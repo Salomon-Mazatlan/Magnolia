@@ -1,0 +1,1790 @@
+:root {
+  --panel-header-height: 28px;
+  --font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+    Ubuntu, Cantarell, sans-serif;
+  /* Optional display face — kept as a hook so future themes can set
+   * --font-display to a distinct family for headings / modal titles
+   * without rewiring callsites. All currently shipped themes let this
+   * fall back to --font-family. */
+  --font-display: var(--font-family);
+  --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', Menlo, Consolas, monospace;
+  /* The font used for document body text in the plain-text, audio
+   * transcript, and video transcript viewers. Single source of truth
+   * so all three viewers stay aligned. Defaults to the proportional UI
+   * font — matches Granola, and Clean now reads the same. Themes that
+   * want monospace can override at the theme level. */
+  --font-doc: var(--font-family);
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-lg: 14px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  /* SF Pro stylistic alternates — applied at the body level via
+   * font-feature-settings. The features (slashed zero, one-storey "a",
+   * alt "9") resolve on macOS where SF Pro renders, and are silently
+   * ignored on Windows / Linux fallback fonts that don't ship them.
+   * Token-based so a future theme with a web font could opt out. */
+  --body-font-features: "ss01", "ss02", "cv11";
+
+  /* Clean (light) palette — light sister to Clean Dark's deep cool
+   * slate. Both carry the same blue tint deliberately so the two
+   * themes read as one family rather than as light/dark of different
+   * apps:
+   *
+   *  - Chrome at #e6ebf4 (clearly blue-tinted off-white). Stops short
+   *    of "Windows blue" or "LinkedIn blue" — the tint is saturated
+   *    enough that the eye registers it as deliberate, not as a
+   *    neutral that happens to skew cool.
+   *  - Panel stays pure #ffffff. The contrast between blue chrome and
+   *    white document is what gives the layout its "lifted card on
+   *    tinted surface" hierarchy.
+   *  - Borders pick up the same cool family (#c4ccdc) so panel edges
+   *    feel intentional rather than left over from a neutral palette.
+   *  - Text stays near-neutral. Pushing labels overtly blue would
+   *    over-saturate; a small cool nudge in --text-secondary /
+   *    --text-muted (the only places it would read) keeps them in the
+   *    family without making them feel coloured.
+   *
+   * Apple's #007AFF accent is kept — that's the anchor identity color
+   * for the Clean family and reads cleanly against the new blue
+   * chrome. */
+  --bg-primary: #dde4f0;
+  /* bg-secondary doubles as the toolbar background AND the hover
+   * fill on tree rows / list items. Set LIGHTER than bg-primary
+   * (#dde4f0) — gives the toolbar a Safari-like "lifted lighter band
+   * above the chrome" feel rather than the darker-band feel it had
+   * when this was tuned below the chrome. Hovers on white panels
+   * still register because white → #ecf1f8 is a visible blue-tinted
+   * fill. */
+  --bg-secondary: #ecf1f8;
+  --bg-tertiary: #eef3fb;
+  --bg-panel: #ffffff;
+  --border-color: #b8c2d4;
+  --text-primary: #1d1d1f;
+  --text-secondary: #45474f;
+  --text-muted: #767a8e;
+  --accent: #007AFF;
+  --accent-hover: #0066d6;
+  --danger: #ff3b30;
+  --success: #34c759;
+  --selection-bg: #a8d0fa;
+  --btn-text: #ffffff;
+  --btn-secondary-hover: #c4cee0;
+  --scrollbar-bg: transparent;
+  --scrollbar-thumb: #9da6b6;
+  --memo-icon-color: #45474f;
+  --quote-icon-color: #d94a4a;
+  /* --memo-active-color is the colour used for the floating MemoFab
+   * (top-right of analysis / query / relationship-map tools) when a
+   * memo is attached. var(--accent) resolves per theme, so a filled
+   * memo button picks up the primary-action colour in every palette
+   * (Clean blue, Granola amber, Dark blue, HC yellow, etc.). Defined
+   * once in the base :root because none of the theme overrides need
+   * to redefine it — each only swaps --accent. */
+  --memo-active-color: var(--accent);
+  /* --bg-input is the surface colour used by all input-like fields
+     (input/textarea/select, MarkdownEditor body). Defined as a variable
+     so it can be redefined inside .modal for themes where the default
+     value would clash with the modal body. */
+  --bg-input: var(--bg-tertiary);
+  /* --canvas-bg is the surface colour for the dot-grid canvases in
+   * the Query Builder + Document Selector AND the palette chips
+   * that get dragged onto them. Keeping both on one token means
+   * the canvas + chips always read as the same surface. Defaults
+   * to bg-primary; the Clean (light) theme overrides to
+   * bg-tertiary below for a softer feel against its white panel. */
+  --canvas-bg: var(--bg-primary);
+}
+
+/* Clean (light) theme: lighten the node-graph canvases and palette
+ * chips so they sit a hair above the white panel rather than the
+ * shade darker bg-primary that's normally used for chrome. */
+:root[data-theme=""],
+html:not([data-theme]) {
+  --canvas-bg: var(--bg-tertiary);
+}
+
+/* Toolbar icons and labels normally render at opacity 0.85 to soften
+ * them. Against the new blue-tinted Clean chrome that dim factor
+ * makes them sit too quietly — force full opacity so each icon
+ * asserts itself confidently, the same trick High Contrast already
+ * uses (see further down). */
+:root[data-theme=""] .app-toolbar-btn .toolbar-label,
+:root[data-theme=""] .app-toolbar-btn svg,
+html:not([data-theme]) .app-toolbar-btn .toolbar-label,
+html:not([data-theme]) .app-toolbar-btn svg {
+  opacity: 1;
+}
+
+:root[data-theme="dark"] {
+  /* Clean Dark palette. Originally a neutral macOS Dark Mode mirror
+   * with --bg-primary === --bg-panel — chrome and document area
+   * shared one uniform dark grey, intentionally flattening the
+   * hierarchy that light mode carries via white-on-grey.
+   *
+   * Iterated to match the new Clean (light) direction: more contrast,
+   * less flat grey:
+   *
+   *  - Chrome at #161821 (deep cool slate) instead of neutral #1e1e1e,
+   *    so dark mode reads as "deliberately tinted" rather than
+   *    "filled with grey".
+   *  - Panel lifted to #1c1f2a (one notch brighter than chrome) —
+   *    breaks the previous flat equality so the document surface
+   *    reads as its own card on the chrome below, the same hierarchy
+   *    Clean light gets from white-on-grey.
+   *  - Border at #2e3245 — visible enough to actually separate panels.
+   *  - Secondary text lifted to #b4b6c3 (was #9c9ca1) and muted to
+   *    #7c7e8c (was #6e6e6e), so labels and metadata read clearly
+   *    against the new chrome. */
+  --bg-primary: #161821;
+  --bg-secondary: #222533;
+  --bg-tertiary: #2c2f3f;
+  --bg-panel: #1c1f2a;
+  --border-color: #2e3245;
+  --text-primary: #ebebf5;
+  --text-secondary: #b4b6c3;
+  --text-muted: #7c7e8c;
+  --accent: #0a84ff;
+  --accent-hover: #409cff;
+  --danger: #ff453a;
+  --success: #32d74b;
+  --selection-bg: #0a84ff66;
+  --btn-text: #ffffff;
+  --btn-secondary-hover: #2c2f3f;
+  --scrollbar-bg: transparent;
+  --scrollbar-thumb: #4a4d5c;
+  --memo-icon-color: #b4b6c3;
+  --quote-icon-color: #ff6961;
+}
+
+/* Granola — three-shade warm cream system.
+ *  Mockup palette mapped onto Magnolia's CSS variables:
+ *    bg-primary   = #fefaf3  very light cream — viewer body / content area
+ *    bg-secondary = #faf2e3  warmer cream    — hover, active tab fill
+ *    bg-tertiary  = #f1e6cf  deep cream      — main-window canvas
+ *    bg-panel     = #ffffff  pure white      — panel card surface
+ *  The three-shade system is what gives the floating-card layout its
+ *  depth: white panels sit on the deep-cream canvas; the slightly
+ *  cream-tinted viewer body is set apart from its surrounding white card.
+ */
+:root[data-theme="granola"] {
+  --bg-primary: #fefaf3;
+  --bg-secondary: #faf2e3;
+  --bg-tertiary: #f1e6cf;
+  --bg-panel: #ffffff;
+  --border-color: #ecdcb8;
+  --text-primary: #2b231a;
+  --text-secondary: #6a5d4a;
+  --text-muted: #948871;
+  --accent: #c97134;
+  --accent-hover: #b35e23;
+  --danger: #c2453a;
+  --success: #82a55a;
+  /* Bumped from #fde0c0 — that cream sat too close to --bg-primary
+   * (#fefaf3, also cream) and highlights washed out. The saturated
+   * peach reads cleanly against both the cream viewer body and the
+   * white panel cards, while still feeling palette-native. */
+  --selection-bg: #fbc890;
+  --btn-text: #ffffff;
+  --btn-secondary-hover: #f4ead4;
+  --scrollbar-bg: #f1e6cf;
+  --scrollbar-thumb: #d8c590;
+  --memo-icon-color: #6a5d4a;
+  --quote-icon-color: #c25a6a;
+  --panel-header-height: 36px;
+  /* Granola swaps the document/transcript font from monospace to the
+   * proportional UI font. Single source of truth — every viewer that
+   * reads var(--font-doc) inherits this change. */
+  --font-doc: var(--font-family);
+}
+
+/* Granola Dark — same warm palette as Granola, but the cream canvas
+ * becomes deep coffee and the white floating cards become mocha cards.
+ * Structural Granola rules below use [data-theme^="granola"] so they
+ * apply to both themes; only the variable values differ here. */
+:root[data-theme="granola-dark"] {
+  --bg-primary: #1f1a14;
+  --bg-secondary: #2a241c;
+  --bg-tertiary: #34291f;
+  --bg-panel: #2d271f;
+  --border-color: #4a3d2d;
+  --text-primary: #f1e6cf;
+  --text-secondary: #c4b39a;
+  --text-muted: #8a7c66;
+  --accent: #e08a4a;
+  --accent-hover: #f09b5b;
+  --danger: #d96459;
+  --success: #9bbf73;
+  --selection-bg: #4a3520;
+  --btn-text: #1f1a14;
+  --btn-secondary-hover: #3a3025;
+  --scrollbar-bg: #2a241c;
+  --scrollbar-thumb: #5a4a35;
+  --memo-icon-color: #c4b39a;
+  --quote-icon-color: #d76e7d;
+  --panel-header-height: 36px;
+  --font-doc: var(--font-family);
+}
+
+:root[data-theme="granola-dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #6a5840;
+}
+
+
+/* High Contrast — maximum-contrast palette for visually impaired users.
+ * Pure-black canvas, pure-white text, bright yellow accent for both
+ * primary actions and the "selected/active" semantic. Bright cyan for
+ * the secondary quote accent so it stays distinct. Strong white borders
+ * give every panel and input a clear visual edge. */
+:root[data-theme="high-contrast"] {
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-tertiary: #1a1a1a;
+  --bg-panel: #000000;
+  --border-color: #ffffff;
+  --text-primary: #ffffff;
+  --text-secondary: #ffffff;
+  /* In HC every text rank is pure white on the black canvas — the
+   * default cccccc looked dim against #000. Yellow-surfaced descendants
+   * still get black/dark-grey via the [style*="--selection-bg"] /
+   * [style*="--accent)"] rule below. */
+  --text-muted: #ffffff;
+  --accent: #ffff00;
+  --accent-hover: #ffff66;
+  /* Bumped from #ff5555 to #ff8a8a so danger text on the black canvas
+   * clears WCAG AAA (~7.5:1) rather than just AA. */
+  --danger: #ff8a8a;
+  --success: #55ff55;
+  --selection-bg: #ffff00;
+  --btn-text: #000000;
+  --btn-secondary-hover: #1a1a1a;
+  --scrollbar-bg: #000000;
+  --scrollbar-thumb: #ffffff;
+  --memo-icon-color: #ffff00;
+  --quote-icon-color: #00ffff;
+}
+
+/* Anywhere yellow is the background, text MUST be black. Three rules
+ * cover every yellow surface:
+ *  1. Inline JSX styles that reference --selection-bg or --accent (~15
+ *     call sites — selected memos, active tabs, drag-over targets, etc.)
+ *     are matched via attribute substring.
+ *  2. ::selection — document text selection.
+ *  3. .context-menu-item:hover — menu hover uses --accent directly.
+ * Buttons already pair --accent with --btn-text=black so they're fine. */
+:root[data-theme="high-contrast"] [style*="--selection-bg"],
+:root[data-theme="high-contrast"] [style*="--accent)"] {
+  color: #000000;
+  /* Re-bind the text-color CSS variables so descendants that resolve
+   * var(--text-primary) / --text-secondary / --text-muted pick up
+   * black automatically — otherwise a child with an explicit
+   * color: var(--text-muted) stays grey-on-yellow. */
+  --text-primary: #000000;
+  --text-secondary: #000000;
+  /* Pure black on yellow surfaces — the prior #1a1a1a "muted" tone reads
+   * as a slightly washed grey and breaks uniformity. */
+  --text-muted: #000000;
+}
+:root[data-theme="high-contrast"] ::selection {
+  background: #ffff00;
+  color: #000000;
+}
+:root[data-theme="high-contrast"] .context-menu-item:hover {
+  color: #000000;
+}
+
+/* High Contrast keeps a visible opaque scrollbar — the global
+ * translucent thumb would fail the contrast ratio HC is designed to
+ * guarantee. */
+:root[data-theme="high-contrast"] ::-webkit-scrollbar-track {
+  background: var(--scrollbar-bg);
+}
+:root[data-theme="high-contrast"] ::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  background-clip: border-box;
+  border: none;
+  border-radius: 4px;
+}
+:root[data-theme="high-contrast"] ::-webkit-scrollbar-thumb:hover {
+  background: #ffff00;
+}
+
+/* In High Contrast every input / textarea / select gets a visible white
+ * border (some default styling elsewhere relies on subtle --border-color
+ * contrast — that disappears against pure black). */
+:root[data-theme="high-contrast"] input,
+:root[data-theme="high-contrast"] select,
+:root[data-theme="high-contrast"] textarea {
+  border-width: 2px;
+}
+
+/* Toolbar labels and icons carry opacity: 0.85 by default to soften
+ * them in the standard themes. In HC that dim factor reads as grey on
+ * the black canvas — force full opacity so every glyph and label is
+ * pure white. */
+:root[data-theme="high-contrast"] .app-toolbar-btn .toolbar-label,
+:root[data-theme="high-contrast"] .app-toolbar-btn svg {
+  opacity: 1;
+}
+
+/* ============================================================
+ * Magnolia — Magnolia's signature light theme.
+ *
+ * Hand-built from scratch (not ported from any external palette
+ * library) to be the app's default. Visually mirrors the current
+ * Lab look — slate-grey canvas, white panel cards, royal-blue
+ * primary action — but every rule is written explicitly here so
+ * there's no inheritance trail or shared rule body with Lab.
+ * Every selector that interacts with a Magnolia-themed surface
+ * lives inside this block, including the analysis-popover hover
+ * (so it can't get lost to specificity / cascade questions).
+ * ============================================================ */
+:root[data-theme="magnolia"] {
+  --bg-primary: #F8FAFB;
+  --bg-secondary: #EAEFF6;
+  --bg-tertiary: #C8D0DA;
+  --bg-panel: #FFFFFF;
+  --border-color: #A0AEC0;
+  --text-primary: #1A2633;
+  --text-secondary: #3A4A60;
+  --text-muted: #5A7088;
+  --accent: #2563EB;
+  --accent-hover: #1D55D9;
+  --danger: #EF4444;
+  --success: #10B981;
+  --selection-bg: #DBE9FF;
+  --btn-text: #FFFFFF;
+  --btn-secondary-hover: #E4EBF2;
+  --scrollbar-bg: transparent;
+  --scrollbar-thumb: #B8C4D4;
+  --memo-icon-color: #3A4A60;
+  --quote-icon-color: #06B6D4;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --bg-input: var(--bg-panel);
+}
+
+/* Canvas — body shows around the floating panel cards. */
+:root[data-theme="magnolia"] body,
+:root[data-theme="magnolia"] #root {
+  background: var(--bg-tertiary);
+}
+
+/* Main-window padding around the panel area. Each .panel below carries
+ * margin: 4px, so adjacent panes show an 8 px canvas gap between them
+ * but only 4 px against the window edge. Adding 4 px padding on left,
+ * right, and bottom matches the inter-pane gap on the outer edges too;
+ * the top stays flush with the toolbar. */
+:root[data-theme="magnolia"] .app-main-panels {
+  padding: 0 4px 4px 4px;
+  box-sizing: border-box;
+}
+
+/* Panel cards: white tiles, hairline border, two-layer cool-tinted
+ * drop shadow. */
+:root[data-theme="magnolia"] .panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  margin: 4px;
+  height: calc(100% - 8px);
+  width: calc(100% - 8px);
+  box-sizing: border-box;
+  box-shadow: 0 2px 8px rgba(20, 40, 70, 0.18), 0 1px 3px rgba(20, 40, 70, 0.12);
+}
+:root[data-theme="magnolia"] #root > .panel { height: calc(100% - 8px); }
+
+:root[data-theme="magnolia"] .modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.1);
+}
+:root[data-theme="magnolia"] .context-menu {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* In-panel --bg-tertiary rebind: chip / hover / input surfaces
+ * inside cards get the subtle light-blue shade instead of the
+ * canvas slate. */
+:root[data-theme="magnolia"] .panel,
+:root[data-theme="magnolia"] .modal,
+:root[data-theme="magnolia"] .context-menu {
+  --bg-tertiary: #EAEFF6;
+}
+
+/* Toolbar: flush against the canvas, no border-bottom, with
+ * --text-secondary rebound to --text-primary so wordmark + button
+ * labels render in the darkest text rank. */
+:root[data-theme="magnolia"] .app-toolbar {
+  background: var(--bg-tertiary) !important;
+  border-bottom: none !important;
+  --text-secondary: var(--text-primary);
+}
+/* Excludes .analysis-popover-tile via :not() — the Analysis-tools
+ * popover is rendered inside .analysis-popover-anchor (inside the
+ * toolbar), so without the exclusion this rule matches the popover
+ * tile buttons too, defeating their own theme-scoped hover styling. */
+:root[data-theme="magnolia"] .app-toolbar button:not(.analysis-popover-tile):hover {
+  background: rgba(255, 255, 255, 0.22) !important;
+}
+:root[data-theme="magnolia"] .app-toolbar-btn .toolbar-label {
+  font-weight: 500 !important;
+  letter-spacing: 0.01em;
+}
+:root[data-theme="magnolia"] .app-toolbar-btn .toolbar-label,
+:root[data-theme="magnolia"] .app-toolbar-btn svg {
+  opacity: 1;
+}
+
+/* Analysis-tools popover tile hover. Explicit, theme-scoped,
+ * literal hex value, !important — every dial cranked so this
+ * rule lands no matter what the global cascade is doing. */
+:root[data-theme="magnolia"] .analysis-popover-tile:hover,
+:root[data-theme="magnolia"] .analysis-popover-tile:focus-visible {
+  /* Matches the Welcome-screen recent-projects rollover (which sets
+   * --bg-secondary inline). Single source of truth: change Magnolia's
+   * --bg-secondary token and both surfaces follow. */
+  background: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+:root[data-theme="magnolia"] ::selection {
+  background: var(--selection-bg);
+  color: var(--text-primary);
+}
+:root[data-theme="magnolia"] ::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  background-clip: border-box;
+  border-radius: 4px;
+}
+:root[data-theme="magnolia"] [data-panel-resize-handle-id] {
+  background: transparent !important;
+}
+:root[data-theme="magnolia"] .queries-sidebar-divider[data-panel-resize-handle-id],
+:root[data-theme="magnolia"] .documents-tags-divider[data-panel-resize-handle-id] {
+  background: var(--border-color) !important;
+}
+
+/* ============================================================
+ * Magnolia Dark — dark counterpart to Magnolia.
+ *
+ * Same precision identity (tight 4 px panel radii, floating cards
+ * on a slate canvas, blue accent) inverted into a dark palette.
+ * Deep blue-tinted slate canvas (#14181E) around panels that lift
+ * to a clearly lighter dark surface (#252B35). Royal blue
+ * brightens to a sky-blue (#5B8FFF) so the primary action stays
+ * visible on dark chrome. Drop shadows tinted with pure black at
+ * higher opacity — a cool-blue tint reads pale on dark canvases;
+ * black gives the cards real depth.
+ *
+ * Written as a complete standalone block (no shared rule bodies
+ * with the light Magnolia theme) so the cascade is fully scoped
+ * to this theme id.
+ * ============================================================ */
+:root[data-theme="magnolia-dark"] {
+  --bg-primary: #1F242C;
+  --bg-secondary: #2D343F;
+  --bg-tertiary: #14181E;
+  --bg-panel: #252B35;
+  --border-color: #3A4250;
+  --text-primary: #E6EAF0;
+  --text-secondary: #A8B0BC;
+  --text-muted: #6E7682;
+  --accent: #5B8FFF;
+  --accent-hover: #7AA5FF;
+  --danger: #F87171;
+  --success: #34D399;
+  --selection-bg: #2D3F5C;
+  --btn-text: #FFFFFF;
+  --btn-secondary-hover: #2D343F;
+  --scrollbar-bg: transparent;
+  --scrollbar-thumb: #404858;
+  --memo-icon-color: #A8B0BC;
+  --quote-icon-color: #22D3EE;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --bg-input: var(--bg-panel);
+}
+
+:root[data-theme="magnolia-dark"] body,
+:root[data-theme="magnolia-dark"] #root {
+  background: var(--bg-tertiary);
+}
+
+/* Match the light-Magnolia edge padding — see the comment on the
+ * light-theme rule above. */
+:root[data-theme="magnolia-dark"] .app-main-panels {
+  padding: 0 4px 4px 4px;
+  box-sizing: border-box;
+}
+
+:root[data-theme="magnolia-dark"] .panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  margin: 4px;
+  height: calc(100% - 8px);
+  width: calc(100% - 8px);
+  box-sizing: border-box;
+  /* Black-tinted two-layer shadow — cool tints read pale on dark
+   * canvases; black at higher opacity gives the cards real lift. */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+:root[data-theme="magnolia-dark"] #root > .panel { height: calc(100% - 8px); }
+
+:root[data-theme="magnolia-dark"] .modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+:root[data-theme="magnolia-dark"] .context-menu {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* In-panel --bg-tertiary rebind: chip / hover / input surfaces
+ * inside cards step UP from the panel surface (rather than
+ * inheriting the deepest canvas tone and disappearing into the
+ * card). */
+:root[data-theme="magnolia-dark"] .panel,
+:root[data-theme="magnolia-dark"] .modal,
+:root[data-theme="magnolia-dark"] .context-menu {
+  --bg-tertiary: #2F3540;
+}
+
+/* Toolbar matches the canvas; --text-secondary rebound to
+ * --text-primary so wordmark + button labels + icons render at
+ * full brightness. */
+:root[data-theme="magnolia-dark"] .app-toolbar {
+  background: var(--bg-tertiary) !important;
+  border-bottom: none !important;
+  --text-secondary: var(--text-primary);
+}
+
+/* Translucent-white toolbar button hover — a readable lift on the
+ * dark canvas. Excludes .analysis-popover-tile so the popover's
+ * own theme-scoped hover styling lands instead (otherwise the
+ * toolbar rule's higher specificity wins because the popover is
+ * rendered inside .app-toolbar via the anchor). */
+:root[data-theme="magnolia-dark"] .app-toolbar button:not(.analysis-popover-tile):hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+:root[data-theme="magnolia-dark"] .app-toolbar-btn .toolbar-label {
+  font-weight: 500 !important;
+  letter-spacing: 0.01em;
+}
+:root[data-theme="magnolia-dark"] .app-toolbar-btn .toolbar-label,
+:root[data-theme="magnolia-dark"] .app-toolbar-btn svg {
+  opacity: 1;
+}
+
+/* Analysis-tools popover tile hover — explicit, theme-scoped, literal
+ * hex, !important. Same approach as light Magnolia. */
+:root[data-theme="magnolia-dark"] .analysis-popover-tile:hover,
+:root[data-theme="magnolia-dark"] .analysis-popover-tile:focus-visible {
+  /* Same single-source-of-truth as light Magnolia — popover hover
+   * tracks --bg-secondary, matching the Welcome rollover. */
+  background: var(--bg-secondary) !important;
+  border-color: var(--border-color) !important;
+}
+
+:root[data-theme="magnolia-dark"] ::selection {
+  background: var(--selection-bg);
+  color: var(--text-primary);
+}
+:root[data-theme="magnolia-dark"] ::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  background-clip: border-box;
+  border-radius: 4px;
+}
+:root[data-theme="magnolia-dark"] [data-panel-resize-handle-id] {
+  background: transparent !important;
+}
+:root[data-theme="magnolia-dark"] .queries-sidebar-divider[data-panel-resize-handle-id],
+:root[data-theme="magnolia-dark"] .documents-tags-divider[data-panel-resize-handle-id] {
+  background: var(--border-color) !important;
+}
+
+/* Keyboard focus indicator — visible across every theme so keyboard /
+ * screen-magnifier users can always track the focused control. The HC
+ * variant is thicker and pure yellow because the canvas is pure black
+ * and the default 2px accent ring can disappear on yellow-on-black
+ * surfaces (yellow-on-yellow). */
+*:focus-visible {
+  /* macOS 12+ keyboard focus: 3 px ring at ~55 % accent alpha plus a
+   * 1 px inset halo in the surrounding background colour to separate
+   * the ring from the focused element's own border. */
+  outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 1px var(--bg-primary) inset;
+}
+:root[data-theme="high-contrast"] *:focus-visible {
+  outline: 3px solid #ffff00;
+  outline-offset: 2px;
+  /* Black inner halo so the ring stays visible on yellow surfaces too. */
+  box-shadow: 0 0 0 1px #000000;
+}
+
+/* Honour the OS "reduce motion" preference — disables hover transitions
+ * and animations for users who experience motion sensitivity (commonly
+ * paired with low-vision settings on macOS / Windows accessibility panels). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Empty-state placeholders ("No memos yet", "No matches found",
+ * etc.) pick up --font-display so themes that define a distinct
+ * heading face would surface it in the placeholder copy. The
+ * currently shipped themes all let --font-display fall back to
+ * --font-family, so this class is a no-op visually — it's kept as
+ * a hook for future themes that opt into a heading-only display
+ * font. Inline styles at each callsite continue to drive padding /
+ * colour / size. */
+.empty-state {
+  font-family: var(--font-display);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  /* SF Pro stylistic alternates Apple uses across Finder/Mail/Notes —
+   * slashed zero (ss02), one-storey "a" (ss01), alt "9" via cv11.
+   * Resolves through --body-font-features so a future theme with a
+   * web font could opt out. Silently ignored when the rendered
+   * fallback (e.g. Segoe UI on Windows) doesn't ship these features. */
+  font-feature-settings: var(--body-font-features);
+}
+
+::selection {
+  background: var(--selection-bg);
+}
+
+/* Slim always-visible scrollbars: 8 px gutter with a transparent
+ * track and a translucent thumb that's painted at all times. The
+ * 2 px transparent border via background-clip: padding-box visually
+ * narrows the thumb to ~4 px, the same slim pill macOS draws. HC
+ * overrides back to an opaque themed scrollbar further down for
+ * accessibility. */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Dark thumbs — light translucent so they're visible on dark
+ * backgrounds. Applies to Clean Dark only; Granola Dark uses the
+ * thicker themed scrollbar further down. */
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+  background-clip: padding-box;
+}
+:root[data-theme="dark"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.45);
+  background-clip: padding-box;
+}
+
+/* Granola: restore the original thicker themed scrollbar — a
+ * transparent track with the cream / mocha --scrollbar-thumb sitting
+ * over whatever bg is behind it (so the thumb reads as part of the
+ * warm palette without painting an opaque stripe behind it). The
+ * thumb fills the full 8 px gutter (no padding-box border) with a
+ * 4 px corner radius, matching the chunkier pill the Granola themes
+ * carried before the slim-translucent treatment was applied globally.
+ * The corner pseudo (where horizontal and vertical scrollbars meet)
+ * is also pinned to transparent so it doesn't render as a stray
+ * square against the cream / mocha surface. */
+:root[data-theme^="granola"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+:root[data-theme^="granola"] ::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  background-clip: border-box;
+  border: none;
+  border-radius: 4px;
+}
+:root[data-theme="granola"] ::-webkit-scrollbar-thumb:hover {
+  background: #c4ad75;
+}
+:root[data-theme="granola-dark"] ::-webkit-scrollbar-thumb:hover {
+  background: #6a5840;
+}
+:root[data-theme^="granola"] ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* The little square where horizontal + vertical scrollbars meet — the
+ * browser default is a flat grey block that reads as a stray white
+ * tile in the corner of the document viewer. Make it transparent so
+ * it inherits whatever's beneath. */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+:root[data-theme="dark"] .context-menu {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+:root[data-theme="dark"] .modal {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5), 0 12px 24px rgba(0, 0, 0, 0.55);
+}
+
+button {
+  font-family: var(--font-family);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  background: var(--accent);
+  color: var(--btn-text);
+  transition: background 0.15s;
+}
+
+button:hover {
+  background: var(--accent-hover);
+}
+
+button:active {
+  opacity: 0.9;
+}
+
+/* Single source of truth for every secondary button (Cancel, Close,
+ * and the lower-emphasis action pairs in the analysis tools, query
+ * builder, dialogs, etc.). Matches the Document Viewer's body
+ * background so the button sits on its surrounding surface the same
+ * way the viewer body does, with a hairline border so it stays
+ * visible even against a same-color background. */
+button.secondary {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+button.secondary:hover {
+  background: var(--btn-secondary-hover);
+}
+
+button.danger {
+  background: var(--danger);
+}
+
+input,
+select,
+textarea {
+  font-family: var(--font-family);
+  font-size: var(--font-size-sm);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+}
+
+/* Panel shared styles */
+.panel-header {
+  height: var(--panel-header-height);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  /* Inherit the panel surface (white in Clean) instead of sitting on
+   * a darker --bg-secondary stripe. No bottom border either — the
+   * title sits flush with the content beneath. */
+  background: var(--bg-panel);
+  /* Section-label small-caps treatment — matches the Analysis Tools
+   * popover title (.analysis-popover-title further down). Bold +
+   * uppercase + tracked-out letterspacing + dimmer --text-muted
+   * colour reads as a category label rather than running text, so
+   * "Documents" / "Codes" / "Memos" feel like sidebar section
+   * headers in the way Apple's Finder / Mail / Notes treat theirs. */
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  user-select: none;
+  gap: 8px;
+  /* Acts as a query container for .compact-add-btn so its label can hide
+     when the header is squeezed past the point where the full button text
+     would fit. inline-size containment is layout-safe here because the
+     header's width comes from its flex parent, never its own contents. */
+  container-type: inline-size;
+  container-name: panel-header;
+}
+
+/* Query Results panel header is a hybrid: it shows the static
+ * "Query" / "Query:" label followed by dynamic user content (the
+ * saved-query name, or for popped-out windows a query string with
+ * file names like "Audio.m4a"). The parent opts out of the
+ * small-caps treatment so the dynamic content renders in its
+ * written case... */
+.panel-header.query-results-header {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--text-secondary);
+}
+/* ...but the leading static label span ("Query" / "Query:") gets
+ * the small-caps treatment back so it reads as a section header,
+ * matching the other panes. The :first-child + direct-span
+ * selector keeps the trailing dynamic-content spans untouched. */
+.panel-header.query-results-header > span:first-child {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* "+" buttons in panel headers (e.g. "+ Memo", "+ Code", "+ Folder").
+   When the header is wide enough they show "+ Label"; when the user
+   resizes the panel narrow, the trailing label is hidden so the button
+   collapses to just "+" instead of wrapping its text onto a new line. */
+.compact-add-btn {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  flex-shrink: 0;
+}
+@container panel-header (max-width: 180px) {
+  .compact-add-btn-label {
+    display: none;
+  }
+}
+
+.panel-header-close,
+.panel-header-popout,
+.panel-header-add {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 10px;
+  line-height: 1;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.panel-header-close:hover,
+.panel-header-popout:hover,
+.panel-header-add:hover {
+  color: var(--text-primary);
+  background: none;
+}
+
+/* Document tab bar.
+ *
+ * The horizontal rule under the tab strip is owned by each .tab-item
+ * (their own border-bottom) plus a flex-grow ::after that fills the
+ * empty area to the right. Putting the line on the tab-bar itself
+ * doesn't work: the tab-bar needs `overflow-x: auto` for many-tab
+ * scrolling, and that clips any active-tab paint that tries to
+ * cover the tab-bar's border-bottom from above. With the line on
+ * the items, the active tab can simply drop its own border-bottom
+ * to break the line under it — no overflow tricks required. */
+.tab-bar {
+  height: var(--panel-header-height);
+  display: flex;
+  align-items: stretch;
+  overflow-x: auto;
+  background: var(--bg-panel);
+  flex-shrink: 0;
+  scrollbar-width: none;
+}
+.tab-bar::-webkit-scrollbar {
+  display: none;
+}
+/* Filler — extends the inactive-tab bottom rule across the empty
+ * area to the right of the last tab so the line reaches the panel
+ * edge. The pseudo-element is a flex item via the parent's
+ * `display: flex`. */
+.tab-bar::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border-color);
+}
+.tab-item {
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 12px;
+  gap: 4px;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 180px;
+  border-right: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+  user-select: none;
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+.tab-item.active {
+  color: var(--text-primary);
+  font-weight: 600;
+  background: var(--bg-panel);
+  /* No bottom border — breaks the rule under the active tab so
+   * it reads as merged with the content area below. */
+  border-bottom: none;
+  /* 2 px accent stripe along the top of the active tab. Inset
+   * box-shadow keeps the label's vertical position unchanged
+   * (versus a border-top) and is a no-op when overridden by
+   * themes (e.g. Granola) that prefer outline-style highlighting. */
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+.tab-item:hover:not(.active) {
+  background: var(--bg-tertiary);
+}
+.tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+.tab-dirty-marker {
+  color: var(--accent, #3b82f6);
+  font-weight: 700;
+}
+.tab-close {
+  opacity: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: opacity 0.1s, background 0.1s;
+  flex-shrink: 0;
+}
+.tab-item:hover .tab-close,
+.tab-item.active .tab-close {
+  opacity: 1;
+}
+.tab-close:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Pop-out icon inside a tab follows the same hover/active reveal as the
+   close X. .panel-header-popout used elsewhere (panels, dialogs) keeps
+   its own always-visible behaviour — this rule is scoped to .tab-item.
+   The negative right-margin pulls the close X tighter to the pop-out
+   icon so the two action buttons read as a single cluster. */
+.tab-item .panel-header-popout {
+  opacity: 0;
+  padding: 2px 2px;
+  margin-right: -2px;
+  transition: opacity 0.1s, color 0.15s;
+}
+.tab-item:hover .panel-header-popout,
+.tab-item.active .panel-header-popout {
+  opacity: 1;
+}
+
+.panel-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px;
+}
+
+/* The Document Viewer panel doesn't want the 4 px padding the side
+ * panels use — its content (PDF page / text body / image) should
+ * extend to the edge of the panel. Detect via :has(.tab-bar) so the
+ * rule is scoped to panels that own a TabBar (i.e. only the doc
+ * viewer). */
+.panel:has(> .tab-bar) > .panel-content {
+  padding: 0;
+}
+
+/* Query Results panel: zero the top padding. The document-group
+ * sticky headers inside this scroll area use `position: sticky;
+ * top: 0`, which pins to the scroll container's padding-box edge.
+ * With the default 4 px top padding, that pinning leaves a 4 px
+ * gap above the sticky header where scrolling content scrolls
+ * up and is visible briefly before clearing the top of the
+ * scroll-port — looks like content bleeding above its accordion
+ * header. Zeroing the top padding closes that gap so each group
+ * header sits flush with the top of the scroll-port. The side
+ * and bottom padding are preserved. */
+.query-results-panel .panel-content {
+  padding-top: 0;
+}
+
+/* Markdown rendering styles (Option A: show-everything, style-in-place) */
+.md-heading-1 { font-size: 1.7em; font-weight: 700; margin-top: 0.4em; margin-bottom: 0.1em; }
+.md-heading-2 { font-size: 1.4em; font-weight: 700; margin-top: 0.35em; margin-bottom: 0.1em; }
+.md-heading-3 { font-size: 1.2em; font-weight: 600; margin-top: 0.3em; }
+.md-heading-4 { font-size: 1.05em; font-weight: 600; margin-top: 0.2em; }
+.md-heading-5 { font-size: 1.0em; font-weight: 600; }
+.md-heading-6 { font-size: 0.95em; font-weight: 600; color: var(--text-secondary); }
+.md-blockquote { border-left: 3px solid var(--border-color); padding-left: 12px; color: var(--text-secondary); }
+.md-list-item { padding-left: 12px; }
+.md-code-block { font-family: var(--font-mono); font-size: 0.9em; background: var(--bg-tertiary); border-radius: 3px; padding: 0 4px; }
+.md-hr { border-bottom: 1px solid var(--border-color); min-height: 0.3em; }
+.md-table-header { font-weight: 700; }
+.md-table-row { }
+.md-table-separator { min-height: 0; height: 0; overflow: hidden; }
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ============================================================
+   GRANOLA THEME — chrome refinements.
+   Mirrors mockups/alternatives-v2.html (.alt-granola): a deep-cream
+   canvas with white, rounded, softly-shadowed panels floating on it,
+   transparent panel headers, and a white (not cream) toolbar.
+   ============================================================ */
+
+/* The body becomes the deep-cream "canvas" that shows through the
+ * gaps between cards. Panels themselves stay white. */
+:root[data-theme^="granola"] body,
+:root[data-theme^="granola"] #root {
+  background: var(--bg-tertiary);
+}
+
+/* Toolbar: white (matching the doc-viewer tab bar surface), separated
+ * by a cream hairline. Uses --bg-panel so it reads as the same surface
+ * as the floating cards below it. Applied universally — Clean and Dark
+ * themes pick up the same compact toolbar treatment as Granola. */
+.app-toolbar {
+  background: var(--bg-panel) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  /* Horizontal padding lives here (vertical padding is set inline
+   * alongside the height). Keeping it in CSS lets the macOS
+   * override below replace just the left edge with the
+   * traffic-light indent. */
+  padding-left: 12px;
+  padding-right: 12px;
+  /* The main window's OS title bar is hidden, so mark the toolbar
+   * as a drag region (interactive children below opt out). */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+/* macOS keeps the traffic lights (titleBarStyle: 'hiddenInset') —
+ * indent the toolbar's left edge so the wordmark sits clear of
+ * them. The cluster spans ~52 px starting at x=20 (set via
+ * trafficLightPosition in main/index.ts), ending around x=72;
+ * 92 px adds ~20 px of breathing room before the wordmark.
+ * Other platforms have no traffic lights and need no indent. */
+:root[data-platform="darwin"] .app-toolbar {
+  padding-left: 92px;
+}
+.app-toolbar button,
+.app-toolbar a,
+.app-toolbar input,
+.app-toolbar select,
+.app-toolbar textarea {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* Clean themes: match the toolbar to the side-panel header colour
+ * (--bg-secondary) so the top strip and the pane headers read as a
+ * single chrome plane. Granola and HC keep their own --bg-panel
+ * toolbar, where their three-shade system already separates the
+ * chrome from the body. */
+:root[data-theme=""] .app-toolbar,
+:root[data-theme="dark"] .app-toolbar,
+html:not([data-theme]) .app-toolbar {
+  background: var(--bg-secondary) !important;
+}
+
+/* Popout windows whose root is a `.panel`: Granola's universal
+ * `.panel` rule adds margin: 6px around every panel (the floating-card
+ * effect). When the panel is the root of a popout window — i.e. a
+ * direct child of #root — its default height: 100% plus that 6px each
+ * side vertically means the panel overflows the viewport by 12px,
+ * clipping the bottom rounded corner past the window. Subtracting the
+ * combined vertical margin from the height lets the rounded corners
+ * sit fully inside the popout window. Targets only popout-root panels
+ * (main window has no `.panel` as a direct child of #root). */
+:root[data-theme^="granola"] #root > .panel {
+  height: calc(100% - 12px);
+}
+
+/* Connected zoom strip used in the PDF and image viewer toolbars.
+ * Matches the mockup's segmented-control look: shared border between
+ * adjacent buttons, rounded outer corners only. */
+.zoom-strip {
+  display: inline-flex;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 22px;
+  background: var(--bg-panel);
+}
+.zoom-strip > button {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-color);
+  border-radius: 0;
+  padding: 0 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 100%;
+}
+.zoom-strip > button:first-child { border-left: none; }
+.zoom-strip > button:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.zoom-strip > button.active {
+  background: var(--accent);
+  color: var(--btn-text);
+}
+
+/* Each panel is a white, rounded, gently-shadowed card with a small
+ * gap on every side so the cream canvas peeks through. The explicit
+ * width/height keep the card + its 6px margin within the parent's box
+ * so the rounded bottom isn't clipped by the parent's overflow:hidden. */
+:root[data-theme^="granola"] .panel {
+  background: var(--bg-panel);
+  border-radius: 16px;
+  margin: 6px;
+  height: calc(100% - 12px);
+  width: calc(100% - 12px);
+  box-sizing: border-box;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(124, 91, 47, 0.08);
+}
+
+/* Panel header: transparent background, no rule below the title — the
+ * label sits inside the white card area. Slightly larger label and
+ * extra horizontal padding to read as a section title rather than a
+ * separator strip. */
+:root[data-theme^="granola"] .panel-header {
+  background: transparent;
+  border-bottom: none;
+  padding: 0 16px;
+  /* Typography (size, weight, uppercase, letter-spacing, colour)
+   * flows through from the base .panel-header rule's small-caps
+   * treatment. Granola only adjusts the chrome bits here. */
+}
+
+/* Tab bar inside the document viewer: same cream as the inactive
+ * tabs, so the bar reads as a continuous strip and only the active
+ * tab (white) pops out of it. */
+:root[data-theme^="granola"] .tab-bar {
+  background: var(--bg-secondary);
+}
+
+/* Hide the visible-line resize handles between cards. They keep their
+ * 3px width (still grabbable) but blend into the cream canvas so the
+ * floating-card look isn't broken by a gridline running through it. */
+:root[data-theme^="granola"] [data-panel-resize-handle-id] {
+  background: transparent !important;
+}
+/* Exception: in-card dividers (Saved Queries vs results body; the
+ * Documents tree vs Tags tree inside the left sidebar) are *part of*
+ * a single card, not between-card gridlines. Keep them visible so
+ * the sections read as deliberately demarcated regions. */
+:root[data-theme^="granola"] .queries-sidebar-divider[data-panel-resize-handle-id],
+:root[data-theme^="granola"] .documents-tags-divider[data-panel-resize-handle-id] {
+  background: var(--border-color) !important;
+}
+
+/* The per-tool accent on Analysis header icons used to clash with the
+ * cream chrome, so this rule forced it to inherit. The inline style
+ * now uses var(--text-secondary) directly across all themes, so the
+ * override is no longer needed — keeping it would defeat the inline
+ * value and leave the icon as dark text-primary. */
+
+/* Toolbar buttons: lay icon and label horizontally so the toolbar reads
+ * like the mockup's compact button row instead of the default vertical
+ * icon/label stack. The inline styles set on each button take precedence
+ * over plain CSS, so these overrides need !important. Applied universally
+ * — every theme gets the same compact button row. */
+.app-toolbar-btn {
+  flex-direction: row !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 4px 10px !important;
+  height: 28px !important;
+}
+.app-toolbar-btn .toolbar-label {
+  font-size: 11.5px !important;
+  font-weight: 400 !important;
+}
+/* FontAwesome free-solid icons render heavy at any size; the smaller
+ * 13 px keeps them feeling like a toolbar glyph rather than body
+ * text. The !important on color defeats the per-tool inline accent
+ * so every analysis icon reads as neutral secondary text rather
+ * than its tool tint. (Earlier we also applied opacity: 0.85 here
+ * for "mockup feel" — that turned out to make the toolbar look
+ * washed-out compared to native macOS toolbars where icons render
+ * at full opacity in their secondary-label colour.) */
+.app-toolbar-btn svg {
+  font-size: 13px !important;
+  color: var(--text-secondary) !important;
+}
+
+/* ============================================================
+ * Analysis popover — single "Analysis ▾" toolbar button that
+ * opens a tile-grid menu listing every analysis tool. Replaces
+ * the old row of seven inline analysis-tool buttons; see
+ * components/Toolbar/AnalysisPopover.tsx.
+ * ============================================================ */
+.analysis-popover-anchor {
+  position: relative;
+  display: inline-flex;
+}
+.analysis-popover {
+  position: absolute;
+  /* Offset clears the toolbar's bottom edge: trigger button is ~28
+   * px tall, centred in a 54 px toolbar, so the button bottom sits
+   * ~13 px above the toolbar bottom. 22 px puts the popover ~9 px
+   * below the toolbar's border with the arrow tip just touching it
+   * from outside. */
+  top: calc(100% + 22px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  padding: 14px;
+  width: 540px;
+  z-index: 1000;
+}
+.analysis-popover-arrow {
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color);
+}
+.analysis-popover-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 8px 4px;
+}
+.analysis-popover-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+.analysis-popover-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  background: transparent;
+  font: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+.analysis-popover-tile:hover,
+.analysis-popover-tile:focus-visible {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+  outline: none;
+}
+.analysis-popover-tile svg {
+  color: var(--text-secondary);
+  transition: color 0.12s;
+}
+.analysis-popover-tile:hover svg,
+.analysis-popover-tile:focus-visible svg {
+  color: var(--text-primary);
+}
+.analysis-popover-tile-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.analysis-popover-tile-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.3;
+}
+
+/* Themed range slider — used by the audio/video volume control. The
+ * filled portion of the track is drawn with a CSS gradient driven by
+ * the `--filled` custom property (set inline as a percentage by the
+ * caller) so it always matches the active theme's accent colour. */
+.themed-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  height: 16px;
+  cursor: pointer;
+}
+.themed-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) var(--filled, 0%),
+    var(--bg-tertiary) var(--filled, 0%),
+    var(--bg-tertiary) 100%
+  );
+}
+.themed-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: none;
+  margin-top: -4px;
+  cursor: pointer;
+}
+.themed-range:focus {
+  outline: none;
+}
+
+/* (#1, #6) Document body: shares the panel surface (--bg-panel) so
+ * the text reading area matches the analysis tools' background.
+ * Body and code-margin labels both adopt the proportional UI font
+ * instead of mono. */
+:root[data-theme^="granola"] .text-document {
+  font-family: var(--font-family) !important;
+  padding: 16px 28px !important;
+}
+/* When the same CodedTextView is rendered inside the audio transcript
+ * coding wrapper, swap the plain-text padding for the video viewer's
+ * tighter container padding so audio and video coding margins match. */
+:root[data-theme^="granola"] .transcript-coding-area .text-document {
+  padding: 4px 0 40px 12px !important;
+}
+/* Code-margin labels render in the proportional UI font across every
+ * theme so the labels look the same regardless of which palette the
+ * user picks. The monospace default in CodeLabel.tsx is overridden
+ * here once. */
+[data-margin-label="1"] {
+  font-family: var(--font-family) !important;
+  font-size: 11.5px !important;
+  letter-spacing: 0;
+}
+
+/* All viewer surfaces (PDF/image scroll areas, the audio/video
+ * code-track timeline, the doc-viewer panel-content frame) share
+ * the analysis tools' --bg-panel background — viewers and tools
+ * read as one continuous surface across every theme. The base
+ * .panel ancestor already paints --bg-panel, so these classes
+ * just inherit it; no per-class background needed.
+ *
+ * Query Results body sits on the same --bg-panel surface so it
+ * reads as a discrete panel against the cream canvas, matching
+ * the other panes in the main window. */
+:root[data-theme^="granola"] .query-results-panel .panel-content {
+  background: var(--bg-panel);
+}
+/* Document-group header rows in Query Results match the audio/video
+ * media controls bar (--bg-secondary) — the warmer cream that's used
+ * for "control strip"-style surfaces across the app. */
+:root[data-theme^="granola"] .query-results-group-header {
+  background: var(--bg-secondary) !important;
+  border-bottom-color: var(--border-color) !important;
+}
+
+/* Single source of truth for the collapsible "section" boxes and the
+ * result/chart areas in every analysis tool window. Each box used to
+ * declare its own border + radius + padding inline in six different
+ * files; this class consolidates them so a future visual change is one
+ * edit. Callers still provide their own layout extras (marginBottom,
+ * flex, fixed widths) via the inline style. */
+.analysis-section {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  /* Push inputs inside an analysis section onto the white card surface
+   * (var(--bg-panel)) instead of the default --bg-tertiary grey. The
+   * default sits a shade darker than the section background, which made
+   * fields look like an inset against an already-white card; matching
+   * the surface keeps the field flush with its surroundings. Mirrors
+   * the Granola modal override pattern. */
+  --bg-input: var(--bg-panel);
+}
+
+/* (#4) Tab bar — borderless. Inactive tabs read as a cream tab
+ * strip; the active tab is the white panel surface popping
+ * through. No outlines, no inter-tab rules, no bottom rule under
+ * the strip. The colour contrast plus rounded top corners is
+ * enough on its own. */
+:root[data-theme^="granola"] .tab-item {
+  background: var(--bg-secondary);
+  border: none;
+  border-radius: 6px 6px 0 0;
+  padding: 0 12px;
+  gap: 8px;
+}
+:root[data-theme^="granola"] .tab-item.active {
+  background: var(--bg-panel);
+  border: none;
+  box-shadow: none;
+}
+/* The default-theme ::after filler draws a 1 px rule across the
+ * empty area to the right of the last tab. Granola has no rule
+ * under the tab strip, so suppress it here. */
+:root[data-theme^="granola"] .tab-bar::after {
+  border-bottom: none;
+}
+
+/* (#5) Viewer control bar — sits between the tab bar and the document
+ * body. Carries a small caption on the left, ⌘F hint on the right,
+ * separated from the body by a thin border. */
+.viewer-toolbar {
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  user-select: none;
+}
+.viewer-toolbar .viewer-meta { color: var(--text-muted); }
+.viewer-toolbar .viewer-spacer { flex: 1; }
+
+
+
+/* Context menu */
+.context-menu {
+  position: fixed;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 4px 0;
+  min-width: 180px;
+  z-index: 1000;
+  /* Apple-style paired drop shadow: tight 1 px edge + soft 12 px lift,
+   * lower alphas. Reads less webpage-y than the prior 16 px / 12 %. */
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.10);
+  /* Force the body (proportional) font so menus opened inside a mono
+     viewer (e.g. the video transcript) don't inherit mono text. This
+     is the single source of truth for context-menu typography — do
+     not set font-family on individual menus. */
+  font-family: var(--font-family);
+}
+
+.context-menu-item {
+  /* Three theme-tokenised text colours that descendants resolve
+   * through (rather than referencing --danger / --text-muted directly).
+   * The :hover rule below redefines them in one place so danger labels,
+   * hotkey shortcuts, and primary text all flip together — no
+   * !important, no per-call-site hover handling. Default values match
+   * the historical inline colours so non-hovered items look identical
+   * to before. */
+  --menu-fg: var(--text-primary);
+  --menu-fg-muted: var(--text-muted);
+  --menu-fg-danger: var(--danger);
+  color: var(--menu-fg);
+  padding: 6px 14px;
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.context-menu-item:hover {
+  /* Softer hover background — matches the in-text highlight tone
+   * (--selection-bg) instead of the saturated accent. Each text
+   * category keeps its resting colour on hover (muted stays muted,
+   * danger stays danger); the variable indirection from the base
+   * rule above is still in place so per-state overrides can be added
+   * later without touching call sites. */
+  background: var(--selection-bg);
+}
+
+.context-menu-separator {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+}
+
+.codebook-entry:hover {
+  background: var(--selection-bg);
+}
+
+/* Markdown content rendered from memos */
+.markdown-content { line-height: 1.6; }
+.markdown-content p { margin: 0 0 8px; }
+.markdown-content p:last-child { margin-bottom: 0; }
+.markdown-content ul, .markdown-content ol { margin: 0 0 8px; padding-left: 20px; }
+.markdown-content li { margin-bottom: 2px; }
+.markdown-content h1, .markdown-content h2, .markdown-content h3,
+.markdown-content h4, .markdown-content h5, .markdown-content h6 {
+  margin: 12px 0 4px;
+  line-height: 1.3;
+}
+.markdown-content h1 { font-size: 1.3em; }
+.markdown-content h2 { font-size: 1.15em; }
+.markdown-content h3 { font-size: 1.05em; }
+.markdown-content code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-tertiary);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.markdown-content pre {
+  background: var(--bg-tertiary);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 0 0 8px;
+}
+.markdown-content pre code { background: none; padding: 0; }
+.markdown-content blockquote {
+  border-left: 3px solid var(--border-color);
+  margin: 0 0 8px;
+  padding: 2px 0 2px 12px;
+  color: var(--text-secondary);
+}
+.markdown-content table { border-collapse: collapse; margin: 0 0 8px; }
+.markdown-content th, .markdown-content td {
+  border: 1px solid var(--border-color);
+  padding: 4px 8px;
+  font-size: inherit;
+}
+.markdown-content th { background: var(--bg-tertiary); }
+.markdown-content strong { font-weight: 600; }
+.markdown-content a { color: var(--accent); }
+.markdown-content hr { border: none; border-top: 1px solid var(--border-color); margin: 8px 0; }
+
+/* Tiptap markdown editor */
+.markdown-editor {
+  cursor: text;
+}
+.markdown-editor .tiptap {
+  padding: 8px;
+  font-family: var(--font-family);
+  font-size: var(--font-size-sm);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 80px;
+  overflow-y: auto;
+  outline: none;
+  flex: 1;
+}
+.markdown-editor:focus-within {
+  border-color: var(--accent);
+}
+.markdown-editor .tiptap p { margin: 0 0 8px; }
+.markdown-editor .tiptap p:last-child { margin-bottom: 0; }
+.markdown-editor .tiptap ul, .markdown-editor .tiptap ol { margin: 0 0 8px; padding-left: 20px; }
+.markdown-editor .tiptap li { margin-bottom: 2px; }
+.markdown-editor .tiptap li p { margin: 0; }
+.markdown-editor .tiptap h1, .markdown-editor .tiptap h2, .markdown-editor .tiptap h3 {
+  margin: 8px 0 4px;
+  line-height: 1.3;
+}
+.markdown-editor .tiptap h1 { font-size: 1.3em; }
+.markdown-editor .tiptap h2 { font-size: 1.15em; }
+.markdown-editor .tiptap h3 { font-size: 1.05em; }
+.markdown-editor .tiptap code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-secondary);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.markdown-editor .tiptap pre {
+  background: var(--bg-secondary);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  margin: 0 0 8px;
+}
+.markdown-editor .tiptap pre code { background: none; padding: 0; }
+.markdown-editor .tiptap blockquote {
+  border-left: 3px solid var(--border-color);
+  margin: 0 0 8px;
+  padding: 2px 0 2px 12px;
+  color: var(--text-secondary);
+}
+.markdown-editor .tiptap strong { font-weight: 600; }
+.markdown-editor .tiptap em { font-style: italic; }
+.markdown-editor .tiptap u { text-decoration: underline; }
+.markdown-editor .tiptap hr { border: none; border-top: 1px solid var(--border-color); margin: 8px 0; }
+.markdown-editor .tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  font-style: italic;
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+.markdown-editor .tiptap .is-empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  font-style: italic;
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+/* Dialog/Modal overlay */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 900;
+}
+
+/* Granola modal tweaks: warm-tinted, lighter scrim so the cream theme
+   doesn't look like it's drowning under flat grey, and white input
+   surfaces so fields stand out from the cream modal body (the default
+   --bg-tertiary cream is too close in value to the modal's
+   --bg-secondary cream). The --bg-input override cascades to every
+   input/textarea/select AND to anything else that reads the variable
+   (e.g. MarkdownEditor body), so all fields stay consistent without
+   per-component rules. */
+:root[data-theme^="granola"] .modal-overlay {
+  background: rgba(43, 35, 26, 0.28);
+}
+:root[data-theme^="granola"] .modal,
+:root[data-theme^="granola"] .memo-edit-window,
+:root[data-theme^="granola"] .codebook-window,
+:root[data-theme^="granola"] .logbook-window,
+:root[data-theme^="granola"] .preferences-window {
+  --bg-input: var(--bg-panel);
+}
+
+.modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 20px;
+  min-width: 400px;
+  max-width: 90vw;
+  max-height: 88vh;
+  overflow-y: auto;
+  /* Apple-style paired shadow — tight 2 px edge + soft 24 px lift. */
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 12px 24px rgba(0, 0, 0, 0.12);
+}
+
+.modal h2 {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+/* Color pip */
+.color-pip {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* PDF text layer — hide native per-span selection; we draw our own overlay */
+.pdfTextLayerNoSelect ::selection {
+  background: transparent;
+}
+.pdfTextLayerNoSelect ::-moz-selection {
+  background: transparent;
+}
+
+/* Pulse animation for renamed saved queries */
+@keyframes query-pulse {
+  0% { background-color: var(--accent); color: #fff; }
+  100% { background-color: transparent; color: inherit; }
+}
+
+/* Pulse animation used by the document viewers when the user clicks a
+ * saved quote. The target (text span rects or a box region) gets a brief
+ * fade-in / fade-out so the user can find it, then disappears — no
+ * persistent highlight. */
+@keyframes quote-pulse {
+  0% { opacity: 0; }
+  25% { opacity: 1; }
+  100% { opacity: 0; }
+}

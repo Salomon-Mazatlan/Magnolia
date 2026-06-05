@@ -1,0 +1,119 @@
+/**
+ * Preferences store — user settings persisted to disk via IPC.
+ * Stores foot pedal key mappings and audio defaults.
+ */
+import { create } from 'zustand'
+
+export interface FootPedalMappings {
+  playPause: string       // e.g. "F5", "Ctrl+Space"
+  rewind: string          // e.g. "F6"
+  fastForward: string     // e.g. "F7"
+  rewindSeconds: number   // default 5
+  fastForwardSeconds: number // default 5
+}
+
+/** Theme id stored in preferences. Lab is the new-install default
+ *  (Lab Dark when the OS reports prefers-color-scheme: dark, per
+ *  apply-theme.ts); the empty string is preserved as a valid id
+ *  ("Clean") for backwards compatibility with older preference files. */
+export type ThemeId = '' | 'dark' | 'granola' | 'granola-dark' | 'high-contrast' | 'magnolia' | 'magnolia-dark'
+
+export interface Preferences {
+  footPedalMappings: FootPedalMappings
+  defaultPlaybackSpeed: number
+  theme: ThemeId
+}
+
+const DEFAULT_PREFERENCES: Preferences = {
+  footPedalMappings: {
+    playPause: 'F5',
+    rewind: 'F6',
+    fastForward: 'F7',
+    rewindSeconds: 5,
+    fastForwardSeconds: 5
+  },
+  defaultPlaybackSpeed: 1.0,
+  theme: 'magnolia'
+}
+
+interface PreferencesState extends Preferences {
+  loaded: boolean
+  load: () => Promise<void>
+  save: () => Promise<void>
+  updateMapping: (key: keyof FootPedalMappings, value: string | number) => void
+  setDefaultPlaybackSpeed: (speed: number) => void
+  setTheme: (theme: ThemeId) => void
+}
+
+export const usePreferencesStore = create<PreferencesState>((set, get) => ({
+  ...DEFAULT_PREFERENCES,
+  loaded: false,
+
+  load: async () => {
+    try {
+      const prefs = await window.api.loadPreferences()
+      if (prefs) {
+        set({
+          footPedalMappings: { ...DEFAULT_PREFERENCES.footPedalMappings, ...prefs.footPedalMappings },
+          defaultPlaybackSpeed: prefs.defaultPlaybackSpeed ?? DEFAULT_PREFERENCES.defaultPlaybackSpeed,
+          theme: (prefs.theme ?? DEFAULT_PREFERENCES.theme) as ThemeId,
+          loaded: true
+        })
+      } else {
+        set({ loaded: true })
+      }
+    } catch {
+      set({ loaded: true })
+    }
+  },
+
+  save: async () => {
+    const { footPedalMappings, defaultPlaybackSpeed, theme } = get()
+    try {
+      await window.api.savePreferences({ footPedalMappings, defaultPlaybackSpeed, theme })
+    } catch { /* ignore */ }
+  },
+
+  updateMapping: (key, value) => {
+    set((state) => ({
+      footPedalMappings: { ...state.footPedalMappings, [key]: value }
+    }))
+    // Auto-save after update
+    setTimeout(() => get().save(), 0)
+  },
+
+  setDefaultPlaybackSpeed: (speed) => {
+    set({ defaultPlaybackSpeed: speed })
+    setTimeout(() => get().save(), 0)
+  },
+
+  setTheme: (theme) => {
+    set({ theme })
+    setTimeout(() => get().save(), 0)
+  }
+}))
+
+// Stay in sync with changes made in any other window (the Preferences
+// popup, or the in-main-window Preferences tab). Those write to disk
+// AND broadcast a `preferences-update` IPC, which the main process
+// forwards back to the main window. Without this subscription, the
+// store stays on whatever values it loaded at mount, so the foot-pedal
+// listeners in AudioDocumentViewer / VideoDocumentViewer keep matching
+// against stale key mappings — i.e. the user changes their pedal key
+// in Preferences, the viewer still listens for the old one, and
+// nothing happens when the pedal fires.
+//
+// The subscription is installed once per renderer at module load. The
+// unsubscribe is intentionally discarded — the store lives for the
+// lifetime of the window, so does this listener.
+if (typeof window !== 'undefined' && window.api?.onPreferencesUpdate) {
+  window.api.onPreferencesUpdate((prefs) => {
+    if (!prefs) return
+    usePreferencesStore.setState({
+      footPedalMappings: { ...DEFAULT_PREFERENCES.footPedalMappings, ...(prefs.footPedalMappings || {}) },
+      defaultPlaybackSpeed: prefs.defaultPlaybackSpeed ?? DEFAULT_PREFERENCES.defaultPlaybackSpeed,
+      theme: (prefs.theme ?? DEFAULT_PREFERENCES.theme) as ThemeId,
+      loaded: true
+    })
+  })
+}

@@ -1,0 +1,799 @@
+import JSZip from 'jszip'
+import { readFile, writeFile } from 'fs/promises'
+import { randomUUID } from 'crypto'
+import { existsSync, mkdirSync } from 'fs'
+import { join } from 'path'
+import { app } from 'electron'
+import { deserializeProject } from './xml-deserializer'
+import type { RawPdfSelection, RawPictureSelection, RawVideoSelection } from './xml-deserializer'
+import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
+import type { Project, PlainTextSelection } from '../../renderer/models/types'
+import { extractPdfTextWithPositions, type PdfTextItem } from '../pdf-extract'
+
+const IMAGE_MIME_BY_EXT: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  gif: 'image/gif',
+  webp: 'image/webp'
+}
+
+const VIDEO_MIME_BY_EXT: Record<string, string> = {
+  mp4: 'video/mp4',
+  mov: 'video/quicktime',
+  avi: 'video/x-msvideo'
+}
+
+/** Convert a raw <VideoSelection> (milliseconds per REFI-QDA) into a
+ *  Magnolia time-range PlainTextSelection. */
+function convertVideoSelection(raw: RawVideoSelection): PlainTextSelection {
+  return {
+    guid: raw.guid,
+    name: raw.name,
+    startPosition: 0,
+    endPosition: 0,
+    timeRange: { startTime: raw.begin / 1000, endTime: raw.end / 1000 },
+    creatingUser: raw.creatingUser,
+    creationDateTime: raw.creationDateTime,
+    modifyingUser: raw.modifyingUser,
+    modifiedDateTime: raw.modifiedDateTime,
+    codings: raw.codings
+  }
+}
+
+/** Convert a raw <PictureSelection> into a region-based PlainTextSelection.
+ *  REFI-QDA defines coordinates as pixels with top-left origin (no quirks
+ *  yet — add a `getPictureSelectionQuirks(origin)` helper here if a real-
+ *  world tool ships a different convention). */
+function convertPictureSelection(raw: RawPictureSelection): PlainTextSelection {
+  const x = Math.min(raw.firstX, raw.secondX)
+  const y = Math.min(raw.firstY, raw.secondY)
+  const width = Math.abs(raw.secondX - raw.firstX)
+  const height = Math.abs(raw.secondY - raw.firstY)
+  return {
+    guid: raw.guid,
+    name: raw.name,
+    startPosition: 0,
+    endPosition: 0,
+    pdfRegion: { page: 1, x, y, width, height },
+    creatingUser: raw.creatingUser,
+    creationDateTime: raw.creationDateTime,
+    modifyingUser: raw.modifyingUser,
+    modifiedDateTime: raw.modifiedDateTime,
+    codings: raw.codings
+  }
+}
+
+/**
+ * Return the unit scale an exporting tool uses for <PDFSelection>
+ * coordinates, expressed as a multiplier that converts the stored value
+ * into PDF user-space points (72 DPI).
+ *
+ * Tool-specific overrides go here. The REFI-QDA spec says selections are
+ * in points with a top-left origin, but MAXQDA (and a handful of other
+ * Windows-first tools) store them in 96-DPI screen pixels instead — a
+ * 72/96 = 0.75 factor. Detection by "does it fit in the page bounds?" is
+ * unreliable because most selections fit at any reasonable scale, so we
+ * dispatch on the `origin` attribute first and fall back to heuristic
+ * detection only when the origin is unknown.
+ */
+/**
+ * Per-origin quirks for reading <PDFSelection> coordinates. The REFI-QDA
+ * spec says rectangles are in PDF user-space points with a top-left
+ * origin, but real-world exporters differ:
+ *
+ *   - MAXQDA writes raw points but uses a PDF-native bottom-LEFT origin
+ *     (Y increases upward), plus it 0-indexes the `page` attribute.
+ *
+ * We verified this empirically against a known-coded "[JUSTICE]" region
+ * in a MAXQDA-exported QDPX: only the bottom-origin + 1-based page shift
+ * lands the box on the text "are brought to justice."
+ */
+interface PdfSelectionQuirks {
+  pageBase: number        // added to raw `page` attribute (0 for 1-based, 1 for 0-based)
+  unitScale: number       // multiply x/y/w/h to convert into PDF user-space points
+  yFlip: boolean          // true = stored coords use PDF-native bottom-origin
+}
+
+function getPdfSelectionQuirks(origin: string): PdfSelectionQuirks {
+  const o = origin.toLowerCase()
+  if (o.startsWith('maxqda')) return { pageBase: 1, unitScale: 1, yFlip: true }
+  // Add more known tools here as they come up.
+  return { pageBase: 0, unitScale: 1, yFlip: false }
+}
+
+/**
+ * Convert a raw <PDFSelection> rectangle into a Magnolia PlainTextSelection
+ * that carries its original page/x/y/width/height in `pdfRegion`. The
+ * viewer renders region-based selections directly on the PDF canvas rather
+ * than trying to map them into the extracted text stream, which preserves
+ * the exact position of the original coding.
+ *
+ * Coordinates are normalized to top-left origin — `firstX/Y` and
+ * `secondX/Y` from the XML may describe any two opposite corners — and
+ * scaled from the exporting tool's unit system into PDF user-space points.
+ */
+/**
+ * Compute the top-origin rectangle (in PDF points) for a raw PDFSelection,
+ * respecting the exporting tool's unit scale and Y-origin convention.
+ */
+function resolveRawRect(
+  raw: RawPdfSelection,
+  quirks: PdfSelectionQuirks,
+  pageSizes: { width: number; height: number }[],
+  page: number
+): { x: number; y: number; width: number; height: number } {
+  const x = Math.min(raw.firstX, raw.secondX) * quirks.unitScale
+  const width = Math.abs(raw.secondX - raw.firstX) * quirks.unitScale
+  const height = Math.abs(raw.secondY - raw.firstY) * quirks.unitScale
+  let y: number
+  if (quirks.yFlip) {
+    const pageSize = pageSizes[page]
+    y = pageSize
+      ? pageSize.height - Math.max(raw.firstY, raw.secondY) * quirks.unitScale
+      : Math.min(raw.firstY, raw.secondY) * quirks.unitScale
+  } else {
+    y = Math.min(raw.firstY, raw.secondY) * quirks.unitScale
+  }
+  return { x, y, width, height }
+}
+
+/**
+ * Convert a PDFSelection into either:
+ *   - A character-offset text selection (if the rectangle overlaps extracted
+ *     text items) — these behave exactly like native Magnolia codings with
+ *     hover/lock/search.
+ *   - A region-based box selection (fallback) — for image-only areas or
+ *     regions where no text was extracted.
+ */
+function convertPdfSelection(
+  raw: RawPdfSelection,
+  quirks: PdfSelectionQuirks,
+  pageSizes: { width: number; height: number }[],
+  pageItems: Map<number, PdfTextItem[]>
+): PlainTextSelection {
+  const page = raw.page + quirks.pageBase
+  const rect = resolveRawRect(raw, quirks, pageSizes, page)
+
+  // Try to find extracted text items that intersect this rectangle.
+  // If found, build a character-offset range → proper text selection.
+  const items = pageItems.get(page) || []
+  let cpStart = Infinity
+  let cpEnd = -Infinity
+  for (const it of items) {
+    // Standard rectangle intersection (both in top-origin PDF points).
+    const ix1 = it.x
+    const ix2 = it.x + it.width
+    const iy1 = it.y
+    const iy2 = it.y + it.height
+    if (ix1 < rect.x + rect.width && ix2 > rect.x && iy1 < rect.y + rect.height && iy2 > rect.y) {
+      if (it.cpStart < cpStart) cpStart = it.cpStart
+      if (it.cpEnd > cpEnd) cpEnd = it.cpEnd
+    }
+  }
+
+  const base: PlainTextSelection = {
+    guid: raw.guid,
+    name: raw.name,
+    startPosition: 0,
+    endPosition: 0,
+    creatingUser: raw.creatingUser,
+    creationDateTime: raw.creationDateTime,
+    modifyingUser: raw.modifyingUser,
+    modifiedDateTime: raw.modifiedDateTime,
+    codings: raw.codings
+  }
+
+  if (cpStart < cpEnd) {
+    // Text selection — character-offset based. Full hover/search support.
+    base.startPosition = cpStart
+    base.endPosition = cpEnd
+  } else {
+    // No text found — keep as a region-based box selection.
+    base.pdfRegion = { page, ...rect }
+  }
+
+  return base
+}
+
+/** Progress reporter: (stage, current, total). `total` may be 0 for indeterminate stages. */
+export type QdpxProgress = (stage: string, current: number, total: number) => void
+
+export async function readQdpx(
+  filePath: string,
+  onProgress?: QdpxProgress
+): Promise<Project & { sourceContents: Record<string, string> }> {
+  onProgress?.('Reading file', 0, 0)
+  const buffer = await readFile(filePath)
+
+  onProgress?.('Unpacking archive', 0, 0)
+  const zip = await JSZip.loadAsync(buffer)
+
+  // Find the .qde XML at the root of the zip. Magnolia's writer used
+  // to hardcode "project.qde", but the REFI-QDA spec doesn't pin the
+  // filename — Atlas.ti and others name it after the project (e.g.
+  // "DemoQDPX.qde"). Accept any *.qde in the zip root, falling back to
+  // "project.qde" for files written by older Magnolia versions.
+  let qdeFile = zip.file('project.qde')
+  if (!qdeFile) {
+    const qdeName = Object.keys(zip.files).find(
+      (n) => /^[^/]+\.qde$/i.test(n) && !zip.files[n].dir
+    )
+    if (qdeName) qdeFile = zip.file(qdeName)
+  }
+  if (!qdeFile) {
+    throw new Error('Invalid QDPX file: missing project.qde')
+  }
+  onProgress?.('Parsing project', 0, 0)
+  const xml = await qdeFile.async('string')
+  const project = deserializeProject(xml)
+
+  // Load source contents from the sources/ folder. The per-source work
+  // is dominated by JSZip decompression of binaries (PDF / audio /
+  // video / image) and the temp-file writeFile that follows. Sources
+  // don't share mutable state — each task writes to its own
+  // sourceContents[guid] key and mutates its own source object — so
+  // we run the extraction in parallel via Promise.all. For typical
+  // projects this is the dominant load-time cost; parallelising
+  // collapses N sources' work into roughly the slowest single one.
+  const sourceContents: Record<string, string> = {}
+  const totalSources = project.sources.length
+  let sourcesDone = 0
+  await Promise.all(project.sources.map(async (source) => {
+    // Audio sources: the binary lives in sources/<guid>.<ext> and is
+    // restored via the magnolia-sources.json side table later. Here we
+    // just load any transcript text from sources/<guid>.txt and clear
+    // the plainTextPath (which currently points at the audio binary,
+    // not the transcript) so the plain-text fall-through doesn't try
+    // to read the binary as a string.
+    if ((source as any).sourceType === 'audio') {
+      const transcriptFile = zip.file(`sources/${source.guid}.txt`)
+      sourceContents[source.guid] = transcriptFile
+        ? await transcriptFile.async('string')
+        : ''
+      source.plainTextPath = undefined
+      sourcesDone++
+      onProgress?.('Loading documents', sourcesDone, totalSources)
+      return
+    }
+
+    // PDFs from other QDA tools: write the PDF binary to a temp file, then
+    // extract its text with per-item positions so we can convert any
+    // rectangle-based <PDFSelection> codings into Magnolia's character-
+    // offset model. The temp-file path is stored in formatData; the viewer
+    // loads the bytes on demand via IPC.
+    if ((source as any).sourceType === 'pdf' && source.plainTextPath) {
+      const match = source.plainTextPath.match(/internal:\/\/(.+)/)
+      if (match) {
+        const pdfFile = zip.file(`sources/${match[1]}`)
+        if (pdfFile) {
+          const pdfBuf = await pdfFile.async('nodebuffer')
+          const tempDir = join(app.getPath('temp'), 'magnolia-pdfs')
+          if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
+          const tempPath = join(tempDir, `${source.guid}.pdf`)
+          await writeFile(tempPath, pdfBuf)
+
+          let extractedText = ''
+          let pageOffsets: number[] = []
+          let pageSizes: { width: number; height: number }[] = []
+          let extractedItems: PdfTextItem[] = []
+          try {
+            const extracted = await extractPdfTextWithPositions(pdfBuf)
+            extractedText = extracted.text
+            pageOffsets = extracted.pageOffsets
+            pageSizes = extracted.pageSizes
+            extractedItems = extracted.items
+          } catch (err) {
+            // Text extraction failed — document still viewable, just no
+            // searchable text.
+            console.error(`Failed to extract text from PDF ${source.guid}:`, err)
+          }
+
+          // Convert raw <PDFSelection> rectangles into either character-
+          // offset text selections (preferred — works with hover/search)
+          // or region-based box selections (fallback for non-text areas).
+          const rawSelections: RawPdfSelection[] = (source as any)._rawPdfSelections || []
+          if (rawSelections.length > 0) {
+            const quirks = getPdfSelectionQuirks(project.origin || '')
+            // Build a per-page index of text items for rect → char-offset matching.
+            const itemsByPage = new Map<number, PdfTextItem[]>()
+            for (const it of extractedItems) {
+              const arr = itemsByPage.get(it.page) || []
+              arr.push(it)
+              itemsByPage.set(it.page, arr)
+            }
+            source.selections = rawSelections.map((raw) =>
+              convertPdfSelection(raw, quirks, pageSizes, itemsByPage)
+            )
+          }
+
+          ;(source as any).formatData = {
+            pdfFilePath: tempPath,
+            pdfPageOffsets: pageOffsets
+          }
+          sourceContents[source.guid] = extractedText
+        }
+      }
+      // Clear plainTextPath and the transient raw selections.
+      source.plainTextPath = undefined
+      delete (source as any)._rawPdfSelections
+      if (sourceContents[source.guid] === undefined) sourceContents[source.guid] = ''
+      sourcesDone++
+      onProgress?.('Loading documents', sourcesDone, totalSources)
+      return
+    }
+
+    // Video sources (<VideoSource>): write the video binary to a temp file
+    // and convert any <VideoSelection> time-range codings into Magnolia's
+    // timeRange-based PlainTextSelections.
+    if ((source as any).sourceType === 'video' && source.plainTextPath) {
+      const match = source.plainTextPath.match(/internal:\/\/(.+)/)
+      if (match) {
+        const internalName = match[1]
+        const vidFile = zip.file(`sources/${internalName}`)
+        if (vidFile) {
+          const vidBuf = await vidFile.async('nodebuffer')
+          const ext = (internalName.split('.').pop() || 'mp4').toLowerCase()
+          const tempDir = join(app.getPath('temp'), 'magnolia-videos')
+          if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
+          const tempPath = join(tempDir, `${source.guid}.${ext}`)
+          await writeFile(tempPath, vidBuf)
+
+          const rawVideoSelections: RawVideoSelection[] =
+            (source as any)._rawVideoSelections || []
+          if (rawVideoSelections.length > 0) {
+            source.selections = rawVideoSelections.map(convertVideoSelection)
+          }
+
+          ;(source as any).formatData = {
+            videoFilePath: tempPath,
+            mimeType: VIDEO_MIME_BY_EXT[ext] || 'video/mp4',
+            duration: 0,
+            videoExt: ext
+          }
+        }
+      }
+      source.plainTextPath = undefined
+      delete (source as any)._rawVideoSelections
+      // Load the transcript text. The writer stores it alongside the video
+      // binary as sources/${guid}.txt — without this load, every save/open
+      // cycle would erase whatever the user typed in the transcript.
+      if (sourceContents[source.guid] === undefined) {
+        const transcriptFile = zip.file(`sources/${source.guid}.txt`)
+        if (transcriptFile) {
+          sourceContents[source.guid] = await transcriptFile.async('string')
+        } else {
+          sourceContents[source.guid] = ''
+        }
+      }
+      sourcesDone++
+      onProgress?.('Loading documents', sourcesDone, totalSources)
+      return
+    }
+
+    // Image sources (<PictureSource>): write the image binary to a temp
+    // file and convert any rectangle <PictureSelection> codings into
+    // Magnolia's region-based selections (page=1, pixel coords).
+    if ((source as any).sourceType === 'image' && source.plainTextPath) {
+      const match = source.plainTextPath.match(/internal:\/\/(.+)/)
+      if (match) {
+        const internalName = match[1]
+        const imgFile = zip.file(`sources/${internalName}`)
+        if (imgFile) {
+          const imgBuf = await imgFile.async('nodebuffer')
+          const ext = (internalName.split('.').pop() || 'png').toLowerCase()
+          const tempDir = join(app.getPath('temp'), 'magnolia-images')
+          if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
+          const tempPath = join(tempDir, `${source.guid}.${ext}`)
+          await writeFile(tempPath, imgBuf)
+
+          const rawPictureSelections: RawPictureSelection[] =
+            (source as any)._rawPictureSelections || []
+          if (rawPictureSelections.length > 0) {
+            source.selections = rawPictureSelections.map(convertPictureSelection)
+          }
+
+          ;(source as any).formatData = {
+            imageFilePath: tempPath,
+            mimeType: IMAGE_MIME_BY_EXT[ext] || 'application/octet-stream',
+            imageExt: ext
+          }
+        }
+      }
+      source.plainTextPath = undefined
+      delete (source as any)._rawPictureSelections
+      sourceContents[source.guid] = ''
+      sourcesDone++
+      onProgress?.('Loading documents', sourcesDone, totalSources)
+      return
+    }
+
+    if (source.plainTextPath) {
+      // Extract filename from internal://guid.txt
+      const match = source.plainTextPath.match(/internal:\/\/(.+)/)
+      if (match) {
+        const filename = match[1]
+        const file = zip.file(`sources/${filename}`)
+        if (file) {
+          sourceContents[source.guid] = await file.async('string')
+        }
+      }
+    } else if (source.plainTextContent) {
+      sourceContents[source.guid] = source.plainTextContent
+    }
+    sourcesDone++
+    onProgress?.('Loading documents', sourcesDone, totalSources)
+  }))
+
+  // Load saved queries (app-specific JSON, not part of REFI-QDA XML)
+  const queriesFile = zip.file('magnolia-queries.json')
+  if (queriesFile) {
+    try {
+      const queriesJson = await queriesFile.async('string')
+      project.savedQueries = JSON.parse(queriesJson)
+    } catch {
+      // Ignore malformed queries file
+    }
+  }
+
+  // Load logbook entries (app-specific JSON, not part of REFI-QDA XML)
+  const logbookFile = zip.file('magnolia-logbook.json')
+  if (logbookFile) {
+    try {
+      const logbookJson = await logbookFile.async('string')
+      project.logbookEntries = JSON.parse(logbookJson)
+    } catch {
+      // Ignore malformed logbook file
+    }
+  }
+
+  // Load tag categories and extension data (app-specific JSON)
+  const tagsExtFile = zip.file('magnolia-tags.json')
+  if (tagsExtFile) {
+    try {
+      const tagsExtJson = await tagsExtFile.async('string')
+      const ext = JSON.parse(tagsExtJson)
+      if (ext.categories) {
+        project.tagCategories = ext.categories
+      }
+      if (ext.tagMeta) {
+        for (const meta of ext.tagMeta) {
+          const set = project.sets.find((s) => s.guid === meta.guid)
+          if (set) {
+            set.categoryGuid = meta.categoryGuid
+            set.value = meta.value
+            if (meta.memberSurveyRespondents) set.memberSurveyRespondents = meta.memberSurveyRespondents
+            if (meta.memberSurveyQuestions) set.memberSurveyQuestions = meta.memberSurveyQuestions
+          }
+        }
+      }
+    } catch {
+      // Ignore malformed tags extension file
+    }
+  }
+
+  // Load memos (app-specific JSON, not part of REFI-QDA XML)
+  const memosFile = zip.file('magnolia-memos.json')
+  if (memosFile) {
+    try {
+      const memosJson = await memosFile.async('string')
+      project.memos = JSON.parse(memosJson)
+    } catch {
+      // Ignore malformed memos file
+    }
+  }
+
+  // Load quotes (app-specific JSON)
+  const quotesFile = zip.file('magnolia-quotes.json')
+  if (quotesFile) {
+    try {
+      const quotesJson = await quotesFile.async('string')
+      project.quotes = JSON.parse(quotesJson)
+    } catch {
+      // Ignore malformed quotes file
+    }
+  }
+
+  // Load document folders + per-source folder mapping (Magnolia-specific).
+  // Older .qdpx files written before folder persistence won't have this
+  // file — they just load with no folders, same as before.
+  const foldersFile = zip.file('magnolia-folders.json')
+  if (foldersFile) {
+    try {
+      const ext = JSON.parse(await foldersFile.async('string'))
+      if (Array.isArray(ext.folders)) project.folders = ext.folders
+      if (ext.sourceFolder && typeof ext.sourceFolder === 'object') {
+        project.sourceFolder = ext.sourceFolder
+      }
+    } catch {
+      // Ignore malformed folders file
+    }
+  }
+
+  // Load saved analyses (app-specific JSON)
+  const analysesFile = zip.file('magnolia-analyses.json')
+  if (analysesFile) {
+    try {
+      const analysesJson = await analysesFile.async('string')
+      project.savedAnalyses = JSON.parse(analysesJson)
+    } catch {
+      // Ignore malformed analyses file
+    }
+  }
+
+  // Load Document Viewer tab state (app-specific JSON)
+  const tabsFile = zip.file('magnolia-tabs.json')
+  if (tabsFile) {
+    try {
+      const tabsJson = await tabsFile.async('string')
+      ;(project as any).tabState = JSON.parse(tabsJson)
+    } catch {
+      // Ignore malformed tabs file
+    }
+  }
+
+  // Load code hotkey assignments (app-specific JSON)
+  const codesExtFile = zip.file('magnolia-codes.json')
+  if (codesExtFile) {
+    try {
+      const codesExtJson = await codesExtFile.async('string')
+      const ext = JSON.parse(codesExtJson)
+      if (ext.hotkeys) {
+        const applyHotkeys = (codes: typeof project.codes) => {
+          for (const c of codes) {
+            const hk = ext.hotkeys.find((h: any) => h.guid === c.guid)
+            if (hk) c.hotkey = hk.hotkey
+            applyHotkeys(c.children)
+          }
+        }
+        applyHotkeys(project.codes)
+      }
+    } catch {
+      // Ignore malformed codes extension file
+    }
+  }
+
+  // Restore source metadata (sourceType, formatData for PDF/markdown, etc.)
+  const sourcesExtFile = zip.file('magnolia-sources.json')
+  if (sourcesExtFile) {
+    try {
+      const ext = JSON.parse(await sourcesExtFile.async('string'))
+      if (ext.sourceMeta) {
+        // Same parallelism rationale as pass 1 — each meta entry maps
+        // to a distinct source object, no shared mutable state, so
+        // concurrent JSZip extraction + writeFile is safe.
+        await Promise.all((ext.sourceMeta as any[]).map(async (meta) => {
+          const source = project.sources.find((s: any) => s.guid === meta.guid)
+          if (!source) return
+          if (meta.sourceType) (source as any).sourceType = meta.sourceType
+
+          // Reattach region-based selection data written as a side table.
+          if (meta.pdfRegionSelections) {
+            const regionByGuid = new Map<string, any>(
+              (meta.pdfRegionSelections as any[]).map((r) => [r.guid, r.region])
+            )
+            for (const sel of source.selections) {
+              const region = regionByGuid.get(sel.guid)
+              if (region) (sel as any).pdfRegion = region
+            }
+          }
+          // Restore survey-cell selections from the side table. The
+          // survey TextSource doesn't emit them in the XML (their
+          // offsets are cell-relative, meaningless to other tools), so
+          // the whole selection — offsets, codings, and the
+          // (respondentId, questionId) cell identity — lives here.
+          if (meta.surveyCellSelections) {
+            source.selections.push(...(meta.surveyCellSelections as PlainTextSelection[]))
+          }
+          // Reattach video-selection transcript anchors + manuallyAnchored.
+          if (meta.videoSelectionAnchors) {
+            const anchorByGuid = new Map<string, { startLine: number; endLine: number; manuallyAnchored: boolean }>(
+              (meta.videoSelectionAnchors as any[]).map((a) => [a.guid, a])
+            )
+            for (const sel of source.selections) {
+              const anchor = anchorByGuid.get(sel.guid)
+              if (anchor) {
+                sel.startPosition = anchor.startLine
+                sel.endPosition = anchor.endLine
+                ;(sel as any).manuallyAnchored = anchor.manuallyAnchored
+              }
+            }
+          }
+          if (meta.formatData) {
+            // Restore PDF binary to a temp file. The viewer loads it on
+            // demand via IPC, avoiding a large base64 string in memory.
+            if (meta.formatData.hasPdfBinary) {
+              const pdfFile = zip.file(`sources/${meta.guid}.pdf`)
+              if (pdfFile) {
+                const pdfBuf = await pdfFile.async('nodebuffer')
+                const tempDir = join(app.getPath('temp'), 'magnolia-pdfs')
+                if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
+                const tempPath = join(tempDir, `${meta.guid}.pdf`)
+                await writeFile(tempPath, pdfBuf)
+                ;(source as any).formatData = {
+                  pdfFilePath: tempPath,
+                  pdfPageOffsets: meta.formatData.pdfPageOffsets
+                }
+              }
+            } else if (meta.formatData.hasAudioBinary) {
+              // Restore audio binary: write to temp file, store path.
+              // Newer exports save the file with its real extension
+              // (m4a / mp3 / wav / etc.) so other QDA tools can read
+              // the AudioSource path attribute. Older exports used the
+              // literal "audio" extension — try the recorded ext first
+              // and fall back to ".audio" for those projects.
+              const audioExt = (meta.formatData.audioExt as string | undefined) || 'audio'
+              let audioFile = zip.file(`sources/${meta.guid}.${audioExt}`)
+              if (!audioFile && audioExt !== 'audio') {
+                audioFile = zip.file(`sources/${meta.guid}.audio`)
+              }
+              if (audioFile) {
+                const audioBuf = await audioFile.async('nodebuffer')
+                const tempDir = join(app.getPath('temp'), 'magnolia-audio')
+                if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
+                const tempPath = join(tempDir, `${meta.guid}.${audioExt}`)
+                await writeFile(tempPath, audioBuf)
+                ;(source as any).formatData = {
+                  audioFilePath: tempPath,
+                  audioExt,
+                  mimeType: meta.formatData.mimeType,
+                  duration: meta.formatData.duration,
+                  channels: meta.formatData.channels,
+                  sampleRate: meta.formatData.sampleRate,
+                  lineTimes: meta.formatData.lineTimes
+                }
+              }
+            } else if (meta.formatData.hasVideoBinary) {
+              // Restore video binary: the XML already produced a temp file
+              // via VideoSource parsing, but we still refresh from the
+              // sources/${guid}.${ext} entry to pick up the current export.
+              // Also restore lineTimes (Magnolia-specific transcript tags).
+              const ext = meta.formatData.videoExt || 'mp4'
+              const vidFile = zip.file(`sources/${meta.guid}.${ext}`)
+              const existing = (source as any).formatData || {}
+              if (vidFile) {
+                const vidBuf = await vidFile.async('nodebuffer')
+                const tempDir = join(app.getPath('temp'), 'magnolia-videos')
+                if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
+                const tempPath = join(tempDir, `${meta.guid}.${ext}`)
+                await writeFile(tempPath, vidBuf)
+                ;(source as any).formatData = {
+                  ...existing,
+                  videoFilePath: tempPath,
+                  mimeType: meta.formatData.mimeType || existing.mimeType,
+                  duration: meta.formatData.duration ?? existing.duration ?? 0,
+                  width: meta.formatData.width,
+                  height: meta.formatData.height,
+                  videoExt: ext,
+                  lineTimes: meta.formatData.lineTimes
+                }
+              } else {
+                ;(source as any).formatData = {
+                  ...existing,
+                  duration: meta.formatData.duration ?? existing.duration ?? 0,
+                  width: meta.formatData.width,
+                  height: meta.formatData.height,
+                  lineTimes: meta.formatData.lineTimes
+                }
+              }
+            } else if (meta.formatData.hasImageBinary) {
+              // Image saved by an earlier Magnolia session — find the
+              // sources/${guid}.${ext} file and write it back to a temp path.
+              const ext = meta.formatData.imageExt || 'png'
+              const imgFile = zip.file(`sources/${meta.guid}.${ext}`)
+              if (imgFile) {
+                const imgBuf = await imgFile.async('nodebuffer')
+                const tempDir = join(app.getPath('temp'), 'magnolia-images')
+                if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
+                const tempPath = join(tempDir, `${meta.guid}.${ext}`)
+                await writeFile(tempPath, imgBuf)
+                ;(source as any).formatData = {
+                  imageFilePath: tempPath,
+                  mimeType: meta.formatData.mimeType,
+                  imageExt: ext
+                }
+              }
+            } else {
+              ;(source as any).formatData = meta.formatData
+            }
+          }
+        }))
+      }
+    } catch {
+      // Ignore malformed sources extension file
+    }
+  }
+
+  // ── Survey REFI reconciliation ──
+  // The standards-native survey representation is <Variables>/<Cases>
+  // plus one per-respondent open-ended <TextSource> (carrying the
+  // promoted cell codings). Those respondent docs are referenced by a
+  // <Case>'s <SourceRef>; the main survey source never is. Two paths:
+  //
+  //   (a) A side-table survey was already restored above (Magnolia↔
+  //       Magnolia): keep the high-fidelity survey + its cell codings,
+  //       and just drop the respondent docs so they don't surface as
+  //       junk standalone documents.
+  //   (b) No side-table (file came back from / originated in Atlas.ti /
+  //       MAXQDA): reconstruct the survey from Variables/Cases/docs —
+  //       closed answers from variables, open-ended answers + codings
+  //       from the documents — synthesize a survey source for it, and
+  //       drop the now-consumed respondent docs.
+  const refiVariables = (project as any)._refiVariables as RefiVariable[] | undefined
+  const refiCases = (project as any)._refiCases as RefiCase[] | undefined
+  if (refiCases && refiCases.length > 0) {
+    const caseDocGuids = new Set<string>()
+    for (const c of refiCases) for (const g of c.sourceRefGuids) caseDocGuids.add(g)
+
+    // Index the respondent docs by guid (text + coded spans).
+    const docByGuid = new Map<string, { text: string; selections: any[] }>()
+    for (const s of project.sources as any[]) {
+      if (!caseDocGuids.has(s.guid)) continue
+      docByGuid.set(s.guid, {
+        text: s.plainTextContent ?? '',
+        selections: (s.selections ?? []).map((sel: any) => ({
+          guid: sel.guid,
+          startPosition: sel.startPosition ?? 0,
+          endPosition: sel.endPosition ?? 0,
+          codings: sel.codings ?? []
+        }))
+      })
+    }
+
+    // respondent-doc guid → {surveyGuid, respondentId} for turning a
+    // tag Set's <MemberSource> back into a respondent tag (foreign path).
+    const docTagTarget = new Map<string, { sourceGuid: string; id: string }>()
+
+    const hasSideTableSurvey = (project.sources as any[]).some((s) => s.formatData?.survey)
+    if (!hasSideTableSurvey && refiVariables && refiVariables.length > 0) {
+      const { survey, cellSelections, docToRespondent } = refiToSurvey(
+        refiVariables,
+        refiCases,
+        docByGuid,
+        project.name ? `${project.name} (survey)` : 'Imported Survey'
+      )
+      const surveyGuid = randomUUID().toUpperCase()
+      ;(project.sources as any[]).push({
+        guid: surveyGuid,
+        name: survey.name,
+        sourceType: 'survey',
+        selections: cellSelections,
+        formatData: { survey, rawCsv: '' }
+      })
+      for (const [docGuid, respId] of Object.entries(docToRespondent)) {
+        docTagTarget.set(docGuid, { sourceGuid: surveyGuid, id: respId })
+      }
+    }
+
+    // Reconcile tags: a Set member pointing at a respondent doc is a
+    // respondent tag. The doc is about to be dropped, so strip it from
+    // memberSourceGuids (else the tag keeps a phantom document member);
+    // when reconstructing a foreign survey, convert it into a
+    // memberSurveyRespondents entry. For Magnolia↔Magnolia the side-table
+    // already restored memberSurveyRespondents, so this is pure cleanup.
+    for (const set of ((project.sets ?? []) as any[])) {
+      const docRefs = (set.memberSourceGuids ?? []).filter((g: string) => caseDocGuids.has(g))
+      if (docRefs.length === 0) continue
+      set.memberSourceGuids = set.memberSourceGuids.filter((g: string) => !caseDocGuids.has(g))
+      for (const docGuid of docRefs) {
+        const target = docTagTarget.get(docGuid)
+        if (!target) continue
+        const members = (set.memberSurveyRespondents ?? (set.memberSurveyRespondents = []))
+        if (!members.some((m: any) => m.sourceGuid === target.sourceGuid && m.id === target.id)) {
+          members.push(target)
+        }
+      }
+    }
+
+    // Drop the consumed respondent docs from both the source list and
+    // the loaded contents map.
+    project.sources = (project.sources as any[]).filter((s) => !caseDocGuids.has(s.guid))
+    for (const g of caseDocGuids) delete sourceContents[g]
+  }
+
+  // Drop the transient REFI fields so they don't leak into renderer state.
+  const { _refiVariables, _refiCases, ...cleanProject } = project as any
+  void _refiVariables
+  void _refiCases
+  return { ...cleanProject, sourceContents }
+}

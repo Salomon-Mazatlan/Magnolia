@@ -1,0 +1,25 @@
+node_modules/
+out/
+dist/
+.DS_Store
+*.log
+
+# Affinity Designer working files (heavy binaries; the exported PNG masters
+# are committed instead) and their editor lock files
+*.af
+*~lock~
+
+# ...but the tracked artwork sources in graphic_files keep their .af files:
+# the icon source folder in full, plus the welcome-screen background.
+# Transient ~lock~ files stay ignored even here.
+!graphic_files/app_and_file_icons/**
+graphic_files/app_and_file_icons/*~lock~
+graphic_files/app_and_file_icons/.DS_Store
+!graphic_files/welcome-bg.af
+
+# Local / scratch / working materials — kept on disk, never tracked or uploaded
+.claude/
+working_materials/
+
+# Maintainer-only release runbook — kept local, not published
+RELEASING.md
