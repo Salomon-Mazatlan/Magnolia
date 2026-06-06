@@ -26,6 +26,29 @@
  */
 import { app, BrowserWindow, dialog, Notification } from 'electron'
 import { autoUpdater } from 'electron-updater'
+import { execFileSync } from 'child_process'
+
+/**
+ * Workaround for a Squirrel.Mac bug on modern macOS (see electron #25626).
+ * After quitAndInstall(), Squirrel *submits* the ShipIt launchd job
+ * (`<appId>.ShipIt`) but never *starts* it — `launchctl print` shows runs=0,
+ * "never exited" — so the staged update is never applied and the app doesn't
+ * relaunch. We start the job ourselves while the app is still alive; ShipIt
+ * then waits for this process to exit and performs the install + relaunch.
+ * (A manual `launchctl start` reliably completes the otherwise-stuck install.)
+ * The job label is the electron-builder appId + ".ShipIt".
+ */
+function startShipItJob(): void {
+  if (process.platform !== 'darwin') return
+  try {
+    // launchctl start returns immediately (fire-and-forget); it does not block
+    // until the job finishes, so this can't deadlock against ShipIt waiting on
+    // us to quit.
+    execFileSync('/bin/launchctl', ['start', 'com.magnolia.app.ShipIt'])
+  } catch {
+    // No job submitted (nothing staged) or already running — nothing to do.
+  }
+}
 
 let mainWindowRef: BrowserWindow | null = null
 let manualCheckInProgress = false
@@ -105,6 +128,9 @@ export function initAutoUpdater(mainWindow: BrowserWindow, onQuitForUpdate: () =
       // keeps running, and Squirrel can never install the staged update.
       onQuitForUpdateRef?.()
       autoUpdater.quitAndInstall()
+      // quitAndInstall submitted the ShipIt launchd job but, on modern macOS,
+      // won't start it — kick it ourselves so the update actually installs.
+      startShipItJob()
     }
   })
 
