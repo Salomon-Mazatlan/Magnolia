@@ -20,6 +20,3 @@ graphic_files/app_and_file_icons/.DS_Store
 # Local / scratch / working materials — kept on disk, never tracked or uploaded
 .claude/
 working_materials/
-
-# Maintainer-only release runbook — kept local, not published
-RELEASING.md
