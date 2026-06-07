@@ -2,7 +2,10 @@
   "name": "magnolia",
   "version": "1.1.0",
   "description": "Open-source qualitative data analysis software",
-  "author": "Cale Davis",
+  "author": {
+    "name": "Cale Davis",
+    "email": "cale@caledavis.eu"
+  },
   "license": "EUPL-1.2",
   "homepage": "https://github.com/caledavis/Magnolia",
   "repository": {
