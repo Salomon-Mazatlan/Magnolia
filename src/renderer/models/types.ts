@@ -523,6 +523,13 @@ export interface ElectronAPI {
   closeWindow: () => void
   isWindowMaximized: () => Promise<boolean>
   onWindowMaximizedChanged: (callback: (isMax: boolean) => void) => () => void
+  // Auto-update dialog (Sparkle-style prompt driven by the renderer)
+  onUpdateAvailable: (
+    callback: (info: { version: string; currentVersion: string; releaseDate: string | null; releaseNotes: string }) => void
+  ) => () => void
+  installUpdate: () => void
+  skipUpdateVersion: (version: string) => void
+  remindUpdateLater: () => void
   // Query results window (pop-out)
   openQueryResultsWindow: (data: QueryResultsInitData) => void
   updateQueryResultsWindow: (data: QueryResultsInitData) => void

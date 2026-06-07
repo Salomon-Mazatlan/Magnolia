@@ -14,6 +14,7 @@ import {
   faTags
 } from './components/Icon'
 import { LicenceDialog } from './components/Licence/LicenceDialog'
+import { UpdateDialog, type UpdateAvailableInfo } from './components/Update/UpdateDialog'
 import { sourceTypeFromExtension } from './utils/format-registry'
 import { parseSurveyGrid, type SurveyFormat } from './utils/survey/survey-parser'
 import { parseCsv } from './utils/survey/csv-parser'
@@ -186,9 +187,14 @@ function App() {
   const [showProjectDetails, setShowProjectDetails] = useState(false)
   const [showLicenceDialog, setShowLicenceDialog] = useState(false)
   const [loadProgress, setLoadProgress] = useState<{ stage: string; current: number; total: number } | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<UpdateAvailableInfo | null>(null)
 
   useEffect(() => {
     return window.api.onProjectLoadProgress((p) => setLoadProgress(p))
+  }, [])
+
+  useEffect(() => {
+    return window.api.onUpdateAvailable(setUpdateInfo)
   }, [])
   const [showSaveQueryDialog, setShowSaveQueryDialog] = useState(false)
   const [showFindDialog, setShowFindDialog] = useState(false)
@@ -2375,6 +2381,7 @@ function App() {
 
       <ProjectDetailsDialog open={showProjectDetails} onClose={() => setShowProjectDetails(false)} />
       <LicenceDialog open={showLicenceDialog} onClose={() => setShowLicenceDialog(false)} />
+      <UpdateDialog info={updateInfo} onDismiss={() => setUpdateInfo(null)} />
 
       {(() => {
         const source = documentStore.sources.find((s) => s.guid === documentStore.viewedDocumentGuid)

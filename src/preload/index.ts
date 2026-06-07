@@ -176,6 +176,17 @@ const api: ElectronAPI = {
     ipcRenderer.on('window-maximized-changed', handler)
     return () => { ipcRenderer.removeListener('window-maximized-changed', handler) }
   },
+  // Auto-update dialog (Sparkle-style prompt driven by the renderer)
+  onUpdateAvailable: (
+    callback: (info: { version: string; currentVersion: string; releaseDate: string | null; releaseNotes: string }) => void
+  ) => {
+    const handler = (_event: any, info: any) => callback(info)
+    ipcRenderer.on('update-available', handler)
+    return () => { ipcRenderer.removeListener('update-available', handler) }
+  },
+  installUpdate: () => ipcRenderer.send('update:install'),
+  skipUpdateVersion: (version: string) => ipcRenderer.send('update:skip', version),
+  remindUpdateLater: () => ipcRenderer.send('update:remind-later'),
   // Query results window (pop-out)
   openQueryResultsWindow: (data) => ipcRenderer.send('open-query-results-window', data),
   updateQueryResultsWindow: (data) => ipcRenderer.send('update-query-results-window', data),

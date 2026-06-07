@@ -24,9 +24,11 @@
  * `electron-vite dev` (because there's no app.asar to compare versions
  * against), so this module is safe to import unconditionally.
  */
-import { app, BrowserWindow, dialog, Notification } from 'electron'
+import { app, BrowserWindow, dialog, Notification, ipcMain } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import { execFileSync } from 'child_process'
+import { join } from 'path'
+import { existsSync, readFileSync, writeFileSync } from 'fs'
 
 /**
  * Workaround for a Squirrel.Mac bug on modern macOS (see electron #25626).
@@ -62,6 +64,50 @@ let onQuitForUpdateRef: (() => void) | null = null
 // submitted-but-never-started ShipIt bug as quitAndInstall.
 let updateDownloaded = false
 let quitHandlersAdded = false
+let ipcHandlersAdded = false
+
+/** Persisted updater state (currently just the version the user chose to skip)
+ *  lives in its own small file in userData, kept separate from user
+ *  preferences so the two can't clobber each other. */
+function updateStatePath(): string {
+  return join(app.getPath('userData'), 'magnolia-update-state.json')
+}
+function getSkippedVersion(): string | null {
+  try {
+    const p = updateStatePath()
+    if (existsSync(p)) return (JSON.parse(readFileSync(p, 'utf-8')).skippedVersion as string) ?? null
+  } catch {
+    /* ignore — treat as nothing skipped */
+  }
+  return null
+}
+function setSkippedVersion(version: string): void {
+  try {
+    writeFileSync(updateStatePath(), JSON.stringify({ skippedVersion: version }, null, 2))
+  } catch {
+    /* ignore */
+  }
+}
+
+/** electron-updater's releaseNotes is either the release body (a markdown
+ *  string) or, with fullChangelog on, an array of {version, note}. Normalise
+ *  to a single markdown string for the renderer to render. */
+function normalizeReleaseNotes(
+  notes: string | Array<{ version: string; note: string | null }> | null | undefined
+): string {
+  if (!notes) return ''
+  if (typeof notes === 'string') return notes
+  return notes.map((n) => (n.version ? `## ${n.version}\n\n${n.note ?? ''}` : n.note ?? '')).join('\n\n')
+}
+
+/** Apply the staged update now: flag the intentional quit (so the Welcome
+ *  screen doesn't reappear), ask Squirrel to install, then kick ShipIt (which
+ *  Squirrel submits but won't start on modern macOS). */
+function installUpdateNow(): void {
+  onQuitForUpdateRef?.()
+  autoUpdater.quitAndInstall()
+  startShipItJob()
+}
 
 /** Initialise the updater and schedule a startup check. Must be
  *  called after app.whenReady() resolves. The reference to the main
@@ -84,6 +130,17 @@ export function initAutoUpdater(mainWindow: BrowserWindow, onQuitForUpdate: () =
     }
     app.on('will-quit', kickShipItOnQuit)
     app.on('quit', kickShipItOnQuit)
+  }
+
+  // Buttons in the renderer's update dialog route back through here.
+  if (!ipcHandlersAdded) {
+    ipcHandlersAdded = true
+    ipcMain.on('update:install', () => installUpdateNow())
+    ipcMain.on('update:skip', (_e, version: string) => setSkippedVersion(version))
+    ipcMain.on('update:remind-later', () => {
+      // No-op: the update stays staged. It re-prompts on the next check and
+      // still installs on quit via autoInstallOnAppQuit.
+    })
   }
 
   autoUpdater.autoDownload = true
@@ -123,36 +180,53 @@ export function initAutoUpdater(mainWindow: BrowserWindow, onQuitForUpdate: () =
     }
   })
 
-  autoUpdater.on('update-downloaded', async (info) => {
+  autoUpdater.on('update-downloaded', (info) => {
+    const wasManual = manualCheckInProgress
     manualCheckInProgress = false
     updateDownloaded = true
-    // Subtle OS notification first — non-blocking, won't pull focus
-    // mid-coding-session.
+
+    // Respect "Skip This Version" for automatic checks; a manual
+    // "Check for updates…" always surfaces the prompt regardless.
+    if (!wasManual && getSkippedVersion() === info.version) {
+      console.log('[auto-update] version skipped by user:', info.version)
+      return
+    }
+
+    // Subtle OS notification — non-blocking, won't pull focus mid-session.
     if (Notification.isSupported()) {
       new Notification({
         title: 'Magnolia update ready',
-        body: `Version ${info.version} will install when you quit, or restart now to install immediately.`
+        body: `Version ${info.version} is ready to install.`
       }).show()
     }
-    const { response } = await dialog.showMessageBox(mainWindowRef ?? undefined as any, {
-      type: 'info',
-      message: `Magnolia ${info.version} is ready to install`,
-      detail: 'Restart now to apply the update, or quit later — it will install automatically on next launch.',
-      buttons: ['Restart now', 'Later'],
-      defaultId: 0,
-      cancelId: 1
-    })
-    if (response === 0) {
-      // Mark the app as intentionally quitting BEFORE quitAndInstall. On macOS,
-      // electron-updater's quitAndInstall closes the main window but does not
-      // reliably fire before-quit / before-quit-for-update, so without this the
-      // main window's `closed` handler re-opens the Welcome screen, the app
-      // keeps running, and Squirrel can never install the staged update.
-      onQuitForUpdateRef?.()
-      autoUpdater.quitAndInstall()
-      // quitAndInstall submitted the ShipIt launchd job but, on modern macOS,
-      // won't start it — kick it ourselves so the update actually installs.
-      startShipItJob()
+
+    const payload = {
+      version: info.version,
+      currentVersion: app.getVersion(),
+      releaseDate: (info as { releaseDate?: string }).releaseDate ?? null,
+      releaseNotes: normalizeReleaseNotes(info.releaseNotes)
+    }
+
+    // The renderer shows the Sparkle-style modal (release notes + Skip /
+    // Remind Me Later / Install Now) and routes the chosen action back via IPC.
+    const win = mainWindowRef
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('update-available', payload)
+    } else {
+      // No main window to host the modal (e.g. only the Welcome window is up) —
+      // fall back to a native prompt so the update can't be silently lost.
+      dialog
+        .showMessageBox(undefined as never, {
+          type: 'info',
+          message: `Magnolia ${info.version} is ready to install`,
+          detail: 'Restart now to apply the update, or quit later — it installs automatically.',
+          buttons: ['Restart now', 'Later'],
+          defaultId: 0,
+          cancelId: 1
+        })
+        .then(({ response }) => {
+          if (response === 0) installUpdateNow()
+        })
     }
   })
 
