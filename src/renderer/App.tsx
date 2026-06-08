@@ -649,6 +649,13 @@ function App() {
         await new Promise((r) => setTimeout(r, 0))
         steps[i].run()
       }
+      // A freshly loaded project matches the file on disk, so it is NOT
+      // dirty. The per-store setX steps above each flip isDirty; clear it
+      // here so the post-load autosave doesn't fire and rewrite the whole
+      // archive for a file the user only opened. That needless full-file
+      // write is what got interrupted and truncated the project. Genuine
+      // edits after this re-dirty it normally.
+      useProjectStore.getState().markClean()
       if ((data as any).filePath) {
         window.api.trackRecentProject(project.name, (data as any).filePath)
       }
@@ -1528,6 +1535,11 @@ function App() {
           await new Promise((r) => setTimeout(r, 0))
           steps[i].run()
         }
+        // Freshly loaded == matches disk == not dirty. Clear the dirty flag
+        // the setX steps raised so opening a recent project doesn't trigger
+        // a post-load autosave (a needless full-archive rewrite). See the
+        // matching note in the file-picker open path above.
+        useProjectStore.getState().markClean()
         window.api.trackRecentProject(project.name, filePath)
       } catch (err) {
         console.error('Failed to open recent project:', err)
