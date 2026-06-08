@@ -107,7 +107,10 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
         tagExcludeGuids: df.tagExcludeGuids ?? [],
         folderGuids: df.folderGuids ?? [],
         typeInclude: [],
-        typeExclude: []
+        typeExclude: [],
+        // Hand the persisted graph back so DocumentSelector rebuilds from
+        // it instead of synthesising one from the resolved arrays.
+        graph: df.graph
       }
     }
     return emptyDocumentFilter()
@@ -152,6 +155,14 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
   const [initialGraphLayout, setInitialGraphLayout] = useState<{ nodes: any[]; conns: any[] } | undefined>(
     initData?.editGraphLayout
   )
+  // Document-selector graph to restore on Discard. Kept in a ref rather
+  // than the dirty-tracked baseline because the graph carries node x/y
+  // positions: folding it into the JSON dirty-compare would flag a query
+  // as unsaved on every node drag. Seeded from the loaded query and
+  // re-seated whenever a save makes the current state the new baseline,
+  // so Discard reverts to the right graph in both cases. The code graph's
+  // equivalent is `initialGraphLayout`, which the editor remount reads.
+  const discardDocGraphRef = useRef(initData?.editQuery?.documentFilter.graph)
   // Bumped on Discard to force QueryNodeEditor to remount with the
   // restored initialCondition / initialGraphLayout. Without the
   // remount the editor keeps its internal graph state and the
@@ -191,7 +202,11 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
       tagExcludeGuids: baseline.docFilter.tagExcludeGuids,
       folderGuids: baseline.docFilter.folderGuids,
       typeInclude: [],
-      typeExclude: []
+      typeExclude: [],
+      // Restore the authored selector graph so Discard reverts to the
+      // exact node structure (operators included) rather than letting the
+      // DocumentSelector re-synthesise a lossy union from the flat arrays.
+      graph: discardDocGraphRef.current
     })
     setDocFilterKey((k) => k + 1)
     setInitialCondition(baseline.codeCondition ?? undefined)
@@ -215,13 +230,16 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
       setInitialCondition(initData.editQuery.codeCondition)
       if (initData.editGraphLayout) setInitialGraphLayout(initData.editGraphLayout)
       const df = initData.editQuery.documentFilter
+      // Seed the Discard target with the loaded graph.
+      discardDocGraphRef.current = df.graph
       setDocFilter({
         sourceGuids: df.sourceGuids ?? [],
         tagGuids: df.tagGuids ?? [],
         tagExcludeGuids: df.tagExcludeGuids ?? [],
         folderGuids: df.folderGuids ?? [],
         typeInclude: [],
-        typeExclude: []
+        typeExclude: [],
+        graph: df.graph
       })
       if (df.sourceGuids?.length || df.tagGuids?.length || df.tagExcludeGuids?.length || df.folderGuids?.length) setDocSectionOpen(true)
       setDocFilterKey((k) => k + 1)
@@ -279,18 +297,27 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
     sourceGuids: docFilter.sourceGuids.length > 0 ? docFilter.sourceGuids : undefined,
     tagGuids: docFilter.tagGuids.length > 0 ? docFilter.tagGuids : undefined,
     tagExcludeGuids: docFilter.tagExcludeGuids.length > 0 ? docFilter.tagExcludeGuids : undefined,
-    folderGuids: docFilter.folderGuids.length > 0 ? docFilter.folderGuids : undefined
+    folderGuids: docFilter.folderGuids.length > 0 ? docFilter.folderGuids : undefined,
+    // Persist the authored selector graph so reopening rebuilds the exact
+    // node structure (operators included) rather than re-synthesising a
+    // lossy union from the resolved arrays above. The flat arrays remain
+    // for the query engine and for legacy queries with no graph.
+    graph: docFilter.graph
   }), [docFilter])
 
-  // Send live preview to main window whenever query changes
+  // Send live preview to main window whenever query changes. The code
+  // graph rides alongside so the main store's currentGraphLayout stays in
+  // sync — "Edit current query" then reopens from the authored graph
+  // rather than re-deriving (and re-expanding "And subcodes") from the
+  // condition. The document graph already travels inside the query.
   useEffect(() => {
     if (!codeCondition) return
     const query: Query = {
       documentFilter: buildDocumentFilter(),
       codeCondition
     }
-    window.api.sendPreviewToMain(query)
-  }, [codeCondition, docFilter, buildDocumentFilter])
+    window.api.sendPreviewToMain(query, currentGraph ?? undefined)
+  }, [codeCondition, docFilter, buildDocumentFilter, currentGraph])
 
   const handleRun = () => {
     if (!codeCondition) return
@@ -337,7 +364,7 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
       // title's editable suffix paints empty until the roundtrip
       // completes.
       const qs = useQueryStore.getState()
-      qs.setComplexQuery(query)
+      qs.setComplexQuery(query, currentGraph ?? undefined)
       qs.saveCurrentQuery(trimmed, currentGraph ?? undefined, newGuid)
     } else {
       // Window mode (legacy popout has its own store instance) —
@@ -347,6 +374,10 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
     }
     setShowSaveDialog(false)
     setBaseline({ docFilter: docFilterForCompare, codeCondition })
+    // A save makes the current state the new Discard target, for both the
+    // document graph and the code graph.
+    discardDocGraphRef.current = query.documentFilter.graph
+    setInitialGraphLayout(currentGraph ?? undefined)
     setEditGuid(newGuid)
     if (inTab) inTab.onSaved(trimmed, newGuid)
     else window.close()
@@ -361,6 +392,9 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
     if (editGuid) {
       handleRun()
       setBaseline({ docFilter: docFilterForCompare, codeCondition })
+      // Re-seat the Discard targets to the just-saved state.
+      discardDocGraphRef.current = buildDocumentFilter().graph
+      setInitialGraphLayout(currentGraph ?? undefined)
       if (inTab) inTab.onSaved('')
       return true
     }

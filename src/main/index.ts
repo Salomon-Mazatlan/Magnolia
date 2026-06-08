@@ -390,9 +390,9 @@ ipcMain.on('qb-save-query', (_event, query, name, graphLayout, savedGuid) => {
   }
 })
 
-ipcMain.on('qb-preview-query', (_event, query) => {
+ipcMain.on('qb-preview-query', (_event, query, graphLayout) => {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('qb-preview-result', query)
+    mainWindow.webContents.send('qb-preview-result', query, graphLayout)
   }
 })
 

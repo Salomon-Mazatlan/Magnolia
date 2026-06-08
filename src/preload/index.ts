@@ -47,7 +47,7 @@ const api: ElectronAPI = {
   // main → mainWindow back to the same renderer that hosts the inline
   // builder tab).
   sendQueryToMain: (query, editSavedQueryGuid, graphLayout) => ipcRenderer.send('qb-run-query', query, editSavedQueryGuid, graphLayout),
-  sendPreviewToMain: (query) => ipcRenderer.send('qb-preview-query', query),
+  sendPreviewToMain: (query, graphLayout) => ipcRenderer.send('qb-preview-query', query, graphLayout),
   sendSaveQueryToMain: (query, name, graphLayout, savedGuid) =>
     ipcRenderer.send('qb-save-query', query, name, graphLayout, savedGuid),
   onSaveQueryFromBuilder: (callback) => {
@@ -59,7 +59,7 @@ const api: ElectronAPI = {
     }
   },
   onPreviewFromBuilder: (callback) => {
-    const handler = (_event: any, query: any) => callback(query)
+    const handler = (_event: any, query: any, graphLayout?: any) => callback(query, graphLayout)
     ipcRenderer.on('qb-preview-result', handler)
     return () => {
       ipcRenderer.removeListener('qb-preview-result', handler)

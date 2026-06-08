@@ -1596,9 +1596,9 @@ function App() {
   // Listen for live preview queries from the query builder window
   // Use getState() inside callbacks to avoid re-subscribing on every store change
   useEffect(() => {
-    const unsub = window.api.onPreviewFromBuilder((query) => {
+    const unsub = window.api.onPreviewFromBuilder((query, graphLayout) => {
       if (query) {
-        useQueryStore.getState().setComplexQuery(query)
+        useQueryStore.getState().setComplexQuery(query, graphLayout)
       } else {
         useQueryStore.getState().clearQuery()
       }
@@ -1609,7 +1609,7 @@ function App() {
   // Listen for save-query requests from the query builder window
   useEffect(() => {
     const unsub = window.api.onSaveQueryFromBuilder((query, name, graphLayout, savedGuid) => {
-      useQueryStore.getState().setComplexQuery(query)
+      useQueryStore.getState().setComplexQuery(query, graphLayout)
       // Honour the builder-supplied guid so the builder can flip its
       // own editGuid state in the same render — title-row inline name
       // appears immediately instead of after a re-mount.
@@ -1889,7 +1889,7 @@ function App() {
         setPulsedQueryGuid(editSavedQueryGuid)
         setTimeout(() => setPulsedQueryGuid(null), 1500)
       } else {
-        useQueryStore.getState().setComplexQuery(query)
+        useQueryStore.getState().setComplexQuery(query, graphLayout)
       }
     })
     return unsub

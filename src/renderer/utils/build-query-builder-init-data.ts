@@ -66,6 +66,12 @@ export function buildQueryBuilderInitData(opts?: {
     }
   } else if (opts?.editCurrentQuery && qStore.currentQuery) {
     initData.editQuery = qStore.currentQuery
+    // Restore the authored code graph (when the current query came from
+    // the builder) so reopening doesn't re-derive nodes from the
+    // flattened condition — which would re-expand an "And subcodes"
+    // parent into one node per subcode. The document graph travels
+    // inside editQuery.documentFilter.graph.
+    initData.editGraphLayout = qStore.currentGraphLayout ?? undefined
   }
   ;(initData as any).theme = document.documentElement.getAttribute('data-theme') || ''
   return initData

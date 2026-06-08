@@ -10,13 +10,21 @@ import { makeHmrSafe } from './hmr-preserve'
 
 interface QueryState {
   currentQuery: Query | null
+  /** Code node graph for `currentQuery`, when it was authored in the
+   *  Query Builder. Mirrors the document graph that now rides inside
+   *  `currentQuery.documentFilter.graph`, but the code graph isn't part
+   *  of the Query shape so it's tracked here. Lets "Edit current query"
+   *  reopen the builder from the authored graph rather than re-deriving
+   *  (and expanding "And subcodes") from the flattened condition. Null
+   *  for queries set by drilldowns / Find, which carry no authored graph. */
+  currentGraphLayout: { nodes: any[]; conns: any[] } | null
   results: QueryResult[]
   isActive: boolean
   /** Names of documents referenced by the current query that no longer exist */
   missingDocuments: string[]
   savedQueries: SavedQuery[]
 
-  setComplexQuery: (query: Query) => void
+  setComplexQuery: (query: Query, graphLayout?: { nodes: any[]; conns: any[] }) => void
   clearQuery: () => void
   runQuery: () => void
   /** Persists `currentQuery` as a SavedQuery. The optional `guid` lets
@@ -35,12 +43,13 @@ interface QueryState {
 
 export const useQueryStore = create<QueryState>((set, get) => ({
   currentQuery: null,
+  currentGraphLayout: null,
   results: [],
   isActive: false,
   missingDocuments: [],
   savedQueries: [],
 
-  setComplexQuery: (query) => {
+  setComplexQuery: (query, graphLayout) => {
     const docState = useDocumentStore.getState()
     // Check for missing documents in the query's document filter
     const missing: string[] = []
@@ -59,10 +68,13 @@ export const useQueryStore = create<QueryState>((set, get) => ({
       docState.sourceFolder,
       docState.folders
     )
-    set({ currentQuery: query, isActive: true, results, missingDocuments: missing })
+    // Track the authored code graph alongside the query. Pass null when
+    // no graph is supplied (drilldowns, Find) so "Edit current query"
+    // doesn't restore a stale graph from a previous builder session.
+    set({ currentQuery: query, currentGraphLayout: graphLayout ?? null, isActive: true, results, missingDocuments: missing })
   },
 
-  clearQuery: () => set({ currentQuery: null, results: [], isActive: false, missingDocuments: [] }),
+  clearQuery: () => set({ currentQuery: null, currentGraphLayout: null, results: [], isActive: false, missingDocuments: [] }),
 
   runQuery: () => {
     const { currentQuery } = get()
@@ -144,13 +156,16 @@ export const useQueryStore = create<QueryState>((set, get) => ({
   runSavedQuery: (guid) => {
     const saved = get().savedQueries.find((q) => q.guid === guid)
     if (!saved) return
-    // Use setComplexQuery which handles missing document detection
-    get().setComplexQuery(saved.query)
+    // Use setComplexQuery which handles missing document detection. Carry
+    // the saved code graph through so a later "Edit current query" reopens
+    // from the authored graph, not a re-derived one. The document graph
+    // already rides inside saved.query.documentFilter.graph.
+    get().setComplexQuery(saved.query, saved.graphLayout)
   },
 
   setSavedQueries: (queries) => set({ savedQueries: queries }),
 
-  clearAll: () => set({ currentQuery: null, results: [], isActive: false, savedQueries: [] })
+  clearAll: () => set({ currentQuery: null, currentGraphLayout: null, results: [], isActive: false, savedQueries: [] })
 }))
 
 makeHmrSafe('queryStore', useQueryStore)

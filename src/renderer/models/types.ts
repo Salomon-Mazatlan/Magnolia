@@ -379,6 +379,15 @@ export interface Query {
     tagGuids?: string[]
     tagExcludeGuids?: string[]
     folderGuids?: string[]
+    /** The Document Selector node graph the user authored. This — not the
+     *  flat arrays above — is the source of truth: the arrays are merely
+     *  the graph's *resolved output*. Persisting it lets a reopened query
+     *  rebuild the exact selector (operators and all) instead of
+     *  re-synthesising a lossy one from the resolved doc list (which
+     *  collapses every combiner to a union and re-adds resolved docs as
+     *  explicit nodes). Optional for backward-compat with queries saved
+     *  before this field existed. */
+    graph?: { nodes: any[]; conns: any[] }
   }
   codeCondition: CodeCondition
 }
@@ -472,8 +481,8 @@ export interface ElectronAPI {
   showNewQueryDialog: () => void
   onQueryFromBuilder: (callback: (query: Query, editSavedQueryGuid?: string, graphLayout?: any) => void) => () => void
   sendQueryToMain: (query: Query, editSavedQueryGuid?: string, graphLayout?: any) => void
-  sendPreviewToMain: (query: Query) => void
-  onPreviewFromBuilder: (callback: (query: Query) => void) => () => void
+  sendPreviewToMain: (query: Query, graphLayout?: any) => void
+  onPreviewFromBuilder: (callback: (query: Query, graphLayout?: any) => void) => () => void
   sendSaveQueryToMain: (query: Query, name: string, graphLayout?: any, savedGuid?: string) => void
   onSaveQueryFromBuilder: (callback: (query: Query, name: string, graphLayout?: any, savedGuid?: string) => void) => () => void
   onMenuAction: (callback: (action: string) => void) => () => void
