@@ -87,6 +87,7 @@ import {
   Check,
   User,
   MessageCircleQuestionMark,
+  AppWindow,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -168,3 +169,7 @@ export const faClipboardPen = ClipboardPen
 export const faCheck = Check
 export const faUser = User
 export const faQuestion = MessageCircleQuestionMark
+/** Lucide `app-window` — the Studio toolbar button that reopens
+ *  closed workspace panels. No Font Awesome forebear, so the alias
+ *  reads as the Lucide name. */
+export const faAppWindow = AppWindow

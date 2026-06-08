@@ -70,6 +70,7 @@ import { FindDialog } from './components/Find/FindDialog'
 import { MemosPane } from './components/Memos/MemosPane'
 import { QuotesPane } from './components/Quotes/QuotesPane'
 import { AnalysisPopover } from './components/Toolbar/AnalysisPopover'
+import { StudioPopover } from './components/Toolbar/StudioPopover'
 import { WindowControls } from './components/Toolbar/WindowControls'
 import type { Project, Query, CodeCondition, Code, TextSource, QDASet, LogbookInitData, AnalysisInitData, AnalysisToolType, PlainTextSelection, Memo, MemoEditInitData } from './models/types'
 
@@ -2080,6 +2081,25 @@ function App() {
             justifySelf: 'end' so it hugs the right edge — visually
             balances the wordmark in the left cell. */}
         <div style={{ justifySelf: 'end', display: 'flex', alignItems: 'center', gap: 6, height: '100%' }}>
+        {/* Studio: show/hide the workspace panels. The cross-platform
+            home for the native View menu's panel toggles — on
+            Windows/Linux the frameless window hides the menu bar, so
+            without this a closed panel could never be reopened. Sits in
+            the right cell beside the Licence button. */}
+        <StudioPopover
+          panels={[
+            { id: 'documents', label: 'Documents', visible: panelVisibility.documents },
+            { id: 'codes', label: 'Codes', visible: panelVisibility.codes },
+            { id: 'queries', label: 'Queries', visible: !queryResultsClosed },
+            { id: 'memos', label: 'Memos', visible: panelVisibility.memos },
+            { id: 'quotes', label: 'Quotes', visible: panelVisibility.quotes },
+            { id: 'analyses', label: 'Analyses', visible: panelVisibility.analyses },
+          ]}
+          onToggle={(id) => {
+            if (id === 'queries') setQueryResultsClosed((prev) => !prev)
+            else togglePanel(id as PanelId)
+          }}
+        />
         <button
           className="app-toolbar-btn"
           title="Licence & attributions"

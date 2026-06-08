@@ -428,7 +428,7 @@ html:not([data-theme]) .app-toolbar-btn svg {
  * popover is rendered inside .analysis-popover-anchor (inside the
  * toolbar), so without the exclusion this rule matches the popover
  * tile buttons too, defeating their own theme-scoped hover styling. */
-:root[data-theme="magnolia"] .app-toolbar button:not(.analysis-popover-tile):hover {
+:root[data-theme="magnolia"] .app-toolbar button:not(.analysis-popover-tile):not(.studio-popover-row):hover {
   background: rgba(255, 255, 255, 0.22) !important;
 }
 :root[data-theme="magnolia"] .app-toolbar-btn .toolbar-label {
@@ -573,7 +573,7 @@ html:not([data-theme]) .app-toolbar-btn svg {
  * own theme-scoped hover styling lands instead (otherwise the
  * toolbar rule's higher specificity wins because the popover is
  * rendered inside .app-toolbar via the anchor). */
-:root[data-theme="magnolia-dark"] .app-toolbar button:not(.analysis-popover-tile):hover {
+:root[data-theme="magnolia-dark"] .app-toolbar button:not(.analysis-popover-tile):not(.studio-popover-row):hover {
   background: rgba(255, 255, 255, 0.08) !important;
 }
 
@@ -1368,6 +1368,54 @@ html:not([data-theme]) .app-toolbar {
   font-size: 11px;
   color: var(--text-muted);
   line-height: 1.3;
+}
+
+/* Studio popover — reuses the .analysis-popover container chrome but
+ * presents a single-column checklist of panel toggles rather than the
+ * analysis tile grid, so it's much narrower. */
+.studio-popover {
+  width: 220px;
+}
+.studio-popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.studio-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  background: transparent;
+  font: inherit;
+  color: var(--text-primary);
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+}
+.studio-popover-row:hover,
+.studio-popover-row:focus-visible {
+  background: var(--bg-secondary);
+  border-color: var(--border-color);
+  outline: none;
+}
+/* Fixed-width gutter so labels align whether or not the row is
+ * checked — the checkmark only fills it when the panel is visible. */
+.studio-popover-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex-shrink: 0;
+  color: var(--accent-color, var(--text-primary));
+}
+.studio-popover-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
 }
 
 /* Themed range slider — used by the audio/video volume control. The
