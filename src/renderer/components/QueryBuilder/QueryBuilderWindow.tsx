@@ -24,8 +24,18 @@ function describeDocFilter(
   tags: { guid: string; name: string; value?: string }[]
 ): string {
   const parts: string[] = []
-  if (df.sourceGuids && df.sourceGuids.length > 0) {
-    const names = df.sourceGuids.map((g) => sources.find((s) => s.guid === g)?.name).filter(Boolean) as string[]
+  // Name explicitly-picked documents only — not the full resolved source
+  // list, which for a tag filter is just the tags' output (e.g. naming a
+  // "Female ∩ Domestic" filter shouldn't spell out every matching doc).
+  // When a selector graph is present, take the explicit `docs` nodes; older
+  // queries with no graph fall back to the resolved sourceGuids.
+  const docGuids = df.graph
+    ? (df.graph.nodes as { kind?: string; docGuids?: string[] }[])
+        .filter((n) => n?.kind === 'docs')
+        .flatMap((n) => n.docGuids ?? [])
+    : df.sourceGuids ?? []
+  if (docGuids.length > 0) {
+    const names = docGuids.map((g) => sources.find((s) => s.guid === g)?.name).filter(Boolean) as string[]
     if (names.length > 0) parts.push(names.length <= 2 ? names.join(', ') : `${names.length} docs`)
   }
   if (df.tagGuids && df.tagGuids.length > 0) {

@@ -114,8 +114,18 @@ function describeQuery(
   let name = describeCondition(query.codeCondition, findCode)
   const df = query.documentFilter
   const parts: string[] = []
-  if (df.sourceGuids && df.sourceGuids.length > 0) {
-    const names = df.sourceGuids
+  // Name explicitly-picked documents only — not the full resolved source
+  // list. For a tag-based filter the sourceGuids are just the tags' output,
+  // so naming them duplicates the tags (and bloats the name). Use the
+  // selector graph's explicit `docs` nodes when present; older queries with
+  // no graph fall back to the resolved sourceGuids.
+  const docGuids = (df as { graph?: { nodes: { kind?: string; docGuids?: string[] }[] } }).graph
+    ? (df as { graph: { nodes: { kind?: string; docGuids?: string[] }[] } }).graph.nodes
+        .filter((n) => n?.kind === 'docs')
+        .flatMap((n) => n.docGuids ?? [])
+    : df.sourceGuids ?? []
+  if (docGuids.length > 0) {
+    const names = docGuids
       .map((g) => sources.find((s) => s.guid === g)?.name)
       .filter(Boolean) as string[]
     if (names.length > 0) parts.push(names.length <= 2 ? names.join(', ') : `${names.length} docs`)
