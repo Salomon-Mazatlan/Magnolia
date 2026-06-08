@@ -2,6 +2,20 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0]
+
+### Added
+- **Studio panel toggle** — a new toolbar button to show or hide the workspace panels (Documents, Codes, Queries, Memos, Quotes, Analyses). On Windows and Linux, which have no menu bar, this is now the way to reopen a panel after you close it; it works on macOS too.
+
+### Changed
+- **Cleaner saved-query names.** Auto-suggested names now read like "Choice to study law (incl. subcodes)" and list the tags and documents you actually chose, instead of spelling out every matching subcode and every resolved document.
+- **Live document filters.** Re-running a saved query now re-applies its document filter against your current data, so a query scoped to (say) "Female ∩ Domestic" picks up documents you tag that way later — matching how code filters already behave, and what the in-app live re-run already implied.
+
+### Fixed
+- **Saved queries reopen as you built them.** Reopening a saved query now restores the exact Document Selector and Query Builder you authored, instead of rebuilding a larger, altered version from the query's resolved output. A code with "And subcodes" stays a single ticked node rather than exploding into one node per subcode, and a document filter keeps its operators instead of collapsing to a union of every matched document.
+- **Coding lands on the text you selected.** Applying a code to a selection no longer jumps to a different passage when the cursor passes over a code, memo, or quote label on its way to the codebook.
+- **Stronger protection against data loss when saving.** Project files are now written atomically, so an interrupted save — a crash, or quitting mid-save — can no longer truncate or corrupt your project. Magnolia also refuses to overwrite a project with empty content, and simply opening a project no longer triggers an unnecessary full rewrite.
+
 ## [1.1.0]
 
 ### Added
