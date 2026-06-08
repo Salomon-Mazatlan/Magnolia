@@ -361,6 +361,42 @@ interface CodeInfo {
   parentGuid?: string
 }
 
+/** Detect a saved "And subcodes" expansion: an OR whose members are exactly
+ *  a parent code plus all of its descendant codes. graphToCondition flattens
+ *  an includeSubcodes node into precisely that OR, so a query saved WITHOUT a
+ *  graphLayout (older saves, or saves made from the results-panel "Save
+ *  Query" dialog) has only the expanded OR to rebuild from. Returns the
+ *  parent guid to collapse back to, or null when the OR isn't a clean
+ *  subcode expansion (a genuine multi-code OR, mixed types, etc.). */
+function detectSubcodeExpansion(
+  conditions: CodeCondition[],
+  codeMap: Map<string, CodeInfo>
+): string | null {
+  if (conditions.length < 2) return null
+  if (!conditions.every((c) => c.type === 'code')) return null
+  const guids = new Set((conditions as { type: 'code'; codeGuid: string }[]).map((c) => c.codeGuid))
+  if (guids.size !== conditions.length) return null // duplicate members → not a clean expansion
+  // For each member, compute {itself + all descendants} (matching how
+  // graphToCondition collects them) and see if it equals the member set.
+  for (const parentGuid of guids) {
+    const expected = new Set<string>([parentGuid])
+    const stack = [parentGuid]
+    while (stack.length) {
+      const p = stack.pop()!
+      for (const code of codeMap.values()) {
+        if (code.parentGuid === p && !expected.has(code.guid)) {
+          expected.add(code.guid)
+          stack.push(code.guid)
+        }
+      }
+    }
+    if (expected.size === guids.size && [...expected].every((g) => guids.has(g))) {
+      return parentGuid
+    }
+  }
+  return null
+}
+
 function conditionToGraph(
   cond: CodeCondition,
   codes: CodeInfo[]
@@ -444,6 +480,31 @@ function conditionToGraph(
     }
 
     if (c.type === 'and' || c.type === 'or' || c.type === 'xor') {
+      // Backward-compat: an OR that is exactly a parent code + all its
+      // subcodes is a saved "And subcodes" expansion. Collapse it to one
+      // includeSubcodes node so queries without a graphLayout don't reopen
+      // as one node per subcode. (Newer saves carry a graphLayout, which
+      // takes precedence over this whole reconstruction.)
+      if (c.type === 'or') {
+        const parentGuid = detectSubcodeExpansion(c.conditions, codeMap)
+        if (parentGuid) {
+          const code = codeMap.get(parentGuid)
+          const id = uid()
+          const y = yCursor
+          nodes.push({
+            id,
+            kind: 'code',
+            x: col * COL_W,
+            y,
+            codeGuid: parentGuid,
+            codeName: code?.name || 'Code',
+            codeColor: code?.color,
+            includeSubcodes: true
+          })
+          yCursor += CODE_H + ROW_GAP
+          return { id, yMin: y, yMax: y + CODE_H }
+        }
+      }
       // Flatten: if AND contains NOT children, expand them as separate inputs
       // (the user wires NOT nodes into AND to get AND NOT behavior)
       const directChildren: CodeCondition[] = c.conditions

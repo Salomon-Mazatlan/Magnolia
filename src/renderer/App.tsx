@@ -2383,7 +2383,7 @@ function App() {
                 onChange={(e) => setSaveQueryName(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && saveQueryName.trim()) {
-                    queryStore.saveCurrentQuery(saveQueryName.trim())
+                    queryStore.saveCurrentQuery(saveQueryName.trim(), useQueryStore.getState().currentGraphLayout ?? undefined)
                     setShowSaveQueryDialog(false)
                   }
                 }}
@@ -2399,7 +2399,7 @@ function App() {
               <button
                 onClick={() => {
                   if (saveQueryName.trim()) {
-                    queryStore.saveCurrentQuery(saveQueryName.trim())
+                    queryStore.saveCurrentQuery(saveQueryName.trim(), useQueryStore.getState().currentGraphLayout ?? undefined)
                     setShowSaveQueryDialog(false)
                   }
                 }}
