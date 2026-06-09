@@ -8,6 +8,9 @@ All notable changes to Magnolia are documented here. The format follows [Keep a 
 - **Donut charts in the Survey Overview.** Single-select questions now show a donut chart of the answer distribution alongside the existing percentages, with the option list doubling as a colour-matched legend. The chart is included in the exported PDF too.
 - **Contents page in the survey summary PDF.** The exported PDF now opens with a Contents section mirroring the Survey Overview's question table. Open-ended questions show a "Show answers" link that jumps to that question's responses later in the document, keeping the overview compact.
 
+### Fixed
+- **Coding an open response no longer also codes the next one.** In Respondent and Question mode, selecting a response whose selection ran through the invisible line break at its end would also apply the code to the following response. The selection now stops at the response you actually selected.
+
 ## [1.2.0]
 
 ### Added

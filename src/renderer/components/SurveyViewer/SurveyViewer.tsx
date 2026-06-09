@@ -2055,11 +2055,32 @@ export function SurveyViewer({ source }: Props) {
     const container = containerRef.current
     if (!container) return
     const cellEls = Array.from(container.querySelectorAll<HTMLElement>('[data-survey-cell]'))
+
+    // A selection contained entirely within one cell is handled by
+    // that cell's CodedTextView, which produces a more accurate
+    // (codepoint-based) pending. Defer to it and don't overwrite.
+    if (cellEls.some((el) => el.contains(range.startContainer) && el.contains(range.endContainer))) {
+      return
+    }
+
     const matched: LocalCellPending[] = []
     for (const el of cellEls) {
-      let intersects = false
-      try { intersects = range.intersectsNode(el) } catch { intersects = false }
-      if (!intersects) continue
+      // Exact text-overlap test. `intersectsNode` (and the
+      // contains-based fallback below) also report a hit when the
+      // selection merely *touches* a cell's leading edge — which is
+      // what happens when a drag runs through the invisible line break
+      // at the end of one response: the caret lands at the very start
+      // of the NEXT response. Counting that as overlap pulled the
+      // neighbouring cell into `matched` and coded it too. Comparing
+      // boundary points instead is exact and treats a zero-length
+      // boundary touch as no overlap.
+      const cellRange = document.createRange()
+      cellRange.selectNodeContents(el)
+      // Selection ends at or before this cell's content begins.
+      if (range.compareBoundaryPoints(Range.START_TO_END, cellRange) <= 0) continue
+      // Selection starts at or after this cell's content ends.
+      if (range.compareBoundaryPoints(Range.END_TO_START, cellRange) >= 0) continue
+
       const [respondentId, questionId] = (el.getAttribute('data-survey-cell') || '').split(':')
       if (!respondentId || !questionId) continue
       const cellText = el.textContent || ''
@@ -2086,10 +2107,12 @@ export function SurveyViewer({ source }: Props) {
         selectedText: cellText.slice(start, end)
       })
     }
-    // Only overwrite when the gesture really spanned multiple cells.
-    // For single-cell drags, CodedTextView's onTextSelected has
-    // already produced a more accurate (codepoint-based) pending.
-    if (matched.length >= 2) {
+    // Adopt the cross-cell result. This path is only reached when no
+    // single cell held the whole selection, so even a length-1 result
+    // (a single response selected up to and past its trailing line
+    // break, where CodedTextView can't resolve the spilled endpoint)
+    // belongs here rather than to CodedTextView.
+    if (matched.length >= 1) {
       setPending({ cells: matched })
     }
   }, [])
