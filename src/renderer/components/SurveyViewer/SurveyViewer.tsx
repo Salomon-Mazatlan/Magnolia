@@ -636,18 +636,23 @@ function NavHeading({
 function OptionListCell({
   options,
   chosen,
-  compact = false
+  compact = false,
+  showSwatches = false
 }: {
   options: OptionTally[]
   chosen: Set<string>
   compact?: boolean
+  /** When set, the reserved left column shows a colour swatch per
+   *  option (matching DonutChart's `segmentColor(index)`) instead of
+   *  staying blank, so the list doubles as the donut's legend. */
+  showSwatches?: boolean
 }) {
   if (options.length === 0) {
     return <div style={emptyAnswerStyle}>(no responses)</div>
   }
   return (
     <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 12px 0', userSelect: 'none' }}>
-      {options.map((d) => {
+      {options.map((d, i) => {
         const isChosen = chosen.has(clean(d.option))
         return (
           <li
@@ -676,7 +681,19 @@ function OptionListCell({
                 color: 'var(--accent)'
               }}
             >
-              {isChosen && <Icon icon={faCheck} style={{ fontSize: 12 }} />}
+              {isChosen ? (
+                <Icon icon={faCheck} style={{ fontSize: 12 }} />
+              ) : showSwatches ? (
+                <span
+                  style={{
+                    width: 9,
+                    height: 9,
+                    borderRadius: 2,
+                    background: segmentColor(i),
+                    display: 'inline-block'
+                  }}
+                />
+              ) : null}
             </span>
             <span style={{ flex: 1 }}>{d.displayOption ?? d.option}</span>
             <span style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', minWidth: 40, textAlign: 'right' }}>
@@ -686,6 +703,82 @@ function OptionListCell({
         )
       })}
     </ul>
+  )
+}
+
+/** Categorical palette for donut segments (and the matching list
+ *  swatches). Apple system colours, picked to stay distinguishable
+ *  on both light and dark themes; cycles if a question has more
+ *  options than colours. Kept fixed rather than derived from
+ *  --accent so segments don't all collapse to one hue. */
+const SEGMENT_PALETTE = [
+  '#007AFF', '#34c759', '#ff9500', '#af52de', '#ff2d55',
+  '#5ac8fa', '#ffcc00', '#5856d6', '#30b0c7', '#a2845e'
+]
+
+function segmentColor(index: number): string {
+  return SEGMENT_PALETTE[index % SEGMENT_PALETTE.length]
+}
+
+/** Donut chart of a single-choice answer distribution. Segments are
+ *  drawn with the stroke-dasharray ring trick (one <circle> per
+ *  option) rather than arc paths, so the geometry stays trivial.
+ *  Colours come from `segmentColor(index)`, matching the swatches an
+ *  OptionListCell renders when `showSwatches` is set — the two read
+ *  as one chart + legend. Returns null when there are no responses
+ *  (the sibling OptionListCell already shows "(no responses)"). */
+function DonutChart({
+  options,
+  size = 72,
+  thickness = 14
+}: {
+  options: OptionTally[]
+  size?: number
+  thickness?: number
+}) {
+  const total = options.reduce((sum, d) => sum + d.count, 0)
+  if (total === 0) return null
+  const cx = size / 2
+  const cy = size / 2
+  const radius = (size - thickness) / 2
+  const circ = 2 * Math.PI * radius
+  let offset = 0
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      style={{ flexShrink: 0, marginTop: 6 }}
+      role="img"
+      aria-label="Answer distribution"
+    >
+      {/* Track behind the segments so sub-pixel rounding between
+          slices never reads as a gap in the ring. */}
+      <circle cx={cx} cy={cy} r={radius} fill="none" stroke="var(--bg-tertiary)" strokeWidth={thickness} />
+      {/* Rotate so the first segment starts at 12 o'clock. */}
+      <g transform={`rotate(-90 ${cx} ${cy})`}>
+        {options.map((d, i) => {
+          const dash = (d.count / total) * circ
+          const seg = (
+            <circle
+              key={d.option}
+              cx={cx}
+              cy={cy}
+              r={radius}
+              fill="none"
+              stroke={segmentColor(i)}
+              strokeWidth={thickness}
+              strokeDasharray={`${dash} ${circ - dash}`}
+              strokeDashoffset={-offset}
+            >
+              <title>{`${d.displayOption ?? d.option}: ${formatPct(d.pct)} (${d.count})`}</title>
+            </circle>
+          )
+          offset += dash
+          return seg
+        })}
+      </g>
+    </svg>
   )
 }
 
@@ -1287,18 +1380,59 @@ function questionAnsweredCount(q: SurveyQuestion, respondents: SurveyRespondent[
 /** Bullet list of options + percentages, for single-choice and
  *  multi-select questions. `displayOption` (set by
  *  computeSingleChoiceDistribution for rating-scale options) wins
- *  over the canonical option text when present. */
-function pdfOptionListHtml(options: OptionTally[]): string {
+ *  over the canonical option text when present. When `withSwatches`
+ *  is set, each row leads with a colour chip matching the donut's
+ *  `segmentColor(index)` — mirroring the on-screen single-choice
+ *  layout where the list is the donut's legend. */
+function pdfOptionListHtml(options: OptionTally[], withSwatches = false): string {
   if (options.length === 0) return '<div class="empty">(no responses)</div>'
   return (
     '<ul class="options">' +
     options
-      .map((d) => {
+      .map((d, i) => {
         const label = d.displayOption ?? d.option
-        return `<li><span class="opt-label">${escHtml(label)}</span><span class="opt-pct">${formatPct(d.pct)}</span></li>`
+        const swatch = withSwatches
+          ? `<span class="opt-swatch" style="background:${segmentColor(i)}"></span>`
+          : ''
+        return `<li>${swatch}<span class="opt-label">${escHtml(label)}</span><span class="opt-pct">${formatPct(d.pct)}</span></li>`
       })
       .join('') +
     '</ul>'
+  )
+}
+
+/** Inline SVG donut mirroring the on-screen DonutChart, for a
+ *  single-choice distribution. Uses the same stroke-dasharray ring
+ *  trick and the same fixed `segmentColor` palette (already hex, so
+ *  it survives the CSS-variable-less print window). Returns '' when
+ *  there are no responses — the sibling option list then carries the
+ *  "(no responses)" message on its own. */
+function pdfDonutHtml(options: OptionTally[], size = 64, thickness = 13): string {
+  const total = options.reduce((sum, d) => sum + d.count, 0)
+  if (total === 0) return ''
+  const cx = size / 2
+  const cy = size / 2
+  const radius = (size - thickness) / 2
+  const circ = 2 * Math.PI * radius
+  let offset = 0
+  const segments = options
+    .map((d, i) => {
+      const dash = (d.count / total) * circ
+      // rotate -90 (about the centre) starts the first slice at 12
+      // o'clock, matching the on-screen chart.
+      const seg =
+        `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${segmentColor(i)}" ` +
+        `stroke-width="${thickness}" stroke-dasharray="${dash} ${circ - dash}" ` +
+        `stroke-dashoffset="${-offset}" transform="rotate(-90 ${cx} ${cy})"/>`
+      offset += dash
+      return seg
+    })
+    .join('')
+  return (
+    `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">` +
+    `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="#eee" stroke-width="${thickness}"/>` +
+    segments +
+    `</svg>`
   )
 }
 
@@ -1388,7 +1522,12 @@ function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string
       if (q.type === 'numeric') {
         dist = pdfNumericBoxPlotHtml(computeNumericStats(survey, q), computeValueLabels(survey, q))
       } else if (q.type === 'single-choice') {
-        dist = pdfOptionListHtml(computeSingleChoiceDistribution(survey, q))
+        // Donut on the left, the option list (with matching colour
+        // swatches) as its legend on the right — mirrors SummaryView.
+        const optDist = computeSingleChoiceDistribution(survey, q)
+        dist =
+          `<div class="dist-single">${pdfDonutHtml(optDist)}` +
+          `<div class="dist-legend">${pdfOptionListHtml(optDist, true)}</div></div>`
       } else if (q.type === 'multi-select') {
         dist = pdfOptionListHtml(computeMultiSelectDistribution(survey, q))
       } else {
@@ -1465,6 +1604,9 @@ function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string
   ul.options li { display: flex; align-items: center; gap: 6px; padding: 1px 0; font-size: 11px; color: #333; }
   ul.options li .opt-label { flex: 1; }
   ul.options li .opt-pct { color: #888; font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; font-size: 10px; }
+  ul.options li .opt-swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; display: inline-block; }
+  .dist-single { display: flex; align-items: flex-start; gap: 12px; }
+  .dist-single .dist-legend { flex: 1; min-width: 0; }
   ul.answers { list-style: none; padding: 0; margin: 0; }
   ul.answers li { padding: 3px 0; font-size: 10.5px; line-height: 1.45; color: #222; }
   ul.answers li .who { font-weight: 600; color: #444; margin-right: 2px; }
@@ -1574,6 +1716,16 @@ function SummaryView({
                   <td style={{ ...summaryTdStyle, verticalAlign: 'top' }}>
                     {q.type === 'numeric' ? (
                       <NumericBoxPlot stats={numericStats} valueLabels={valueLabels} />
+                    ) : q.type === 'single-choice' && optionDist ? (
+                      // Single-select: donut on the left, the option
+                      // list (with matching colour swatches) doubling
+                      // as its legend on the right.
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                        <DonutChart options={optionDist} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <OptionListCell options={optionDist} chosen={new Set()} compact showSwatches />
+                        </div>
+                      </div>
                     ) : optionDist ? (
                       <OptionListCell options={optionDist} chosen={new Set()} compact />
                     ) : (
