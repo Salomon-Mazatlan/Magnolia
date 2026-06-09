@@ -1514,36 +1514,61 @@ function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string
   const totalQuestions = survey.questions.length
   const now = new Date().toLocaleString()
 
-  const questionsRows = survey.questions
-    .map((q, i) => {
-      const answered = questionAnsweredCount(q, survey.respondents)
-      const pct = totalRespondents === 0 ? 0 : Math.round((answered / totalRespondents) * 100)
-      let dist = ''
-      if (q.type === 'numeric') {
-        dist = pdfNumericBoxPlotHtml(computeNumericStats(survey, q), computeValueLabels(survey, q))
-      } else if (q.type === 'single-choice') {
-        // Donut on the left, the option list (with matching colour
-        // swatches) as its legend on the right — mirrors SummaryView.
-        const optDist = computeSingleChoiceDistribution(survey, q)
-        dist =
-          `<div class="dist-single">${pdfDonutHtml(optDist)}` +
-          `<div class="dist-legend">${pdfOptionListHtml(optDist, true)}</div></div>`
-      } else if (q.type === 'multi-select') {
-        dist = pdfOptionListHtml(computeMultiSelectDistribution(survey, q))
-      } else {
-        // 'open-ended'
-        dist = pdfOpenEndedAnswersHtml(survey, q)
+  // Inline distribution cell for a closed-question type (donut /
+  // option list / box plot). Shared by the Contents overview and the
+  // detailed Questions section so both render distributions
+  // identically. Open-ended questions are handled separately.
+  const closedDistHtml = (q: SurveyQuestion): string => {
+    if (q.type === 'numeric') {
+      return pdfNumericBoxPlotHtml(computeNumericStats(survey, q), computeValueLabels(survey, q))
+    }
+    if (q.type === 'single-choice') {
+      // Donut on the left, the option list (with matching colour
+      // swatches) as its legend on the right — mirrors SummaryView.
+      const optDist = computeSingleChoiceDistribution(survey, q)
+      return (
+        `<div class="dist-single">${pdfDonutHtml(optDist)}` +
+        `<div class="dist-legend">${pdfOptionListHtml(optDist, true)}</div></div>`
+      )
+    }
+    if (q.type === 'multi-select') {
+      return pdfOptionListHtml(computeMultiSelectDistribution(survey, q))
+    }
+    return ''
+  }
+
+  // Renders one question's table row(s). Both the Contents overview
+  // and the detailed Questions section share the #/Question/Answered
+  // cells and the closed-question distributions; they differ only for
+  // open-ended questions:
+  //   - 'contents' shows a "Show answers" hyperlink jumping to the
+  //     detailed section (anchor #oe-ans-<i>), mirroring the on-screen
+  //     Survey Overview where the answers aren't inlined.
+  //   - 'detail' inlines the answers in a full-width row spanning
+  //     Question→Distribution (the hyperlink's destination), anchored
+  //     on the question's header row.
+  const renderQuestionRow = (q: SurveyQuestion, i: number, mode: 'contents' | 'detail'): string => {
+    const answered = questionAnsweredCount(q, survey.respondents)
+    const pct = totalRespondents === 0 ? 0 : Math.round((answered / totalRespondents) * 100)
+    const headCells =
+      `<td class="num">${i + 1}</td>` +
+      `<td>${escHtml(clean(q.text))}</td>` +
+      `<td class="num">${answered} / ${totalRespondents} (${pct}%)</td>`
+
+    if (q.type === 'open-ended') {
+      if (mode === 'contents') {
+        return `<tr>${headCells}<td><a class="show-answers" href="#oe-ans-${i}">Show answers →</a></td></tr>`
       }
       return (
-        `<tr>` +
-        `<td class="num">${i + 1}</td>` +
-        `<td>${escHtml(clean(q.text))}</td>` +
-        `<td class="num">${answered} / ${totalRespondents} (${pct}%)</td>` +
-        `<td>${dist}</td>` +
-        `</tr>`
+        `<tr class="oe-head" id="oe-ans-${i}">${headCells}<td></td></tr>` +
+        `<tr class="oe-answers"><td></td><td colspan="3">${pdfOpenEndedAnswersHtml(survey, q)}</td></tr>`
       )
-    })
-    .join('')
+    }
+    return `<tr>${headCells}<td>${closedDistHtml(q)}</td></tr>`
+  }
+
+  const contentsRows = survey.questions.map((q, i) => renderQuestionRow(q, i, 'contents')).join('')
+  const questionsRows = survey.questions.map((q, i) => renderQuestionRow(q, i, 'detail')).join('')
 
   const respondentsRows = survey.respondents
     .map((r, i) => {
@@ -1570,7 +1595,16 @@ function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string
     `${totalQuestions} question${totalQuestions === 1 ? '' : 's'} — ` +
     `exported ${escHtml(now)}`
 
-  const body = `<div class="section-heading">Questions</div>
+  const body = `<div class="section-heading">Contents</div>
+<table>
+  <colgroup>
+    <col class="c-num"><col><col class="c-answered"><col class="c-distribution">
+  </colgroup>
+  <thead><tr><th>#</th><th>Question</th><th>Answered</th><th>Distribution</th></tr></thead>
+  <tbody>${contentsRows}</tbody>
+</table>
+
+<div class="section-heading section-break">Questions</div>
 <table>
   <colgroup>
     <col class="c-num"><col><col class="c-answered"><col class="c-distribution">
@@ -1588,11 +1622,11 @@ function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string
   <tbody>${respondentsRows}</tbody>
 </table>`
 
-  // Survey-only CSS: fixed column widths for the Questions and
+  // Survey-only CSS: fixed column widths for the Contents and
   // Respondents tables, plus the option-list / answer-list / numeric
-  // box plot styling. Everything else (body typography, h1, table
-  // base, .section-heading, .empty, etc.) is provided by
-  // buildPdfDocument's base CSS.
+  // box plot / open-ended-response styling. Everything else (body
+  // typography, h1, table base, .section-heading, .empty, etc.) is
+  // provided by buildPdfDocument's base CSS.
   const extraCss = `
   table { table-layout: fixed; }
   col.c-num { width: 28px; }
@@ -1607,6 +1641,19 @@ function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string
   ul.options li .opt-swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; display: inline-block; }
   .dist-single { display: flex; align-items: flex-start; gap: 12px; }
   .dist-single .dist-legend { flex: 1; min-width: 0; }
+  /* Contents "Show answers" link → jumps to the question's answers in
+     the detailed Questions section. Print blue, no underline to match
+     the on-screen link. */
+  a.show-answers { color: #1155cc; text-decoration: none; }
+  /* The detailed Questions section starts on a fresh page so Contents
+     reads as front matter. */
+  .section-break { page-break-before: always; }
+  /* Open-ended (detailed section): header row joins seamlessly to its
+     full-width answers row (no divider between them), and the answers
+     row may break across pages so long lists aren't forced onto a
+     fresh page by the table's default break-inside:avoid. */
+  tr.oe-head td { border-bottom: none; }
+  tr.oe-answers { break-inside: auto; page-break-inside: auto; }
   ul.answers { list-style: none; padding: 0; margin: 0; }
   ul.answers li { padding: 3px 0; font-size: 10.5px; line-height: 1.45; color: #222; }
   ul.answers li .who { font-weight: 600; color: #444; margin-right: 2px; }
