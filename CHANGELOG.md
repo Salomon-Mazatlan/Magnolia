@@ -2,6 +2,12 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.0]
+
+### Added
+- **Donut charts in the Survey Overview.** Single-select questions now show a donut chart of the answer distribution alongside the existing percentages, with the option list doubling as a colour-matched legend. The chart is included in the exported PDF too.
+- **Contents page in the survey summary PDF.** The exported PDF now opens with a Contents section mirroring the Survey Overview's question table. Open-ended questions show a "Show answers" link that jumps to that question's responses later in the document, keeping the overview compact.
+
 ## [1.2.0]
 
 ### Added
