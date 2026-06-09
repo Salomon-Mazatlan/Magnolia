@@ -7,7 +7,7 @@ import {
   emptyDocumentFilter,
   type DocumentFilterState
 } from '../DocumentSelector/DocumentSelector'
-import { truncate, countCoOccurrences, toCsv, resolveFilteredSources, applySurveyCellScope } from './analysis-helpers'
+import { truncate, countCoOccurrences, toCsv, resolveFilteredSources, applySurveyCellScope, binarizeGrid } from './analysis-helpers'
 import { generateGuid } from '../../utils/guid'
 import { useLiveAnalysisData } from './use-live-analysis-data'
 import { EditableTitleSuffix } from '../EditableTitleSuffix'
@@ -99,6 +99,7 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
   const live = useLiveAnalysisData()
   const data = useMemo(() => applySurveyCellScope({ ...propData, ...live }, docFilter), [propData, live, docFilter])
   const [visualMode, setVisualMode] = useState(false)
+  const [binaryMode, setBinaryMode] = useState(false)
   const [docSectionOpen, setDocSectionOpen] = useState(false)
   const [analysisGuid] = useState(savedConfig?.guid ?? generateGuid())
   const [analysisName, setAnalysisName] = useState(savedConfig?.name ?? '')
@@ -159,6 +160,24 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
   const grandTotal = useMemo(() => rowTotals.reduce((a, b) => a + b, 0), [rowTotals])
   const maxVal = useMemo(() => Math.max(1, ...matrix.flat()), [matrix])
 
+  // Binary (incidence) view: each cell shows 1 if the codes co-occur
+  // at all, else 0; the margins re-sum those 0/1s so a total reads as
+  // "co-occurs with N codes". Recomputed with the same reducers as the
+  // count totals above, just on the binarised grid.
+  const binaryMatrix = useMemo(() => binarizeGrid(matrix), [matrix])
+  const binaryRowTotals = useMemo(() => binaryMatrix.map((row) => row.reduce((a, b) => a + b, 0)), [binaryMatrix])
+  const binaryColTotals = useMemo(
+    () => (binaryMatrix.length === 0 ? colCodeGuids.map(() => 0) : colCodeGuids.map((_, j) => binaryMatrix.reduce((sum, row) => sum + row[j], 0))),
+    [binaryMatrix, colCodeGuids]
+  )
+  const binaryGrandTotal = useMemo(() => binaryRowTotals.reduce((a, b) => a + b, 0), [binaryRowTotals])
+
+  const showMatrix = binaryMode ? binaryMatrix : matrix
+  const showRowTotals = binaryMode ? binaryRowTotals : rowTotals
+  const showColTotals = binaryMode ? binaryColTotals : colTotals
+  const showGrandTotal = binaryMode ? binaryGrandTotal : grandTotal
+  const showMaxVal = binaryMode ? 1 : maxVal
+
   const handleGridDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     const guids = parseDraggedCodes(e)
@@ -202,11 +221,11 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
     const rowNames = rowCodeGuids.map((g) => codeMap.get(g)?.name || 'Code')
     const rows: string[][] = [['', ...colNames, 'Total']]
     for (let i = 0; i < rowCodeGuids.length; i++) {
-      rows.push([rowNames[i], ...matrix[i].map(String), String(rowTotals[i])])
+      rows.push([rowNames[i], ...showMatrix[i].map(String), String(showRowTotals[i])])
     }
-    rows.push(['Total', ...colTotals.map(String), String(grandTotal)])
+    rows.push(['Total', ...showColTotals.map(String), String(showGrandTotal)])
     window.api.exportCsv(toCsv(rows), 'code-cooccurrences.csv')
-  }, [rowCodeGuids, colCodeGuids, matrix, codeMap, rowTotals, colTotals, grandTotal])
+  }, [rowCodeGuids, colCodeGuids, showMatrix, codeMap, showRowTotals, showColTotals, showGrandTotal])
 
   const handleRename = useCallback((newName: string) => {
     setAnalysisName(newName)
@@ -343,6 +362,9 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
               <button className="secondary" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => setVisualMode(!visualMode)}>
                 {visualMode ? 'Numeric' : 'Visual'}
               </button>
+              <button className="secondary" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => setBinaryMode(!binaryMode)} title="Show each cell as 1 (codes co-occur) or 0 (they don't); totals count the cells.">
+                {binaryMode ? 'Counts' : 'Binary'}
+              </button>
               <button className="secondary" style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleExportCsv} disabled={!hasAnyCodes}>
                 Export CSV
               </button>
@@ -403,9 +425,9 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
                         <span onClick={() => setRowCodeGuids((p) => p.filter((x) => x !== rowGuid))} style={{ marginLeft: 4, fontSize: 9, color: 'var(--text-muted)', cursor: 'pointer' }}>x</span>
                       </td>
                       {colCodeGuids.map((colGuid, j) => {
-                        const val = matrix[i][j]
+                        const val = showMatrix[i][j]
                         const isSame = rowGuid === colGuid
-                        const ratio = val > 0 ? val / maxVal : 0
+                        const ratio = val > 0 ? val / showMaxVal : 0
                         // Max box size = cell height (32) − vertical
                         // padding (2 × 4 px), with a small breathing
                         // gap so visual-mode rows match numeric-mode
@@ -444,11 +466,11 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
                         borderLeft: '2px solid var(--border-color)',
                         textAlign: 'center',
                         fontWeight: 700,
-                        cursor: rowTotals[i] > 0 ? 'pointer' : 'default',
-                        color: rowTotals[i] === 0 ? 'var(--text-muted)' : undefined,
-                        opacity: rowTotals[i] === 0 ? 0.4 : 1
+                        cursor: showRowTotals[i] > 0 ? 'pointer' : 'default',
+                        color: showRowTotals[i] === 0 ? 'var(--text-muted)' : undefined,
+                        opacity: showRowTotals[i] === 0 ? 0.4 : 1
                       }}>
-                        {rowTotals[i]}
+                        {showRowTotals[i]}
                       </td>
                     </tr>
                     )
@@ -456,7 +478,7 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
                   {/* Total row */}
                   <tr>
                     <td style={{ padding: '4px 6px', borderTop: '2px solid var(--border-color)', fontWeight: 700 }}>Total</td>
-                    {colTotals.map((ct, j) => (
+                    {showColTotals.map((ct, j) => (
                       <td key={colCodeGuids[j]} onClick={() => handleColTotalClick(j)} style={{
                         width: 50, minWidth: 50, maxWidth: 50, height: 32,
                         borderTop: '2px solid var(--border-color)',
@@ -475,11 +497,11 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
                       borderLeft: '2px solid var(--border-color)',
                       textAlign: 'center',
                       fontWeight: 700,
-                      cursor: grandTotal > 0 ? 'pointer' : 'default',
-                      color: grandTotal === 0 ? 'var(--text-muted)' : undefined,
-                      opacity: grandTotal === 0 ? 0.4 : 1
+                      cursor: showGrandTotal > 0 ? 'pointer' : 'default',
+                      color: showGrandTotal === 0 ? 'var(--text-muted)' : undefined,
+                      opacity: showGrandTotal === 0 ? 0.4 : 1
                     }}>
-                      {grandTotal}
+                      {showGrandTotal}
                     </td>
                   </tr>
                 </tbody>

@@ -194,6 +194,14 @@ export function codeFrequencyInSource(
   return (covered / totalCp) * 100
 }
 
+/** Binary (incidence) view of a numeric grid: every cell becomes 1 if
+ *  it has any hits (>= 1) or 0 otherwise. Used by the analysis tables'
+ *  "Binary" toggle; row/column margins are then re-summed from the
+ *  result so a total reads as "present in N cells". */
+export function binarizeGrid(grid: number[][]): number[][] {
+  return grid.map((row) => row.map((v) => (v >= 1 ? 1 : 0)))
+}
+
 /** Generate CSV from a 2D string array */
 export function toCsv(rows: string[][]): string {
   return rows

@@ -3,7 +3,7 @@ import type { AnalysisInitData, Query, QueryResult } from '../../models/types'
 import { Icon, faFileSearchCorner, faChevronDown, faChevronRight, faXmark, faFolder, faTag, faTags } from '../Icon'
 import { toolColors } from '../../utils/tool-colors'
 import { executeQuery } from '../../utils/query-engine'
-import { truncate, toCsv } from './analysis-helpers'
+import { truncate, toCsv, binarizeGrid } from './analysis-helpers'
 import { generateGuid } from '../../utils/guid'
 import { parseGroupByDrop } from './group-by'
 import { useLiveAnalysisData } from './use-live-analysis-data'
@@ -73,6 +73,7 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
     return []
   })
   const [visualMode, setVisualMode] = useState(false)
+  const [binaryMode, setBinaryMode] = useState(false)
   const [dropOver, setDropOver] = useState(false)
   const [tagDropOver, setTagDropOver] = useState(false)
   const [analysisGuid] = useState(savedConfig?.guid ?? generateGuid())
@@ -343,6 +344,28 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
     return m
   }, [grid, columns])
 
+  // Binary (incidence) view: each cell shows 1 if the query returned
+  // any hits in that document/group, else 0; the margins re-sum those
+  // 0/1s (so a query total reads as "matched in N documents").
+  // Recomputed with the same reducers as the count totals above —
+  // including the subtotal-column exclusion from row totals.
+  const binaryGrid = useMemo(() => binarizeGrid(grid), [grid])
+  const binaryRowTotals = useMemo(
+    () => binaryGrid.map((row) => row.reduce((sum, val, j) => (columns[j].isSubtotal ? sum : sum + val), 0)),
+    [binaryGrid, columns]
+  )
+  const binaryColTotals = useMemo(
+    () => (binaryGrid.length === 0 ? columns.map(() => 0) : columns.map((_, j) => binaryGrid.reduce((sum, row) => sum + row[j], 0))),
+    [binaryGrid, columns]
+  )
+  const binaryGrandTotal = useMemo(() => binaryRowTotals.reduce((a, b) => a + b, 0), [binaryRowTotals])
+
+  const showGrid = binaryMode ? binaryGrid : grid
+  const showRowTotals = binaryMode ? binaryRowTotals : rowTotals
+  const showColTotals = binaryMode ? binaryColTotals : colTotals
+  const showGrandTotal = binaryMode ? binaryGrandTotal : grandTotal
+  const showMaxVal = binaryMode ? 1 : maxVal
+
   // Per-row metadata for the flipped table layout. Each entry mirrors a
   // column-spec but tells the renderer whether to draw the spanning
   // category-name cell on the left for that row (only for the first row
@@ -435,16 +458,16 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
       const row: string[] = []
       if (hasGroupedHeader) row.push(layout.groupLabel ?? '')
       row.push(col.label)
-      for (let i = 0; i < queryGuids.length; i++) row.push(String(grid[i][j]))
-      row.push(String(colTotals[j]))
+      for (let i = 0; i < queryGuids.length; i++) row.push(String(showGrid[i][j]))
+      row.push(String(showColTotals[j]))
       rows.push(row)
     }
     const totalRow: string[] = []
     if (hasGroupedHeader) totalRow.push('')
-    totalRow.push('Total', ...rowTotals.map(String), String(grandTotal))
+    totalRow.push('Total', ...showRowTotals.map(String), String(showGrandTotal))
     rows.push(totalRow)
     window.api.exportCsv(toCsv(rows), 'results-in-documents.csv')
-  }, [columns, rowLayout, queryGuids, grid, queryMap, rowTotals, colTotals, grandTotal, hasGroupedHeader])
+  }, [columns, rowLayout, queryGuids, showGrid, queryMap, showRowTotals, showColTotals, showGrandTotal, hasGroupedHeader])
 
   const groupKey = (e: GroupByEntry): string =>
     e.kind === 'tag' ? `t:${e.tagGuid}`
@@ -689,6 +712,9 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
               <button className="secondary" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => setVisualMode(!visualMode)}>
                 {visualMode ? 'Numeric' : 'Visual'}
               </button>
+              <button className="secondary" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => setBinaryMode(!binaryMode)} title="Show each cell as 1 (query matched) or 0 (no match); totals count the cells.">
+                {binaryMode ? 'Counts' : 'Binary'}
+              </button>
               <button className="secondary" style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleExportCsv} disabled={queryGuids.length === 0}>
                 Export CSV
               </button>
@@ -844,13 +870,13 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
                         )}
                         {/* One cell per query column */}
                         {queryGuids.map((qGuid, i) => {
-                          const val = grid[i][j]
+                          const val = showGrid[i][j]
                           // Clamp the ratio at 1: subtotal cells exceed
                           // maxVal (which deliberately excludes subtotals
                           // so the heatmap isn't dominated by them), and
                           // an unclamped ratio would push the box past
                           // the cell height and stretch the row.
-                          const ratio = val > 0 ? Math.min(1, val / maxVal) : 0
+                          const ratio = val > 0 ? Math.min(1, val / showMaxVal) : 0
                           // Max box size = cell height (32) − vertical
                           // padding (2 × 4 px), with a small breathing
                           // gap so visual-mode rows match numeric-mode
@@ -893,11 +919,11 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
                           background: col.isSubtotal ? 'color-mix(in srgb, var(--text-secondary) 6%, transparent)' : undefined,
                           textAlign: 'center',
                           fontWeight: 700,
-                          cursor: colTotals[j] > 0 ? 'pointer' : 'default',
-                          color: colTotals[j] === 0 ? 'var(--text-muted)' : undefined,
-                          opacity: colTotals[j] === 0 ? 0.4 : 1
+                          cursor: showColTotals[j] > 0 ? 'pointer' : 'default',
+                          color: showColTotals[j] === 0 ? 'var(--text-muted)' : undefined,
+                          opacity: showColTotals[j] === 0 ? 0.4 : 1
                         }}>
-                          {colTotals[j]}
+                          {showColTotals[j]}
                         </td>
                       </tr>
                     )
@@ -910,7 +936,7 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
                     >
                       Total
                     </td>
-                    {rowTotals.map((rt, i) => (
+                    {showRowTotals.map((rt, i) => (
                       <td key={queryGuids[i]} onClick={() => handleRowTotalClick(i)} style={{
                         width: 50, minWidth: 50, maxWidth: 50, height: 32,
                         borderTop: '2px solid var(--border-color)',
@@ -929,11 +955,11 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
                       borderLeft: '2px solid var(--border-color)',
                       textAlign: 'center',
                       fontWeight: 700,
-                      cursor: grandTotal > 0 ? 'pointer' : 'default',
-                      color: grandTotal === 0 ? 'var(--text-muted)' : undefined,
-                      opacity: grandTotal === 0 ? 0.4 : 1
+                      cursor: showGrandTotal > 0 ? 'pointer' : 'default',
+                      color: showGrandTotal === 0 ? 'var(--text-muted)' : undefined,
+                      opacity: showGrandTotal === 0 ? 0.4 : 1
                     }}>
-                      {grandTotal}
+                      {showGrandTotal}
                     </td>
                   </tr>
                 </tbody>

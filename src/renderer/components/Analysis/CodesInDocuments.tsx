@@ -7,7 +7,7 @@ import {
   emptyDocumentFilter,
   type DocumentFilterState
 } from '../DocumentSelector/DocumentSelector'
-import { truncate, countCodeInSource, toCsv, resolveFilteredSources, applySurveyCellScope, tagColumnSources } from './analysis-helpers'
+import { truncate, countCodeInSource, toCsv, resolveFilteredSources, applySurveyCellScope, tagColumnSources, binarizeGrid } from './analysis-helpers'
 import { generateGuid } from '../../utils/guid'
 import {
   type GroupByEntry,
@@ -73,6 +73,7 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
   const live = useLiveAnalysisData()
   const data = useMemo(() => applySurveyCellScope({ ...propData, ...live }, docFilter), [propData, live, docFilter])
   const [visualMode, setVisualMode] = useState(false)
+  const [binaryMode, setBinaryMode] = useState(false)
   const [docSectionOpen, setDocSectionOpen] = useState(false)
   const [dropOver, setDropOver] = useState(false)
   const [tagDropOver, setTagDropOver] = useState(false)
@@ -234,6 +235,28 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
     return m
   }, [grid, columns])
 
+  // Binary (incidence) view: each cell shows 1 if the code occurs at
+  // all in that document/group, else 0; the margins re-sum those 0/1s
+  // (so a row total reads as "present in N documents"). Recomputed
+  // with the same reducers as the count totals above — including the
+  // subtotal-column exclusion from row totals — on the binarised grid.
+  const binaryGrid = useMemo(() => binarizeGrid(grid), [grid])
+  const binaryRowTotals = useMemo(
+    () => binaryGrid.map((row) => row.reduce((sum, val, j) => (columns[j].isSubtotal ? sum : sum + val), 0)),
+    [binaryGrid, columns]
+  )
+  const binaryColTotals = useMemo(
+    () => (binaryGrid.length === 0 ? columns.map(() => 0) : columns.map((_, j) => binaryGrid.reduce((sum, row) => sum + row[j], 0))),
+    [binaryGrid, columns]
+  )
+  const binaryGrandTotal = useMemo(() => binaryRowTotals.reduce((a, b) => a + b, 0), [binaryRowTotals])
+
+  const showGrid = binaryMode ? binaryGrid : grid
+  const showRowTotals = binaryMode ? binaryRowTotals : rowTotals
+  const showColTotals = binaryMode ? binaryColTotals : colTotals
+  const showGrandTotal = binaryMode ? binaryGrandTotal : grandTotal
+  const showMaxVal = binaryMode ? 1 : maxVal
+
   // For each column, whether it lives inside a labeled band (category
   // or folder). Drives the band-tint background that replaces the old
   // bracket-of-vertical-lines treatment so the band reads as a unit.
@@ -298,11 +321,11 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
     const colNames = columns.map((c) => c.label)
     const rows: string[][] = [['Code', ...colNames, 'Total']]
     for (let i = 0; i < codeGuids.length; i++) {
-      rows.push([codeMap.get(codeGuids[i])?.name || '', ...grid[i].map(String), String(rowTotals[i])])
+      rows.push([codeMap.get(codeGuids[i])?.name || '', ...showGrid[i].map(String), String(showRowTotals[i])])
     }
-    rows.push(['Total', ...colTotals.map(String), String(grandTotal)])
+    rows.push(['Total', ...showColTotals.map(String), String(showGrandTotal)])
     window.api.exportCsv(toCsv(rows), 'codes-in-documents.csv')
-  }, [columns, codeGuids, grid, codeMap, rowTotals, colTotals, grandTotal])
+  }, [columns, codeGuids, showGrid, codeMap, showRowTotals, showColTotals, showGrandTotal])
 
   const handleTagDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -479,6 +502,9 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
               <button className="secondary" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => setVisualMode(!visualMode)}>
                 {visualMode ? 'Numeric' : 'Visual'}
               </button>
+              <button className="secondary" style={{ fontSize: 10, padding: '3px 8px' }} onClick={() => setBinaryMode(!binaryMode)} title="Show each cell as 1 (code present) or 0 (absent); totals count the cells.">
+                {binaryMode ? 'Counts' : 'Binary'}
+              </button>
               <button className="secondary" style={{ fontSize: 10, padding: '3px 8px' }} onClick={handleExportCsv} disabled={codeGuids.length === 0}>
                 Export CSV
               </button>
@@ -565,13 +591,13 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                         <span onClick={() => setCodeGuids((p) => p.filter((g) => g !== codeGuid))} style={{ marginLeft: 4, fontSize: 9, color: 'var(--text-muted)', cursor: 'pointer' }}>x</span>
                       </td>
                       {columns.map((col, j) => {
-                        const val = grid[i][j]
+                        const val = showGrid[i][j]
                         // Clamp the ratio at 1: subtotal cells exceed
                         // maxVal (which deliberately excludes subtotals
                         // so the heatmap isn't dominated by them), and
                         // an unclamped ratio would push the box past
                         // the cell height and stretch the row.
-                        const ratio = val > 0 ? Math.min(1, val / maxVal) : 0
+                        const ratio = val > 0 ? Math.min(1, val / showMaxVal) : 0
                         // Max box size = cell height (32) − vertical
                         // padding (2 × 4 px), so the box sits inside the
                         // existing 32 px cell with a small breathing
@@ -613,11 +639,11 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                         borderLeft: '2px solid var(--border-color)',
                         textAlign: 'center',
                         fontWeight: 700,
-                        cursor: rowTotals[i] > 0 ? 'pointer' : 'default',
-                        color: rowTotals[i] === 0 ? 'var(--text-muted)' : undefined,
-                        opacity: rowTotals[i] === 0 ? 0.4 : 1
+                        cursor: showRowTotals[i] > 0 ? 'pointer' : 'default',
+                        color: showRowTotals[i] === 0 ? 'var(--text-muted)' : undefined,
+                        opacity: showRowTotals[i] === 0 ? 0.4 : 1
                       }}>
-                        {rowTotals[i]}
+                        {showRowTotals[i]}
                       </td>
                     </tr>
                     )
@@ -625,7 +651,7 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                   {/* Total row */}
                   <tr>
                     <td style={{ padding: '4px 6px', borderTop: '2px solid var(--border-color)', fontWeight: 700 }}>Total</td>
-                    {colTotals.map((ct, j) => (
+                    {showColTotals.map((ct, j) => (
                       <td key={columns[j].id} onClick={() => handleColTotalClick(j)} style={{
                         width: 50, minWidth: 50, maxWidth: 50, height: 32,
                         borderTop: '2px solid var(--border-color)',
@@ -645,11 +671,11 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                       borderLeft: '2px solid var(--border-color)',
                       textAlign: 'center',
                       fontWeight: 700,
-                      cursor: grandTotal > 0 ? 'pointer' : 'default',
-                      color: grandTotal === 0 ? 'var(--text-muted)' : undefined,
-                      opacity: grandTotal === 0 ? 0.4 : 1
+                      cursor: showGrandTotal > 0 ? 'pointer' : 'default',
+                      color: showGrandTotal === 0 ? 'var(--text-muted)' : undefined,
+                      opacity: showGrandTotal === 0 ? 0.4 : 1
                     }}>
-                      {grandTotal}
+                      {showGrandTotal}
                     </td>
                   </tr>
                 </tbody>
