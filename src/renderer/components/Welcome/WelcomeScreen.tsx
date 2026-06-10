@@ -37,14 +37,20 @@ export function WelcomeScreen() {
     }}>
       <div style={{
         background: 'var(--bg-panel)',
-        padding: '40px 48px',
+        // No bottom padding: the sponsor link's flex:1 region extends to the
+        // true window bottom so it centres between the buttons and that edge.
+        padding: '40px 48px 0',
         boxShadow: '16px 0 60px rgba(0,0,0,0.18), 4px 0 16px rgba(0,0,0,0.10)',
         height: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        justifyContent: 'center',
         overflowY: 'auto'
       }}>
+        {/* Top spacer — pairs with the equal-weight spacer holding the sponsor
+            link below. The two keep the wordmark / projects / buttons stack
+            vertically centred, while the sponsor link sits centred in the gap
+            between the buttons and the bottom of the window. */}
+        <div style={{ flex: 1 }} />
         {/* Wordmark — same mask-recolour pattern the toolbar uses. The
             welcome screen and PDF exports share the full-product
             wordmark (magnoliaqda.svg); the in-app toolbar uses the
@@ -170,10 +176,11 @@ export function WelcomeScreen() {
           </button>
         </div>
 
-        {/* Sponsor link — Magnolia is free and open-source; routed through
-            the 'sponsor' welcome action so it opens in the default browser
-            (the welcome window has no setWindowOpenHandler). */}
-        <div style={{ textAlign: 'center', marginTop: 18 }}>
+        {/* Sponsor link — centred in the gap between the buttons and the
+            bottom of the window via this flex:1 region (paired with the top
+            spacer). Routed through the 'sponsor' welcome action so it opens in
+            the default browser (the welcome window has no setWindowOpenHandler). */}
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <span
             role="button"
             tabIndex={0}
