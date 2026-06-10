@@ -187,6 +187,21 @@ const api: ElectronAPI = {
   installUpdate: () => ipcRenderer.send('update:install'),
   skipUpdateVersion: (version: string) => ipcRenderer.send('update:skip', version),
   remindUpdateLater: () => ipcRenderer.send('update:remind-later'),
+  // Manual update check + version, surfaced in the Preferences pane.
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  checkForUpdates: () => ipcRenderer.send('update:check-manual'),
+  onUpdateStatus: (callback) => {
+    const handler = (_e: unknown, status: unknown) => callback(status as never)
+    ipcRenderer.on('update:status', handler)
+    return () => { ipcRenderer.removeListener('update:status', handler) }
+  },
+  // "Newer version available" nudge badge (toolbar wordmark + Updates pane).
+  getUpdateBadge: () => ipcRenderer.invoke('get-update-badge'),
+  onUpdateBadge: (callback) => {
+    const handler = (_e: unknown, state: unknown) => callback(state as never)
+    ipcRenderer.on('update:badge', handler)
+    return () => { ipcRenderer.removeListener('update:badge', handler) }
+  },
   // Query results window (pop-out)
   openQueryResultsWindow: (data) => ipcRenderer.send('open-query-results-window', data),
   updateQueryResultsWindow: (data) => ipcRenderer.send('update-query-results-window', data),

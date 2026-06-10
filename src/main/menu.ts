@@ -258,6 +258,13 @@ export function buildMenu(mainWindow: BrowserWindow, openWindows?: WindowListEnt
             await shell.openExternal('https://github.com/caledavis/Magnolia')
           }
         },
+        {
+          label: 'Sponsor Magnolia…',
+          click: async () => {
+            const { shell } = require('electron')
+            await shell.openExternal('https://github.com/sponsors/caledavis')
+          }
+        },
         ...(isMac ? [] : [
           { type: 'separator' as const },
           {

@@ -8,6 +8,13 @@ All notable changes to Magnolia are documented here. The format follows [Keep a 
 - **Donut charts in the Survey Overview.** Single-select questions now show a donut chart of the answer distribution alongside the existing percentages, with the option list doubling as a colour-matched legend. The chart is included in the exported PDF too.
 - **Contents page in the survey summary PDF.** The exported PDF now opens with a Contents section mirroring the Survey Overview's question table. Open-ended questions show a "Show answers" link that jumps to that question's responses later in the document, keeping the overview compact.
 - **Binary view for analysis tables.** Codes in Documents, Results in Documents, and Code Co-Occurrences now have a "Binary" button next to "Visual" that shows each cell as 1 (present) or 0 (absent), with the row and column totals counting how many cells are present. CSV export reflects whichever view is active.
+- **Portable Windows build.** A no-install version of Magnolia for Windows that runs without administrator rights — ideal for managed or work computers where you can't run an installer. Download it from the releases page (linked in the README). It doesn't update itself, so use "Check for Updates" to know when a new version is out.
+- **Check for Updates in Preferences.** A new Updates section in Preferences shows your current version and lets you check for a newer one at any time, with the result shown inline — a fallback for when the background updater can't run (for example on a locked-down computer or the portable build).
+- **Update-available nudge.** When a newer version has been released, a small badge appears on the Magnolia wordmark in the toolbar; clicking it opens the Updates section, where you can download the latest version. This works on every build, including ones that can't update themselves.
+- **Support Magnolia.** Links to Magnolia's GitHub Sponsors page now appear in a new "Support Magnolia" section of Preferences, in the Help menu, and on the Welcome screen, for anyone who'd like to support its development.
+
+### Changed
+- **The Windows installer no longer needs an administrator password.** It now installs Magnolia for the current user only, so it runs on computers where you don't have admin rights.
 
 ### Fixed
 - **Coding an open response no longer also codes the next one.** In Respondent and Question mode, selecting a response whose selection ran through the invisible line break at its end would also apply the code to the following response. The selection now stops at the response you actually selected.

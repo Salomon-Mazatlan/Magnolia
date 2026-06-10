@@ -146,14 +146,24 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "${productName}-win-portable-${arch}.${ext}"
     },
     "linux": {
       "icon": "build/icon.png",

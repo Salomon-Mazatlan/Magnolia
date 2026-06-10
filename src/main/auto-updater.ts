@@ -54,6 +54,10 @@ function startShipItJob(): void {
 
 let mainWindowRef: BrowserWindow | null = null
 let manualCheckInProgress = false
+// Where the in-progress manual check was triggered from. 'menu' (Help →
+// "Check for updates…") reports its outcome via native dialogs; 'preferences'
+// reports inline in the Preferences pane via the 'update:status' channel.
+let manualCheckSource: 'menu' | 'preferences' = 'menu'
 // Called right before quitAndInstall() so the main process can mark itself as
 // intentionally quitting (otherwise the window's `closed` handler re-opens the
 // Welcome screen and the macOS update can't install — see below).
@@ -89,6 +93,102 @@ function setSkippedVersion(version: string): void {
   }
 }
 
+/** Report a manual-check outcome inline to the Preferences pane. No-op if the
+ *  main window is gone. Used only for 'preferences'-sourced checks; 'menu'
+ *  checks use native dialogs instead. */
+function sendUpdateStatus(status: {
+  state: 'checking' | 'up-to-date' | 'available' | 'error' | 'dev-disabled'
+  version?: string
+  message?: string
+}): void {
+  const win = mainWindowRef
+  if (win && !win.isDestroyed()) win.webContents.send('update:status', status)
+}
+
+// ---------------------------------------------------------------------------
+// Update-available badge
+//
+// A lightweight "is a newer version published?" check that works on EVERY
+// build — including the portable Windows exe, where electron-updater can't
+// install and its check is unreliable. We fetch the published latest*.yml from
+// GitHub Releases and compare versions ourselves, independent of whether this
+// build can self-update. electron-updater still owns the *install* action where
+// supported; this only answers "should we nudge the user?". Best-effort and
+// silent on any failure (offline, rate-limited, asset missing).
+// ---------------------------------------------------------------------------
+
+export interface UpdateBadgeState {
+  available: boolean
+  latestVersion: string | null
+  currentVersion: string
+}
+
+let badgeState: UpdateBadgeState = { available: false, latestVersion: null, currentVersion: '' }
+
+/** The release manifest electron-builder publishes per platform; all carry the
+ *  same `version:` line for a given release, so any one answers "what's latest". */
+function latestManifestName(): string {
+  if (process.platform === 'darwin') return 'latest-mac.yml'
+  if (process.platform === 'linux') return 'latest-linux.yml'
+  return 'latest.yml'
+}
+
+/** Numeric dotted-version compare. >0 if a>b, <0 if a<b, 0 if equal. Strips a
+ *  leading 'v' and any prerelease suffix (we ship a single stable channel). */
+function compareVersions(a: string, b: string): number {
+  const parse = (v: string): number[] => v.replace(/^v/, '').split('-')[0].split('.').map((n) => parseInt(n, 10) || 0)
+  const pa = parse(a)
+  const pb = parse(b)
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0)
+    if (d !== 0) return d
+  }
+  return 0
+}
+
+function setBadgeState(next: UpdateBadgeState): void {
+  badgeState = next
+  const win = mainWindowRef
+  if (win && !win.isDestroyed()) win.webContents.send('update:badge', next)
+}
+
+/** Current badge state, for the renderer to read on mount (before any push). */
+export function getUpdateBadgeState(): UpdateBadgeState {
+  return badgeState
+}
+
+/** Re-evaluate the badge: fetch the latest published version, compare to this
+ *  build, and raise the badge if it's newer and not skipped. Silent on failure. */
+export async function refreshUpdateBadge(): Promise<void> {
+  const currentVersion = app.getVersion()
+
+  // Dev-only override for testing the badge UI without a real newer release or
+  // a working network. Set MAGNOLIA_FORCE_UPDATE_BADGE to force the badge on;
+  // an optional version string is used as the "latest" label (else a stub).
+  // Guarded by !app.isPackaged so it can never fire in a shipped build.
+  if (!app.isPackaged && process.env.MAGNOLIA_FORCE_UPDATE_BADGE) {
+    const forced = process.env.MAGNOLIA_FORCE_UPDATE_BADGE
+    const latestVersion = /^\d/.test(forced) ? forced : '99.0.0'
+    setBadgeState({ available: true, latestVersion, currentVersion })
+    return
+  }
+
+  try {
+    const url = `https://github.com/caledavis/Magnolia/releases/latest/download/${latestManifestName()}`
+    const res = await fetch(url, { redirect: 'follow' })
+    if (!res.ok) return
+    const text = await res.text()
+    const match = text.match(/^version:\s*([0-9][^\s]*)/m)
+    if (!match) return
+    const latestVersion = match[1].trim()
+    const newer = compareVersions(latestVersion, currentVersion) > 0
+    const skipped = getSkippedVersion() === latestVersion
+    setBadgeState({ available: newer && !skipped, latestVersion, currentVersion })
+  } catch {
+    /* offline / rate-limited / asset missing — leave the badge as-is */
+  }
+}
+
 /** electron-updater's releaseNotes is either the release body (a markdown
  *  string) or, with fullChangelog on, an array of {version, note}. Normalise
  *  to a single markdown string for the renderer to render. */
@@ -116,6 +216,7 @@ function installUpdateNow(): void {
 export function initAutoUpdater(mainWindow: BrowserWindow, onQuitForUpdate: () => void): void {
   mainWindowRef = mainWindow
   onQuitForUpdateRef = onQuitForUpdate
+  badgeState = { available: false, latestVersion: null, currentVersion: app.getVersion() }
 
   // "Later → install on quit": when the app quits with a staged update,
   // Squirrel.Mac is meant to install it on quit, but it hits the same
@@ -136,7 +237,13 @@ export function initAutoUpdater(mainWindow: BrowserWindow, onQuitForUpdate: () =
   if (!ipcHandlersAdded) {
     ipcHandlersAdded = true
     ipcMain.on('update:install', () => installUpdateNow())
-    ipcMain.on('update:skip', (_e, version: string) => setSkippedVersion(version))
+    ipcMain.on('update:skip', (_e, version: string) => {
+      setSkippedVersion(version)
+      // Skipping the latest version clears the nudge badge for it.
+      if (badgeState.latestVersion === version) {
+        setBadgeState({ ...badgeState, available: false })
+      }
+    })
     ipcMain.on('update:remind-later', () => {
       // No-op: the update stays staged. It re-prompts on the next check and
       // still installs on quit via autoInstallOnAppQuit.
@@ -150,20 +257,29 @@ export function initAutoUpdater(mainWindow: BrowserWindow, onQuitForUpdate: () =
   autoUpdater.allowPrerelease = false
 
   autoUpdater.on('update-available', (info) => {
-    // Silent; the download proceeds in the background.
+    // Silent; the download proceeds in the background. For a manual check
+    // from the Preferences pane, surface the "available" result inline right
+    // away — the download then completes and the Sparkle modal handles install.
     console.log('[auto-update] available:', info.version)
+    if (manualCheckInProgress && manualCheckSource === 'preferences') {
+      sendUpdateStatus({ state: 'available', version: info.version })
+    }
   })
 
   autoUpdater.on('update-not-available', (info) => {
     console.log('[auto-update] up to date:', info.version)
     if (manualCheckInProgress) {
       manualCheckInProgress = false
-      dialog.showMessageBox(mainWindowRef ?? undefined as any, {
-        type: 'info',
-        message: 'Magnolia is up to date',
-        detail: `Version ${info.version} is the latest available.`,
-        buttons: ['OK']
-      })
+      if (manualCheckSource === 'preferences') {
+        sendUpdateStatus({ state: 'up-to-date', version: info.version })
+      } else {
+        dialog.showMessageBox(mainWindowRef ?? undefined as any, {
+          type: 'info',
+          message: 'Magnolia is up to date',
+          detail: `Version ${info.version} is the latest available.`,
+          buttons: ['OK']
+        })
+      }
     }
   })
 
@@ -171,12 +287,16 @@ export function initAutoUpdater(mainWindow: BrowserWindow, onQuitForUpdate: () =
     console.error('[auto-update] error:', err)
     if (manualCheckInProgress) {
       manualCheckInProgress = false
-      dialog.showMessageBox(mainWindowRef ?? undefined as any, {
-        type: 'error',
-        message: 'Could not check for updates',
-        detail: err?.message ?? String(err),
-        buttons: ['OK']
-      })
+      if (manualCheckSource === 'preferences') {
+        sendUpdateStatus({ state: 'error', message: err?.message ?? String(err) })
+      } else {
+        dialog.showMessageBox(mainWindowRef ?? undefined as any, {
+          type: 'error',
+          message: 'Could not check for updates',
+          detail: err?.message ?? String(err),
+          buttons: ['OK']
+        })
+      }
     }
   })
 
@@ -236,31 +356,47 @@ export function initAutoUpdater(mainWindow: BrowserWindow, onQuitForUpdate: () =
     autoUpdater.checkForUpdates().catch((err) => {
       console.error('[auto-update] startup check failed:', err)
     })
+    // Independent nudge-badge check, run on every build (electron-updater's
+    // own check above no-ops on builds that can't self-install).
+    refreshUpdateBadge()
   }, 5_000)
 }
 
-/** Triggered by the Help → "Check for updates…" menu item. Same flow
- *  as the startup check, but with user-visible feedback when nothing
- *  is available so they know the check actually happened. */
-export function checkForUpdatesManually(): void {
+/** Triggered by the Help → "Check for updates…" menu item ('menu') or the
+ *  Preferences → Updates pane ('preferences'). Same flow as the startup check,
+ *  but with user-visible feedback when nothing's available so the user knows
+ *  the check happened. 'menu' reports via native dialogs; 'preferences' reports
+ *  inline through the 'update:status' channel. */
+export function checkForUpdatesManually(source: 'menu' | 'preferences' = 'menu'): void {
   if (!app.isPackaged) {
-    dialog.showMessageBox(mainWindowRef ?? undefined as any, {
-      type: 'info',
-      message: 'Update checks are disabled in development',
-      detail: 'Run a packaged build (`npm run package:mac/win/linux`) to test the update flow.',
-      buttons: ['OK']
-    })
+    if (source === 'preferences') {
+      sendUpdateStatus({ state: 'dev-disabled' })
+    } else {
+      dialog.showMessageBox(mainWindowRef ?? undefined as any, {
+        type: 'info',
+        message: 'Update checks are disabled in development',
+        detail: 'Run a packaged build (`npm run package:mac/win/linux`) to test the update flow.',
+        buttons: ['OK']
+      })
+    }
     return
   }
+  // Keep the nudge badge in sync with an explicit user-initiated check.
+  refreshUpdateBadge()
   manualCheckInProgress = true
+  manualCheckSource = source
   autoUpdater.checkForUpdates().catch((err) => {
     manualCheckInProgress = false
     console.error('[auto-update] manual check failed:', err)
-    dialog.showMessageBox(mainWindowRef ?? undefined as any, {
-      type: 'error',
-      message: 'Could not check for updates',
-      detail: err?.message ?? String(err),
-      buttons: ['OK']
-    })
+    if (source === 'preferences') {
+      sendUpdateStatus({ state: 'error', message: err?.message ?? String(err) })
+    } else {
+      dialog.showMessageBox(mainWindowRef ?? undefined as any, {
+        type: 'error',
+        message: 'Could not check for updates',
+        detail: err?.message ?? String(err),
+        buttons: ['OK']
+      })
+    }
   })
 }

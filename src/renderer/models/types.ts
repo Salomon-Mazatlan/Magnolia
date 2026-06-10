@@ -445,6 +445,15 @@ export interface QueryBuilderInitData {
   priorQuery?: Query | null
 }
 
+/** "Newer version available" nudge state, computed in the main process by
+ *  comparing this build against the latest published GitHub release. Drives the
+ *  toolbar wordmark badge and the Updates pane on all builds. */
+export interface UpdateBadgeState {
+  available: boolean
+  latestVersion: string | null
+  currentVersion: string
+}
+
 // IPC API exposed to renderer
 export interface ElectronAPI {
   getFileSize: (filePath: string) => Promise<number | null>
@@ -539,6 +548,17 @@ export interface ElectronAPI {
   installUpdate: () => void
   skipUpdateVersion: (version: string) => void
   remindUpdateLater: () => void
+  getAppVersion: () => Promise<string>
+  checkForUpdates: () => void
+  onUpdateStatus: (
+    callback: (status: {
+      state: 'checking' | 'up-to-date' | 'available' | 'error' | 'dev-disabled'
+      version?: string
+      message?: string
+    }) => void
+  ) => () => void
+  getUpdateBadge: () => Promise<UpdateBadgeState>
+  onUpdateBadge: (callback: (state: UpdateBadgeState) => void) => () => void
   // Query results window (pop-out)
   openQueryResultsWindow: (data: QueryResultsInitData) => void
   updateQueryResultsWindow: (data: QueryResultsInitData) => void

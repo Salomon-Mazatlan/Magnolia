@@ -59,6 +59,7 @@ import { useRelationshipMapStore } from './stores/relationship-map-store'
 import { useSurveyViewStore } from './stores/survey-view-store'
 import { useAnalysisTabsStore } from './stores/analysis-tabs-store'
 import { isAnalysisTab, isMapTab, isQueryBuilderTab, makeAnalysisTabId, makeMapTabId, makeQueryBuilderTabId, mapGuidFromTabId, parseAnalysisTabId, PREFERENCES_TAB_ID } from './utils/tab-ids'
+import { requestPreferencesCategory } from './components/Preferences/PreferencesWindow'
 import type { PersistedTab, PersistedTabState } from './models/types'
 // ES import so Vite bundles + hashes the Magnolia wordmark for production.
 import magnoliaUrl from './assets/magnolia.svg'
@@ -207,6 +208,17 @@ function App() {
   useEffect(() => {
     return window.api.onUpdateAvailable(setUpdateInfo)
   }, [])
+
+  // "Newer version available" nudge badge on the toolbar wordmark. State is
+  // computed in the main process (independent of whether this build can
+  // self-update) and pushed via onUpdateBadge; read once on mount for the
+  // initial value.
+  const [updateBadgeAvailable, setUpdateBadgeAvailable] = useState(false)
+  useEffect(() => {
+    window.api.getUpdateBadge().then((s) => setUpdateBadgeAvailable(!!s?.available))
+    return window.api.onUpdateBadge((s) => setUpdateBadgeAvailable(!!s?.available))
+  }, [])
+
   const [showSaveQueryDialog, setShowSaveQueryDialog] = useState(false)
   const [showFindDialog, setShowFindDialog] = useState(false)
   const [saveQueryName, setSaveQueryName] = useState('')
@@ -1967,9 +1979,14 @@ function App() {
             it on hover would recolour the glyph. */}
         <button
           type="button"
-          onClick={() => useDocumentStore.getState().openToolTab(PREFERENCES_TAB_ID)}
-          title="Settings"
-          aria-label="Open Settings"
+          onClick={() => {
+            // When the wordmark is nudging about an update, take the user
+            // straight to the Updates section instead of the default category.
+            if (updateBadgeAvailable) requestPreferencesCategory('updates')
+            useDocumentStore.getState().openToolTab(PREFERENCES_TAB_ID)
+          }}
+          title={updateBadgeAvailable ? 'A new version is available — open Settings → Updates' : 'Settings'}
+          aria-label={updateBadgeAvailable ? 'Open Settings — update available' : 'Open Settings'}
           style={{
             justifySelf: 'start',
             // Right margin guarantees breathing room between the
@@ -1983,7 +2000,9 @@ function App() {
             cursor: 'pointer',
             transition: 'background 0.12s',
             display: 'flex',
-            alignItems: 'center'
+            alignItems: 'center',
+            // Anchor for the update-available badge dot.
+            position: 'relative'
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-tertiary)' }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
@@ -2008,6 +2027,25 @@ function App() {
               pointerEvents: 'none'
             }}
           />
+          {updateBadgeAvailable && (
+            // Small accent dot in the top-right corner of the wordmark — a
+            // discreet, non-modal nudge that a newer version is available.
+            // Clicking the wordmark already opens Settings (→ Updates).
+            <span
+              aria-hidden
+              style={{
+                position: 'absolute',
+                top: 2,
+                right: 2,
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: 'var(--accent)',
+                boxShadow: '0 0 0 2px var(--bg-secondary)',
+                pointerEvents: 'none'
+              }}
+            />
+          )}
         </button>
 
         {/* Center cell: icons */}

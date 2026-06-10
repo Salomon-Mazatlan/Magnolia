@@ -63,7 +63,7 @@ const THEME_OPTIONS: ThemeOption[] = [
   { id: 'high-contrast', label: 'High Contrast', swatch: { bg: '#000000', surface: '#ffffff', accent: '#ffff00' } }
 ]
 
-type CategoryId = 'appearance' | 'media-playback'
+type CategoryId = 'appearance' | 'media-playback' | 'updates' | 'support'
 
 interface Category {
   id: CategoryId
@@ -72,8 +72,33 @@ interface Category {
 
 const CATEGORIES: Category[] = [
   { id: 'appearance',     label: 'Appearance' },
-  { id: 'media-playback', label: 'Media Playback' }
+  { id: 'media-playback', label: 'Media Playback' },
+  { id: 'updates',        label: 'Updates' },
+  { id: 'support',        label: 'Support Magnolia' }
 ]
+
+// Lets callers outside this module (e.g. the toolbar wordmark, when it's
+// showing an update badge) open Preferences to a specific category. If the
+// pane is already mounted, listeners switch it live; otherwise the request is
+// held and consumed when the pane next mounts. Held value is cleared on the
+// mount read so a later plain open (menu / Cmd+,) still lands on the default.
+let pendingCategory: CategoryId | null = null
+const categoryListeners = new Set<(c: CategoryId) => void>()
+
+export function requestPreferencesCategory(category: CategoryId): void {
+  if (categoryListeners.size > 0) {
+    categoryListeners.forEach((l) => l(category))
+  } else {
+    pendingCategory = category
+  }
+}
+
+/** GitHub Sponsors page for funding Magnolia's development. */
+const SPONSOR_URL = 'https://github.com/sponsors/caledavis'
+
+/** Latest release page — where users on builds that can't self-update (e.g.
+ *  the portable Windows exe) download the newest version. */
+const RELEASES_URL = 'https://github.com/caledavis/Magnolia/releases/latest'
 
 /** Capture a key combination from a keyboard event */
 function keyComboFromEvent(e: KeyboardEvent): string {
@@ -285,6 +310,193 @@ function MediaPlaybackSettings({
   )
 }
 
+type UpdateStatus = {
+  state: 'checking' | 'up-to-date' | 'available' | 'error' | 'dev-disabled'
+  version?: string
+  message?: string
+}
+
+/** Render the inline result of a manual update check. Colour and wording
+ *  track the state reported by the main process over 'update:status'. */
+function UpdateStatusLine({ status }: { status: UpdateStatus }) {
+  const map: Record<UpdateStatus['state'], { color: string; text: string }> = {
+    checking:      { color: 'var(--text-muted)',   text: 'Checking for updates…' },
+    'up-to-date':  { color: 'var(--success)',      text: `You're up to date${status.version ? ` (version ${status.version})` : ''}.` },
+    available:     { color: 'var(--accent)',       text: `Update available${status.version ? ` — version ${status.version}` : ''}. It's downloading now; you'll be prompted to install it shortly.` },
+    error:         { color: 'var(--danger)',       text: `Couldn't check for updates: ${status.message ?? 'unknown error'}` },
+    'dev-disabled':{ color: 'var(--text-muted)',   text: 'Update checks are disabled in development builds.' }
+  }
+  const { color, text } = map[status.state]
+  return <div style={{ fontSize: 11.5, color, marginTop: 12, lineHeight: 1.5 }}>{text}</div>
+}
+
+function UpdatesSettings() {
+  const [version, setVersion] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
+  const [status, setStatus] = useState<UpdateStatus | null>(null)
+  const [badge, setBadge] = useState<{ available: boolean; latestVersion: string | null }>({
+    available: false,
+    latestVersion: null
+  })
+  const fallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.getAppVersion().then((v) => {
+      if (!cancelled) setVersion(v)
+    })
+    // Initial nudge-badge state + live updates (same source as the toolbar dot).
+    window.api.getUpdateBadge().then((s) => {
+      if (!cancelled) setBadge({ available: !!s?.available, latestVersion: s?.latestVersion ?? null })
+    })
+    const offBadge = window.api.onUpdateBadge((s) =>
+      setBadge({ available: !!s?.available, latestVersion: s?.latestVersion ?? null })
+    )
+    // The main process reports the outcome inline (up-to-date / available /
+    // error / dev-disabled) rather than via a native dialog.
+    const off = window.api.onUpdateStatus((s) => {
+      if (fallbackRef.current) clearTimeout(fallbackRef.current)
+      setChecking(false)
+      setStatus(s)
+    })
+    return () => {
+      cancelled = true
+      off()
+      offBadge()
+      if (fallbackRef.current) clearTimeout(fallbackRef.current)
+    }
+  }, [])
+
+  const check = useCallback(() => {
+    setStatus(null)
+    setChecking(true)
+    window.api.checkForUpdates()
+    // Safety net: a status event should always arrive, but don't leave the
+    // spinner stuck forever if one somehow doesn't.
+    if (fallbackRef.current) clearTimeout(fallbackRef.current)
+    fallbackRef.current = setTimeout(() => setChecking(false), 30000)
+  }, [])
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: 'var(--text-secondary)' }}>Software Updates</h3>
+      <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 14, lineHeight: 1.5 }}>
+        Magnolia checks for updates automatically in the background. If that
+        doesn't work on your computer (for example on a managed or restricted
+        machine), you can check for a new version here at any time.
+      </p>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>Current version</span>
+        <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+          {version ?? '…'}
+        </span>
+      </div>
+
+      {/* Persistent nudge when a newer release exists. Shown on every build so
+          it also catches a silently-failed auto-update; the Download link is
+          the reliable path for builds that can't self-update (portable exe).
+          The main window routes target=_blank through shell.openExternal. */}
+      {badge.available && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: '10px 12px',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--accent)',
+            background: 'var(--selection-bg)'
+          }}
+        >
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+            A new version{badge.latestVersion ? ` (${badge.latestVersion})` : ''} is available
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 10, lineHeight: 1.5 }}>
+            If Magnolia doesn't update itself, download the latest version from the
+            releases page.
+          </div>
+          <a
+            href={RELEASES_URL}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              display: 'inline-block',
+              padding: '6px 16px',
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#fff',
+              background: 'var(--accent)',
+              borderRadius: 'var(--radius-md)',
+              textDecoration: 'none'
+            }}
+          >
+            Download latest version
+          </a>
+        </div>
+      )}
+
+      <button
+        className="secondary"
+        disabled={checking}
+        onClick={check}
+        style={{ fontSize: 12, padding: '6px 16px' }}
+      >
+        {checking ? 'Checking…' : 'Check for Updates'}
+      </button>
+
+      {checking
+        ? <UpdateStatusLine status={{ state: 'checking' }} />
+        : status && <UpdateStatusLine status={status} />}
+    </div>
+  )
+}
+
+function SupportSettings() {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: 'var(--text-secondary)' }}>
+        Support Magnolia
+      </h3>
+      <p style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginBottom: 12, lineHeight: 1.6 }}>
+        Magnolia is free and open-source, with no ads, subscriptions, or cloud
+        lock-in. It's built and maintained independently. If it's useful in your
+        work, sponsoring its development helps keep it free and funds new
+        features, fixes, and ongoing support.
+      </p>
+      <p style={{ fontSize: 11.5, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
+        You can sponsor monthly or make a one-off contribution through GitHub
+        Sponsors. The link opens in your browser.
+      </p>
+
+      {/* The main window's setWindowOpenHandler routes target=_blank links
+          through shell.openExternal, so this opens in the default browser. */}
+      <a
+        href={SPONSOR_URL}
+        target="_blank"
+        rel="noreferrer"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 18px',
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: '#fff',
+          background: 'var(--accent)',
+          borderRadius: 'var(--radius-md)',
+          textDecoration: 'none'
+        }}
+      >
+        <span aria-hidden style={{ fontSize: 13 }}>♥</span>
+        Sponsor Magnolia on GitHub
+      </a>
+
+      <p style={{ fontSize: 10.5, color: 'var(--text-muted)', marginTop: 14, fontFamily: 'var(--font-mono)' }}>
+        {SPONSOR_URL}
+      </p>
+    </div>
+  )
+}
+
 interface PreferencesWindowProps {
   /** Tab-host close callback. When present, the Close button calls
    *  this; otherwise (popout-window mode) it falls back to window.close. */
@@ -294,7 +506,22 @@ interface PreferencesWindowProps {
 export function PreferencesWindow({ onClose }: PreferencesWindowProps = {}) {
   const [prefs, setPrefs] = useState<Preferences>(DEFAULT_PREFS)
   const [loaded, setLoaded] = useState(false)
-  const [selectedCategory, setSelectedCategory] = useState<CategoryId>(CATEGORIES[0].id)
+  // Open to a category requested before mount (e.g. the wordmark badge asking
+  // for Updates), else the default. Consume-and-clear so a later plain open
+  // lands on the default.
+  const [selectedCategory, setSelectedCategory] = useState<CategoryId>(() => {
+    const requested = pendingCategory
+    pendingCategory = null
+    return requested ?? CATEGORIES[0].id
+  })
+
+  // Switch category live when a request arrives while already mounted (the tab
+  // was already open and just refocused, so no remount happens).
+  useEffect(() => {
+    const listener = (c: CategoryId): void => setSelectedCategory(c)
+    categoryListeners.add(listener)
+    return () => { categoryListeners.delete(listener) }
+  }, [])
 
   // Load preferences on mount
   useEffect(() => {
@@ -418,6 +645,8 @@ export function PreferencesWindow({ onClose }: PreferencesWindowProps = {}) {
           {selected.id === 'media-playback' && (
             <MediaPlaybackSettings prefs={prefs} updateMapping={updateMapping} save={save} />
           )}
+          {selected.id === 'updates' && <UpdatesSettings />}
+          {selected.id === 'support' && <SupportSettings />}
         </div>
       </div>
     </div>

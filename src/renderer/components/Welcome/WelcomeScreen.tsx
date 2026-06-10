@@ -169,6 +169,31 @@ export function WelcomeScreen() {
             New
           </button>
         </div>
+
+        {/* Sponsor link — Magnolia is free and open-source; routed through
+            the 'sponsor' welcome action so it opens in the default browser
+            (the welcome window has no setWindowOpenHandler). */}
+        <div style={{ textAlign: 'center', marginTop: 18 }}>
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={() => window.api.sendWelcomeAction('sponsor')}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') window.api.sendWelcomeAction('sponsor') }}
+            style={{
+              fontSize: 11.5,
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--accent)')}
+            onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary)')}
+          >
+            <span aria-hidden>♥</span>
+            Sponsor Magnolia's development
+          </span>
+        </div>
       </div>
       <div />
 

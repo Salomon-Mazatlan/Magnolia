@@ -8,7 +8,7 @@ import { registerIpcHandlers } from './ipc-handlers'
 import { buildMenu, type WindowListEntry } from './menu'
 import { readQdpx } from './qdpx/reader'
 import { createEmptyProjectFile } from './qdpx/writer'
-import { initAutoUpdater, checkForUpdatesManually } from './auto-updater'
+import { initAutoUpdater, checkForUpdatesManually, getUpdateBadgeState } from './auto-updater'
 import { openBundledLicenceFile } from './licence-files'
 
 // Register custom protocol scheme BEFORE app.ready (required by Electron)
@@ -559,6 +559,17 @@ function savePreferencesToDisk(prefs: any): void {
 ipcMain.handle('load-preferences', () => loadPreferencesFromDisk())
 ipcMain.handle('save-preferences', (_event, prefs: any) => { savePreferencesToDisk(prefs) })
 
+// Lets the Preferences pane show the running version and offer a manual
+// update check — a fallback for users (e.g. on locked-down Windows
+// machines) where the background auto-updater can't run. Both route
+// through the same tested flow as the Help → "Check for Updates…" menu.
+ipcMain.handle('get-app-version', () => app.getVersion())
+ipcMain.on('update:check-manual', () => checkForUpdatesManually('preferences'))
+// Current "newer version available" nudge state, for the toolbar wordmark
+// badge and the Updates pane. Pushed on change via the 'update:badge' channel;
+// this handler lets a freshly-mounted renderer read the latest known state.
+ipcMain.handle('get-update-badge', () => getUpdateBadgeState())
+
 // The Preferences pane lives in a main-window tab now (no popup
 // window), so `preferences-update` from the renderer just persists
 // to disk and echoes back to mainWindow so the preferences-store
@@ -791,6 +802,13 @@ ipcMain.on('welcome-action', async (_event, action: string) => {
       welcomeWindow = null
     }
     app.quit()
+    return
+  }
+
+  if (action === 'sponsor') {
+    // The welcome window has no setWindowOpenHandler, so open the GitHub
+    // Sponsors page in the user's browser from the main process directly.
+    shell.openExternal('https://github.com/sponsors/caledavis')
     return
   }
 
