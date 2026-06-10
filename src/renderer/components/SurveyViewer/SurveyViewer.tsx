@@ -1932,6 +1932,10 @@ export function SurveyViewer({ source }: Props) {
   }
   const [pending, setPending] = useState<{ cells: LocalCellPending[] } | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
+  // The cell a click-drag began in. Selection is confined to this cell while
+  // the drag is live (see the selectionchange effect below), so a drag can
+  // never visibly spill into neighbouring cells.
+  const dragStartCellRef = useRef<HTMLElement | null>(null)
 
   // Consume an incoming scroll target. Memo-pane single-clicks
   // (and any other future caller) write a `(surveyGuid,
@@ -2041,12 +2045,74 @@ export function SurveyViewer({ source }: Props) {
     []
   )
 
+  // Remember which cell a drag began in and hard-lock the selection to it.
+  // While the container carries `.survey-drag-lock` and the origin cell carries
+  // `.survey-drag-source`, every OTHER cell's content is forced to
+  // user-select:none (see global.css) — overriding CodedTextView's inline
+  // user-select:text — so the browser physically refuses to extend the native
+  // selection into a neighbouring cell. (The selectionchange handler below is a
+  // JS backstop for anything that slips past the CSS lock.)
+  const handleContainerMouseDown = useCallback((e: React.MouseEvent) => {
+    // Drop any stale lock from a previous interaction first.
+    dragStartCellRef.current?.classList.remove('survey-drag-source')
+    if (e.button !== 0) {
+      dragStartCellRef.current = null
+      containerRef.current?.classList.remove('survey-drag-lock')
+      return
+    }
+    const cell = (e.target as HTMLElement).closest?.('[data-survey-cell]') as HTMLElement | null
+    dragStartCellRef.current = cell
+    if (cell) {
+      cell.classList.add('survey-drag-source')
+      containerRef.current?.classList.add('survey-drag-lock')
+    } else {
+      containerRef.current?.classList.remove('survey-drag-lock')
+    }
+  }, [])
+
+  // JS backstop to the CSS hard-lock: if any selection still escapes the start
+  // cell, pull the moving end (focus) back to the cell's near edge, keeping the
+  // anchor put. Re-entrant-safe: once clamped the focus is back inside, so the
+  // next change is a no-op. Also clears the lock (ref + classes) on any release.
+  useEffect(() => {
+    const clampToStartCell = (): void => {
+      const startEl = dragStartCellRef.current
+      if (!startEl) return
+      const sel = window.getSelection()
+      if (!sel || sel.rangeCount === 0 || !sel.focusNode) return
+      if (startEl.contains(sel.focusNode)) return
+      const pos = startEl.compareDocumentPosition(sel.focusNode)
+      try {
+        if (pos & Node.DOCUMENT_POSITION_FOLLOWING) {
+          sel.extend(startEl, startEl.childNodes.length) // focus drifted past → clamp to cell end
+        } else if (pos & Node.DOCUMENT_POSITION_PRECEDING) {
+          sel.extend(startEl, 0) // focus drifted before → clamp to cell start
+        }
+      } catch {
+        /* transient invalid range mid-drag — ignore */
+      }
+    }
+    // Release: drop the lock everywhere (ref + both classes), including for
+    // releases outside the container, so a later selection isn't constrained.
+    const clearDragCell = (): void => {
+      dragStartCellRef.current?.classList.remove('survey-drag-source')
+      containerRef.current?.classList.remove('survey-drag-lock')
+      dragStartCellRef.current = null
+    }
+    document.addEventListener('selectionchange', clampToStartCell)
+    document.addEventListener('mouseup', clearDragCell)
+    return () => {
+      document.removeEventListener('selectionchange', clampToStartCell)
+      document.removeEventListener('mouseup', clearDragCell)
+    }
+  }, [])
+
   // Top-level mouseup: catches drags that started in one cell and
   // ended in another (CodedTextView's per-cell onTextSelected only
-  // fires when the selection terminates inside the SAME cell). We
-  // walk every [data-survey-cell] element the native Selection
-  // intersects, slice each cell's local (start, end), and overwrite
-  // pending with the multi-cell list.
+  // fires when the selection terminates inside the SAME cell). Coding
+  // is limited to one cell at a time, so when a drag spans cells we keep
+  // only the cell where the selection began and clamp the on-screen
+  // selection to it.
   const handleContainerMouseUp = useCallback((e: React.MouseEvent) => {
     if (e.button !== 0) return
     const sel = window.getSelection()
@@ -2056,10 +2122,17 @@ export function SurveyViewer({ source }: Props) {
     if (!container) return
     const cellEls = Array.from(container.querySelectorAll<HTMLElement>('[data-survey-cell]'))
 
-    // A selection contained entirely within one cell is handled by
-    // that cell's CodedTextView, which produces a more accurate
-    // (codepoint-based) pending. Defer to it and don't overwrite.
-    if (cellEls.some((el) => el.contains(range.startContainer) && el.contains(range.endContainer))) {
+    // A selection contained entirely within one cell is normally reported by
+    // that cell's CodedTextView (more accurate, codepoint-based) on its own
+    // mouseup — defer to it. But after the live clamp confines a cross-cell
+    // drag, the pointer can be released over a DIFFERENT cell than the one
+    // holding the selection, so the start cell's CodedTextView never fires.
+    // Only defer when the release happened inside the selection's own cell;
+    // otherwise fall through and resolve the pending here.
+    const selCell = cellEls.find(
+      (el) => el.contains(range.startContainer) && el.contains(range.endContainer)
+    )
+    if (selCell && selCell.contains(e.target as Node)) {
       return
     }
 
@@ -2107,13 +2180,25 @@ export function SurveyViewer({ source }: Props) {
         selectedText: cellText.slice(start, end)
       })
     }
-    // Adopt the cross-cell result. This path is only reached when no
-    // single cell held the whole selection, so even a length-1 result
-    // (a single response selected up to and past its trailing line
-    // break, where CodedTextView can't resolve the spilled endpoint)
-    // belongs here rather than to CodedTextView.
+    // Coding is limited to a single cell. `matched` is in DOM order, so
+    // matched[0] is the cell where the selection begins; when a drag spans
+    // several cells we keep only that one. (A length-1 result is the
+    // single-response case — e.g. a response selected past its trailing line
+    // break, which CodedTextView can't resolve — and is kept as-is.)
     if (matched.length >= 1) {
-      setPending({ cells: matched })
+      setPending({ cells: [matched[0]] })
+      // Collapse the visible selection to the start cell so the on-screen
+      // highlight matches what will actually be coded (one cell).
+      if (matched.length > 1) {
+        const startEl = cellEls.find((el) => el.contains(range.startContainer))
+        if (startEl) {
+          const clamped = document.createRange()
+          clamped.selectNodeContents(startEl)
+          clamped.setStart(range.startContainer, range.startOffset)
+          sel.removeAllRanges()
+          sel.addRange(clamped)
+        }
+      }
     }
   }, [])
 
@@ -2456,6 +2541,7 @@ export function SurveyViewer({ source }: Props) {
     <div
       ref={containerRef}
       style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+      onMouseDown={handleContainerMouseDown}
       onMouseUp={handleContainerMouseUp}
       onDragOver={(e) => {
         if (

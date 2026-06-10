@@ -17,6 +17,7 @@ All notable changes to Magnolia are documented here. The format follows [Keep a 
 
 ### Changed
 - **The Windows installer no longer needs an administrator password.** It now installs Magnolia for the current user only, so it runs on computers where you don't have admin rights.
+- **Coding a survey response is locked to one answer at a time.** In the Respondent and Question views, a click-drag selection now stays within the answer it began in, so a drag can no longer spill across several respondents' (or questions') answers and code them together.
 
 ### Fixed
 - **Coding an open response no longer also codes the next one.** In Respondent and Question mode, selecting a response whose selection ran through the invisible line break at its end would also apply the code to the following response. The selection now stops at the response you actually selected.

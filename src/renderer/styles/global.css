@@ -1836,3 +1836,15 @@ html:not([data-theme]) .app-toolbar {
   25% { opacity: 1; }
   100% { opacity: 0; }
 }
+
+/* Survey coding: hard-lock a drag-selection to the cell it began in.
+ * While a drag is live, SurveyViewer puts .survey-drag-lock on the grid
+ * container and .survey-drag-source on the originating cell. Every other
+ * cell — and all of its content — is then forced unselectable, overriding
+ * CodedTextView's inline `user-select: text` via !important, so the native
+ * selection physically cannot extend past the cell the drag started in. */
+.survey-drag-lock [data-survey-cell]:not(.survey-drag-source),
+.survey-drag-lock [data-survey-cell]:not(.survey-drag-source) * {
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}
