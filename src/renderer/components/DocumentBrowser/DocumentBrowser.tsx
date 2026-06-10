@@ -10,6 +10,7 @@ import { useClampedMenuPosition } from '../../utils/use-clamped-menu-position'
 import { sortTagsForCategory, sortListOptions } from '../../utils/sort-tags'
 import { useSurveyViewStore } from '../../stores/survey-view-store'
 import { buildCellText } from '../../utils/survey/cell-text'
+import { RESPONDENTS_GROUP_MIME } from '../Analysis/group-by'
 
 function iconForSource(filename: string) {
   const st: string = sourceTypeFromFilename(filename)
@@ -861,10 +862,20 @@ function SurveyItem({
 
       {survey && (
         <>
-          {/* Respondents category */}
+          {/* Respondents category. Draggable onto an analysis tool's
+              "Group by" box to cluster the survey's results by
+              respondent (the RESPONDENTS_GROUP_MIME marker is all the
+              Group By drop handler needs). */}
           <div
             style={rowStyle(20, false)}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.effectAllowed = 'copy'
+              e.dataTransfer.setData(RESPONDENTS_GROUP_MIME, '1')
+              e.dataTransfer.setData('text/plain', 'Respondents')
+            }}
             onClick={() => setRespondentsOpen(!respondentsOpen)}
+            title="Drag onto an analysis tool's Group by box to group results by respondent"
           >
             <span style={{ width: 12, display: 'inline-flex', justifyContent: 'center', flexShrink: 0 }}>
               <Icon icon={respondentsOpen ? faChevronDown : faChevronRight} style={{ fontSize: 9, color: 'var(--text-muted)' }} />

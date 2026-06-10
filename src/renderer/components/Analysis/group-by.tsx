@@ -1,5 +1,10 @@
 import type { AnalysisInitData } from '../../models/types'
-import { Icon, faXmark, faFolder, faTag, faTags } from '../Icon'
+import { Icon, faXmark, faFolder, faTag, faTags, faUser } from '../Icon'
+
+/** Drag MIME emitted by the Document Browser's survey "Respondents"
+ *  header. Carries no payload — its presence means "group surveys by
+ *  respondent". */
+export const RESPONDENTS_GROUP_MIME = 'application/x-magnolia-survey-respondents'
 
 /** A single Group-by entry. Drives the column/row breakdown in the
  *  analysis grids. Tags become a flat slot; categories and folders
@@ -14,6 +19,10 @@ export type GroupByEntry =
   | { kind: 'tag'; tagGuid: string; name?: string }
   | { kind: 'category'; categoryGuid: string; name?: string }
   | { kind: 'folder'; folderGuid: string; name?: string }
+  // Each in-scope survey becomes a band of its respondents (one slot
+  // per respondent + a whole-survey subtotal). A single entry covers
+  // every survey in scope; non-survey documents are unaffected.
+  | { kind: 'respondents' }
 
 export interface GroupedSlot {
   id: string
@@ -30,9 +39,12 @@ export interface GroupedHeader {
 
 /** Stable key for dedup. */
 export function groupByKey(e: GroupByEntry): string {
-  return e.kind === 'tag' ? `t:${e.tagGuid}`
-    : e.kind === 'category' ? `c:${e.categoryGuid}`
-      : `f:${e.folderGuid}`
+  switch (e.kind) {
+    case 'tag': return `t:${e.tagGuid}`
+    case 'category': return `c:${e.categoryGuid}`
+    case 'folder': return `f:${e.folderGuid}`
+    case 'respondents': return 'respondents'
+  }
 }
 
 /** Append entries to an existing group-by list, dropping duplicates. */
@@ -57,6 +69,10 @@ export function mergeGroupBy(prev: GroupByEntry[], fresh: GroupByEntry[]): Group
  *  can render correctly even if the analysis window's data snapshot
  *  doesn't contain the entity. */
 export function parseGroupByDrop(e: React.DragEvent): GroupByEntry[] {
+  // The survey "Respondents" header carries only this marker MIME.
+  if (e.dataTransfer.types.includes(RESPONDENTS_GROUP_MIME)) {
+    return [{ kind: 'respondents' }]
+  }
   const folderGuid = e.dataTransfer.getData('application/x-magnolia-folder')
   if (folderGuid) {
     let name: string | undefined
@@ -89,7 +105,8 @@ export function isGroupByDrag(e: React.DragEvent): boolean {
   return (
     types.includes('application/x-magnolia-tag') ||
     types.includes('application/x-magnolia-category') ||
-    types.includes('application/x-magnolia-folder')
+    types.includes('application/x-magnolia-folder') ||
+    types.includes(RESPONDENTS_GROUP_MIME)
   )
 }
 
@@ -174,7 +191,7 @@ export function buildGroupedSlots(
         slots.push({ id: `cat:${entry.categoryGuid}:subtotal`, label: 'Subtotal', sourceGuids: Array.from(subtotalSet), isSubtotal: true })
       }
       groups.push({ id: `cat:${entry.categoryGuid}`, label: cat.name, span: slots.length - before })
-    } else {
+    } else if (entry.kind === 'folder') {
       const folder = (data.folders || []).find((f) => f.guid === entry.folderGuid)
       if (!folder) continue
       const folderSet = descendantFolderGuids(data.folders || [], entry.folderGuid)
@@ -225,6 +242,15 @@ export function GroupByChips({
   return (
     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
       {groupBy.map((entry) => {
+        if (entry.kind === 'respondents') {
+          return (
+            <span key="respondents" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 600, border: '1px solid var(--border-color)' }}>
+              <Icon icon={faUser} style={{ fontSize: 10, color: 'var(--text-muted)' }} />
+              Respondents
+              <span onClick={() => onRemove(entry)} style={{ fontSize: 9, color: 'var(--text-muted)', cursor: 'pointer' }}><Icon icon={faXmark} /></span>
+            </span>
+          )
+        }
         if (entry.kind === 'tag') {
           const tag = data.tags.find((t) => t.guid === entry.tagGuid)
           return (

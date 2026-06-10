@@ -20,6 +20,13 @@ import {
   migrateLegacyGroupBy,
   GroupByChips
 } from './group-by'
+import {
+  buildSurveyAwareColumns,
+  hasSurveyInScope,
+  QuestionScopeBox,
+  type AnalysisColumn,
+  type QuestionScopeRef
+} from './survey-grouping'
 import { useLiveAnalysisData } from './use-live-analysis-data'
 import { EditableTitleSuffix } from '../EditableTitleSuffix'
 import { renameSavedAnalysis } from '../../utils/rename-saved-analysis'
@@ -36,6 +43,7 @@ interface Props {
     wordCount: number
     groupByTags?: string[]
     groupBy?: GroupByEntry[]
+    questionScope?: QuestionScopeRef[]
     guid: string
     name: string
   }
@@ -138,8 +146,13 @@ export function WordFrequencies({ data: propData, savedConfig, inTab }: Props) {
   const [groupBy, setGroupBy] = useState<GroupByEntry[]>(
     () => savedConfig?.groupBy ?? migrateLegacyGroupBy(savedConfig?.groupByTags)
   )
+  const [questionScope, setQuestionScope] = useState<QuestionScopeRef[]>(savedConfig?.questionScope ?? [])
+  const respondentsDismissed = useRef(false)
   const live = useLiveAnalysisData()
-  const data = useMemo(() => applySurveyCellScope({ ...propData, ...live }, docFilter), [propData, live, docFilter])
+  const data = useMemo(() => {
+    const base = applySurveyCellScope({ ...propData, ...live }, docFilter)
+    return questionScope.length > 0 ? applySurveyCellScope(base, { questionScope }) : base
+  }, [propData, live, docFilter, questionScope])
   const [tagDropOver, setTagDropOver] = useState(false)
   const [includeWords, setIncludeWords] = useState(savedConfig?.includeWords ?? '')
   const [excludeWords, setExcludeWords] = useState(savedConfig?.excludeWords ?? Array.from(STOP_WORDS).join(', '))
@@ -154,15 +167,16 @@ export function WordFrequencies({ data: propData, savedConfig, inTab }: Props) {
 
   // Dirty tracking (see useToolDirtyState).
   const currentConfig = useMemo(
-    () => ({ docFilter, includeWords, excludeWords, wordCount, groupBy }),
-    [docFilter, includeWords, excludeWords, wordCount, groupBy]
+    () => ({ docFilter, includeWords, excludeWords, wordCount, groupBy, questionScope }),
+    [docFilter, includeWords, excludeWords, wordCount, groupBy, questionScope]
   )
   const initialBaseline = useMemo(() => ({
     docFilter: savedConfig?.docFilter ?? emptyDocumentFilter(),
     includeWords: savedConfig?.includeWords ?? '',
     excludeWords: savedConfig?.excludeWords ?? Array.from(STOP_WORDS).join(', '),
     wordCount: savedConfig?.wordCount ?? 30,
-    groupBy: savedConfig?.groupBy ?? migrateLegacyGroupBy(savedConfig?.groupByTags)
+    groupBy: savedConfig?.groupBy ?? migrateLegacyGroupBy(savedConfig?.groupByTags),
+    questionScope: savedConfig?.questionScope ?? []
   }), [])
   const { dirty, baseline, setBaseline } = useToolDirtyState(currentConfig, initialBaseline, inTab)
 
@@ -172,12 +186,23 @@ export function WordFrequencies({ data: propData, savedConfig, inTab }: Props) {
     setExcludeWords(baseline.excludeWords)
     setWordCount(baseline.wordCount)
     setGroupBy(baseline.groupBy)
+    setQuestionScope(baseline.questionScope ?? [])
   }, [baseline])
 
   const filteredSourceGuids = useMemo(
     () => resolveFilteredSources(data, docFilter.sourceGuids, docFilter.tagGuids, docFilter.tagExcludeGuids, docFilter.typeInclude, docFilter.typeExclude),
     [data, docFilter]
   )
+
+  // Auto-add "Respondents" grouping when a survey first enters scope on a
+  // fresh, never-saved analysis; removing the chip prevents re-adding.
+  useEffect(() => {
+    if (respondentsDismissed.current || savedConfig) return
+    if (groupBy.some((e) => e.kind === 'respondents')) return
+    if (hasSurveyInScope(filteredSourceGuids, data)) {
+      setGroupBy((p) => mergeGroupBy(p, [{ kind: 'respondents' }]))
+    }
+  }, [filteredSourceGuids, data, groupBy, savedConfig])
 
   const handleTagDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -187,6 +212,7 @@ export function WordFrequencies({ data: propData, savedConfig, inTab }: Props) {
   }, [])
 
   const handleRemoveGroupBy = useCallback((entry: GroupByEntry) => {
+    if (entry.kind === 'respondents') respondentsDismissed.current = true
     const key = groupByKey(entry)
     setGroupBy((p) => p.filter((e) => groupByKey(e) !== key))
   }, [])
@@ -227,95 +253,32 @@ export function WordFrequencies({ data: propData, savedConfig, inTab }: Props) {
     return m
   }, [data.sources])
 
-  // Series build: copied from ResultsInDocuments (renamed cols → series
-  // since group-by adds chart series here). Default state collapses to
-  // a single "All" series across the filtered source set.
+  // Series build. Default (no group-by) collapses to a single "All"
+  // series across the filtered source set; otherwise the shared,
+  // survey-aware builder produces tag/category/folder bands and the
+  // Respondents grouping (columns renamed → chart series here).
   const { series, seriesGroups } = useMemo(() => {
     if (groupBy.length === 0) {
-      return {
-        series: [{ id: '__all', label: 'All', sourceGuids: filteredSourceGuids, isSubtotal: false }],
-        seriesGroups: [] as { id: string; label: string | null; span: number }[]
-      }
+      const all: AnalysisColumn[] = [{ id: '__all', label: 'All', sourceGuids: filteredSourceGuids }]
+      return { series: all, seriesGroups: [] as { id: string; label: string | null; span: number }[] }
     }
-    const descendantFolderGuids = (rootGuid: string): Set<string> => {
-      const set = new Set<string>([rootGuid])
-      let added = true
-      while (added) {
-        added = false
-        for (const f of (data.folders || [])) {
-          if (f.parentGuid && set.has(f.parentGuid) && !set.has(f.guid)) {
-            set.add(f.guid)
-            added = true
-          }
-        }
-      }
-      return set
-    }
-    const ss: { id: string; label: string; sourceGuids: string[]; isSubtotal: boolean }[] = []
-    const groups: { id: string; label: string | null; span: number }[] = []
-    for (const entry of groupBy) {
-      if (entry.kind === 'tag') {
-        const tag = data.tags.find((t) => t.guid === entry.tagGuid)
-        if (!tag) continue
-        const members = (data.tagMembers[entry.tagGuid] || []).filter((g) => filteredSourceGuids.includes(g))
-        ss.push({ id: `tag:${entry.tagGuid}`, label: tag.value || tag.name || 'Tag', sourceGuids: members, isSubtotal: false })
-        groups.push({ id: `tag:${entry.tagGuid}`, label: null, span: 1 })
-      } else if (entry.kind === 'category') {
-        const cat = data.categories.find((c) => c.guid === entry.categoryGuid)
-        if (!cat) continue
-        const childTags = data.tags.filter((t) => t.categoryGuid === entry.categoryGuid)
-        if (childTags.length === 0) continue
-        const before = ss.length
-        for (const tag of childTags) {
-          const members = (data.tagMembers[tag.guid] || []).filter((g) => filteredSourceGuids.includes(g))
-          ss.push({ id: `cat:${entry.categoryGuid}:tag:${tag.guid}`, label: tag.value || tag.name || 'Tag', sourceGuids: members, isSubtotal: false })
-        }
-        const subtotalSet = new Set<string>()
-        for (const tag of childTags) {
-          for (const g of (data.tagMembers[tag.guid] || [])) {
-            if (filteredSourceGuids.includes(g)) subtotalSet.add(g)
-          }
-        }
-        ss.push({ id: `cat:${entry.categoryGuid}:subtotal`, label: 'Subtotal', sourceGuids: Array.from(subtotalSet), isSubtotal: true })
-        groups.push({ id: `cat:${entry.categoryGuid}`, label: cat.name, span: ss.length - before })
-      } else {
-        const folder = (data.folders || []).find((f) => f.guid === entry.folderGuid)
-        if (!folder) continue
-        const folderSet = descendantFolderGuids(entry.folderGuid)
-        const folderDocs = filteredSourceGuids.filter((g) => {
-          const fg = data.sourceFolder?.[g]
-          return fg ? folderSet.has(fg) : false
-        })
-        if (folderDocs.length === 0) continue
-        const before = ss.length
-        for (const docGuid of folderDocs) {
-          ss.push({ id: `folder:${entry.folderGuid}:doc:${docGuid}`, label: sourceMap.get(docGuid) || 'Document', sourceGuids: [docGuid], isSubtotal: false })
-        }
-        ss.push({ id: `folder:${entry.folderGuid}:subtotal`, label: 'Subtotal', sourceGuids: [...folderDocs], isSubtotal: true })
-        groups.push({ id: `folder:${entry.folderGuid}`, label: folder.name, span: ss.length - before })
-      }
-    }
-    const taggedGuids = new Set(ss.filter((s) => !s.isSubtotal).flatMap((s) => s.sourceGuids))
-    const otherGuids = filteredSourceGuids.filter((g) => !taggedGuids.has(g))
-    if (otherGuids.length > 0) {
-      ss.push({ id: '__other', label: 'Other', sourceGuids: otherGuids, isSubtotal: false })
-      groups.push({ id: '__other', label: null, span: 1 })
-    }
-    return { series: ss, seriesGroups: groups }
-  }, [groupBy, filteredSourceGuids, data.tags, data.tagMembers, data.categories, data.folders, data.sourceFolder, sourceMap])
+    const built = buildSurveyAwareColumns(groupBy, data, filteredSourceGuids, sourceMap, { includeSubtotals: true })
+    return { series: built.columns, seriesGroups: built.headerGroups }
+  }, [groupBy, filteredSourceGuids, data, sourceMap])
 
-  // Word frequency helper: count words for a set of source GUIDs
-  const countWords = useCallback((sourceGuids: string[]) => {
+  // Word frequency helper: count words for a set of source GUIDs within
+  // a given (possibly respondent-scoped) data snapshot.
+  const countWordsIn = useCallback((d: AnalysisInitData, sourceGuids: string[]) => {
     const freq = new Map<string, number>()
     for (const sg of sourceGuids) {
-      const src = data.sources.find((s) => s.guid === sg)
+      const src = d.sources.find((s) => s.guid === sg)
       let text: string
       if ((src as { sourceType?: string } | undefined)?.sourceType === 'survey') {
         // A survey's analysable text is its codable (open-ended) answers,
         // not the raw CSV (which holds headers, metadata, closed answers).
-        text = (data.surveyCodableCells?.[sg] || []).map((c) => c.text).join('\n')
+        text = (d.surveyCodableCells?.[sg] || []).map((c) => c.text).join('\n')
       } else {
-        text = data.sourceContents[sg]
+        text = d.sourceContents[sg]
         if (text) {
           // Strip formatting syntax so we count content words only
           const st = src ? sourceTypeFromFilename(src.name) : 'text'
@@ -332,12 +295,17 @@ export function WordFrequencies({ data: propData, savedConfig, inTab }: Props) {
       }
     }
     return freq
-  }, [data.sourceContents, data.sources, data.surveyCodableCells, excludeSet, includeSet])
+  }, [excludeSet, includeSet])
 
-  // Per-series frequency maps
+  // Per-series frequency maps. A respondent series counts only that
+  // respondent's codable cells (surveyCodableCells scoped to the
+  // respondent first); other series read the shared data directly.
   const seriesFreqs = useMemo(() => {
-    return series.map((s) => countWords(s.sourceGuids))
-  }, [series, countWords])
+    return series.map((s) => {
+      const sd = s.respondentRef ? applySurveyCellScope(data, { respondentScope: [s.respondentRef] }) : data
+      return countWordsIn(sd, s.sourceGuids)
+    })
+  }, [series, data, countWordsIn])
 
   // Overall word frequencies (sum across all series) for ranking + table
   const wordFreqs = useMemo(() => {
@@ -474,12 +442,12 @@ export function WordFrequencies({ data: propData, savedConfig, inTab }: Props) {
       guid: analysisGuid,
       toolType: 'word-frequencies',
       name,
-      config: { docFilter, includeWords, excludeWords, wordCount, groupBy }
+      config: { docFilter, includeWords, excludeWords, wordCount, groupBy, questionScope }
     })
-    setBaseline({ docFilter, includeWords, excludeWords, wordCount, groupBy })
+    setBaseline({ docFilter, includeWords, excludeWords, wordCount, groupBy, questionScope })
     if (inTab) inTab.onSaved(analysisGuid, name)
     else setTimeout(() => window.close(), 200)
-  }, [analysisGuid, docFilter, includeWords, excludeWords, wordCount, groupBy, inTab, setBaseline])
+  }, [analysisGuid, docFilter, includeWords, excludeWords, wordCount, groupBy, questionScope, inTab, setBaseline])
 
   useRegisterToolSave(inTab?.tabId, () => {
     if (isExisting) {
@@ -602,6 +570,11 @@ export function WordFrequencies({ data: propData, savedConfig, inTab }: Props) {
             }} />
           )}
         </div>
+
+        {/* Questions scope — only meaningful when a survey is analysed. */}
+        {hasSurveyInScope(filteredSourceGuids, data) && (
+          <QuestionScopeBox value={questionScope} onChange={setQuestionScope} data={data} />
+        )}
 
         {/* Include/Exclude words */}
         <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>

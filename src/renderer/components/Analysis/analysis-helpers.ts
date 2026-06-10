@@ -1,5 +1,27 @@
-import type { PlainTextSelection, AnalysisInitData } from '../../models/types'
+import type { PlainTextSelection, AnalysisInitData, SurveyEntityRef } from '../../models/types'
 import { resolveTagCellScope } from '../../utils/survey-cell-scope'
+
+/** Build a cell predicate from a list of (survey, entity) refs. A survey
+ *  that appears in the list is restricted to its listed entities; a
+ *  survey NOT in the list is left untouched (all its cells pass). This
+ *  matches the "global per question/respondent node; others = all"
+ *  semantics used by the Questions scope box and Respondents grouping.
+ *  Returns null when there's no constraint. */
+function entityScopePredicate(
+  refs: SurveyEntityRef[] | undefined
+): ((sourceGuid: string, entityId: string) => boolean) | null {
+  if (!refs || refs.length === 0) return null
+  const bySurvey = new Map<string, Set<string>>()
+  for (const r of refs) {
+    let set = bySurvey.get(r.sourceGuid)
+    if (!set) { set = new Set(); bySurvey.set(r.sourceGuid, set) }
+    set.add(r.id)
+  }
+  return (sourceGuid, entityId) => {
+    const set = bySurvey.get(sourceGuid)
+    return set ? set.has(entityId) : true
+  }
+}
 
 /** Truncate a string to maxLen chars, adding ellipsis */
 export function truncate(s: string, maxLen: number): string {
@@ -302,31 +324,51 @@ export function resolveFilteredSources(
  */
 export function applySurveyCellScope(
   data: AnalysisInitData,
-  filter: { tagGuids?: string[]; tagExcludeGuids?: string[] }
+  filter: {
+    tagGuids?: string[]
+    tagExcludeGuids?: string[]
+    /** Restrict listed surveys to these respondents (per the
+     *  Respondents grouping — one ref per respondent column). */
+    respondentScope?: SurveyEntityRef[]
+    /** Restrict listed surveys to these questions (the Questions
+     *  scope box — applied globally to the analysis). */
+    questionScope?: SurveyEntityRef[]
+  }
 ): AnalysisInitData {
   const scope = resolveTagCellScope(filter, {
     sourceMembersByTag: data.tagMembers,
     respondentMembersByTag: data.respondentTagMembers ?? {},
     questionMembersByTag: data.questionTagMembers ?? {}
   })
-  if (!scope.hasConstraint) return data
+  const respondentPred = entityScopePredicate(filter.respondentScope)
+  const questionPred = entityScopePredicate(filter.questionScope)
+  // Nothing to do — common fast path.
+  if (!scope.hasConstraint && !respondentPred && !questionPred) return data
+
+  // A survey cell is kept only if it satisfies every active scope: the
+  // tag scope AND the respondent scope AND the question scope.
+  const cellKept = (sg: string, respondentId: string, questionId: string): boolean => {
+    if (scope.hasConstraint && !scope.cellInScope(sg, respondentId, questionId)) return false
+    if (respondentPred && !respondentPred(sg, respondentId)) return false
+    if (questionPred && !questionPred(sg, questionId)) return false
+    return true
+  }
+
   const scoped: Record<string, PlainTextSelection[]> = {}
   for (const sg of Object.keys(data.sourceSelections)) {
     const sels = data.sourceSelections[sg]
     scoped[sg] = sels.filter(
-      (sel) =>
-        !sel.surveyCell ||
-        scope.cellInScope(sg, sel.surveyCell.respondentId, sel.surveyCell.questionId)
+      (sel) => !sel.surveyCell || cellKept(sg, sel.surveyCell.respondentId, sel.surveyCell.questionId)
     )
   }
   // Scope the codable-cell denominator the same way, so "% of survey"
-  // is relative to the in-scope cells (not the whole survey) when a tag
+  // is relative to the in-scope cells (not the whole survey) when a
   // filter narrows to specific respondents/questions.
   let scopedCells = data.surveyCodableCells
   if (scopedCells) {
     const next: NonNullable<AnalysisInitData['surveyCodableCells']> = {}
     for (const sg of Object.keys(scopedCells)) {
-      next[sg] = scopedCells[sg].filter((c) => scope.cellInScope(sg, c.respondentId, c.questionId))
+      next[sg] = scopedCells[sg].filter((c) => cellKept(sg, c.respondentId, c.questionId))
     }
     scopedCells = next
   }

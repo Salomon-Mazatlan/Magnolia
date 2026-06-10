@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import type { AnalysisInitData } from '../../models/types'
 import { Icon, faFileCodeCorner, faChevronDown, faChevronRight } from '../Icon'
 import { toolColors } from '../../utils/tool-colors'
@@ -7,7 +7,7 @@ import {
   emptyDocumentFilter,
   type DocumentFilterState
 } from '../DocumentSelector/DocumentSelector'
-import { truncate, countCodeInSource, toCsv, resolveFilteredSources, applySurveyCellScope, tagColumnSources, binarizeGrid } from './analysis-helpers'
+import { truncate, countCodeInSource, toCsv, resolveFilteredSources, applySurveyCellScope, binarizeGrid } from './analysis-helpers'
 import { generateGuid } from '../../utils/guid'
 import {
   type GroupByEntry,
@@ -18,6 +18,12 @@ import {
   migrateLegacyGroupBy,
   GroupByChips
 } from './group-by'
+import {
+  buildSurveyAwareColumns,
+  hasSurveyInScope,
+  QuestionScopeBox,
+  type QuestionScopeRef
+} from './survey-grouping'
 import { useLiveAnalysisData } from './use-live-analysis-data'
 import { EditableTitleSuffix } from '../EditableTitleSuffix'
 import { renameSavedAnalysis } from '../../utils/rename-saved-analysis'
@@ -31,8 +37,10 @@ interface Props {
     docFilter: DocumentFilterState
     /** Legacy: pre-category support. Migrated on load. */
     groupByTags?: string[]
-    /** New shape: tags + categories + folders. */
+    /** New shape: tags + categories + folders + respondents. */
     groupBy?: GroupByEntry[]
+    /** Survey questions the analysis is scoped to (empty = all). */
+    questionScope?: QuestionScopeRef[]
     guid: string
     name: string
   }
@@ -70,8 +78,17 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
   const [groupBy, setGroupBy] = useState<GroupByEntry[]>(
     () => savedConfig?.groupBy ?? migrateLegacyGroupBy(savedConfig?.groupByTags)
   )
+  const [questionScope, setQuestionScope] = useState<QuestionScopeRef[]>(savedConfig?.questionScope ?? [])
+  // Once the user removes the auto-added Respondents grouping, don't
+  // re-seed it (they can drag it back from the Document Browser).
+  const respondentsDismissed = useRef(false)
   const live = useLiveAnalysisData()
-  const data = useMemo(() => applySurveyCellScope({ ...propData, ...live }, docFilter), [propData, live, docFilter])
+  const data = useMemo(() => {
+    const base = applySurveyCellScope({ ...propData, ...live }, docFilter)
+    // Question scope narrows the whole analysis to the chosen survey
+    // questions (surveys with no chosen question keep all of theirs).
+    return questionScope.length > 0 ? applySurveyCellScope(base, { questionScope }) : base
+  }, [propData, live, docFilter, questionScope])
   const [visualMode, setVisualMode] = useState(false)
   const [binaryMode, setBinaryMode] = useState(false)
   const [docSectionOpen, setDocSectionOpen] = useState(false)
@@ -86,13 +103,14 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
   // never-saved tools). Save updates the baseline; Discard restores the
   // working state from it.
   const currentConfig = useMemo(
-    () => ({ codeGuids, docFilter, groupBy }),
-    [codeGuids, docFilter, groupBy]
+    () => ({ codeGuids, docFilter, groupBy, questionScope }),
+    [codeGuids, docFilter, groupBy, questionScope]
   )
   const initialBaseline = useMemo(() => ({
     codeGuids: savedConfig?.codeGuids ?? [],
     docFilter: savedConfig?.docFilter ?? emptyDocumentFilter(),
-    groupBy: savedConfig?.groupBy ?? migrateLegacyGroupBy(savedConfig?.groupByTags)
+    groupBy: savedConfig?.groupBy ?? migrateLegacyGroupBy(savedConfig?.groupByTags),
+    questionScope: savedConfig?.questionScope ?? []
   }), [])
   const { dirty, baseline, setBaseline } = useToolDirtyState(currentConfig, initialBaseline, inTab)
 
@@ -100,12 +118,25 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
     setCodeGuids(baseline.codeGuids)
     setDocFilter(baseline.docFilter)
     setGroupBy(baseline.groupBy)
+    setQuestionScope(baseline.questionScope ?? [])
   }, [baseline])
 
   const filteredSourceGuids = useMemo(
     () => resolveFilteredSources(data, docFilter.sourceGuids, docFilter.tagGuids, docFilter.tagExcludeGuids, docFilter.typeInclude, docFilter.typeExclude),
     [data, docFilter]
   )
+
+  // Auto-add "Respondents" grouping the first time a survey is in scope
+  // (for a fresh, never-saved analysis). Saved analyses keep exactly the
+  // grouping they were saved with; removing the chip sets the dismissed
+  // flag so it isn't re-added.
+  useEffect(() => {
+    if (respondentsDismissed.current || savedConfig) return
+    if (groupBy.some((e) => e.kind === 'respondents')) return
+    if (hasSurveyInScope(filteredSourceGuids, data)) {
+      setGroupBy((p) => mergeGroupBy(p, [{ kind: 'respondents' }]))
+    }
+  }, [filteredSourceGuids, data, groupBy, savedConfig])
 
   const codeMap = useMemo(() => {
     const m = new Map<string, { name: string; color?: string; parentGuid?: string }>()
@@ -119,89 +150,27 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
     return m
   }, [data.sources])
 
-  // Column build: copied verbatim from ResultsInDocuments (which works
-  // for tags + categories + folders) so the four analysis tools share an
-  // identical, in-component implementation rather than depending on the
-  // shared module. Keeps every fix to one tool trivially portable.
-  const { columns, headerGroups, hasGroupedHeader } = useMemo(() => {
-    if (groupBy.length === 0) {
-      const cols: { id: string; label: string; sourceGuids: string[]; isSubtotal?: boolean; tagScopeGuids?: string[] }[] = filteredSourceGuids.map((g) => ({
-        id: g,
-        label: sourceMap.get(g) || 'Document',
-        sourceGuids: [g]
-      }))
-      return { columns: cols, headerGroups: [] as { id: string; label: string | null; span: number }[], hasGroupedHeader: false }
-    }
-    const descendantFolderGuids = (rootGuid: string): Set<string> => {
-      const set = new Set<string>([rootGuid])
-      let added = true
-      while (added) {
-        added = false
-        for (const f of (data.folders || [])) {
-          if (f.parentGuid && set.has(f.parentGuid) && !set.has(f.guid)) {
-            set.add(f.guid)
-            added = true
-          }
-        }
-      }
-      return set
-    }
-    const cols: { id: string; label: string; sourceGuids: string[]; isSubtotal?: boolean; tagScopeGuids?: string[] }[] = []
-    const groups: { id: string; label: string | null; span: number }[] = []
-    for (const entry of groupBy) {
-      if (entry.kind === 'tag') {
-        const tag = data.tags.find((t) => t.guid === entry.tagGuid)
-        if (!tag) continue
-        const members = tagColumnSources(data, entry.tagGuid, filteredSourceGuids)
-        cols.push({ id: `tag:${entry.tagGuid}`, label: tag.value || tag.name || 'Tag', sourceGuids: members, tagScopeGuids: [entry.tagGuid] })
-        groups.push({ id: `tag:${entry.tagGuid}`, label: null, span: 1 })
-      } else if (entry.kind === 'category') {
-        const cat = data.categories.find((c) => c.guid === entry.categoryGuid)
-        if (!cat) continue
-        const childTags = data.tags.filter((t) => t.categoryGuid === entry.categoryGuid)
-        if (childTags.length === 0) continue
-        const before = cols.length
-        for (const tag of childTags) {
-          const members = tagColumnSources(data, tag.guid, filteredSourceGuids)
-          cols.push({ id: `cat:${entry.categoryGuid}:tag:${tag.guid}`, label: tag.value || tag.name || 'Tag', sourceGuids: members, tagScopeGuids: [tag.guid] })
-        }
-        const subtotalSet = new Set<string>()
-        for (const tag of childTags) for (const g of tagColumnSources(data, tag.guid, filteredSourceGuids)) subtotalSet.add(g)
-        cols.push({ id: `cat:${entry.categoryGuid}:subtotal`, label: 'Subtotal', sourceGuids: Array.from(subtotalSet), isSubtotal: true, tagScopeGuids: childTags.map((t) => t.guid) })
-        groups.push({ id: `cat:${entry.categoryGuid}`, label: cat.name, span: cols.length - before })
-      } else {
-        const folder = (data.folders || []).find((f) => f.guid === entry.folderGuid)
-        if (!folder) continue
-        const folderSet = descendantFolderGuids(entry.folderGuid)
-        const folderDocs = filteredSourceGuids.filter((g) => {
-          const fg = data.sourceFolder?.[g]
-          return fg ? folderSet.has(fg) : false
-        })
-        if (folderDocs.length === 0) continue
-        const before = cols.length
-        for (const docGuid of folderDocs) {
-          cols.push({ id: `folder:${entry.folderGuid}:doc:${docGuid}`, label: sourceMap.get(docGuid) || 'Document', sourceGuids: [docGuid] })
-        }
-        cols.push({ id: `folder:${entry.folderGuid}:subtotal`, label: 'Subtotal', sourceGuids: [...folderDocs], isSubtotal: true })
-        groups.push({ id: `folder:${entry.folderGuid}`, label: folder.name, span: cols.length - before })
-      }
-    }
-    const taggedGuids = new Set(cols.filter((c) => !c.isSubtotal).flatMap((c) => c.sourceGuids))
-    const otherGuids = filteredSourceGuids.filter((g) => !taggedGuids.has(g))
-    if (otherGuids.length > 0) {
-      cols.push({ id: '__other', label: 'Other', sourceGuids: otherGuids })
-      groups.push({ id: '__other', label: null, span: 1 })
-    }
-    const hasGroupedHeader = groups.some((g) => g.label !== null)
-    return { columns: cols, headerGroups: groups, hasGroupedHeader }
-  }, [filteredSourceGuids, groupBy, data.tags, data.tagMembers, data.categories, data.folders, data.sourceFolder, sourceMap])
+  // Column build via the shared, survey-aware builder (handles tags,
+  // categories, folders, the Respondents grouping, and the "Other"
+  // catch-all) — the same builder every grid tool uses.
+  const { columns, headerGroups, hasGroupedHeader } = useMemo(
+    () => buildSurveyAwareColumns(groupBy, data, filteredSourceGuids, sourceMap),
+    [filteredSourceGuids, groupBy, data, sourceMap]
+  )
 
   const grid = useMemo(() => {
-    // Per-column survey-cell scope so a tag column counts only that
-    // tag's cells (see CodeFrequencies for the rationale).
+    // Per-column survey-cell scope: a tag column counts only that tag's
+    // cells; a respondent column counts only that respondent's cells.
     const colData = new Map<string, AnalysisInitData>()
     for (const col of columns) {
-      colData.set(col.id, col.tagScopeGuids ? applySurveyCellScope(data, { tagGuids: col.tagScopeGuids }) : data)
+      colData.set(
+        col.id,
+        col.respondentRef
+          ? applySurveyCellScope(data, { respondentScope: [col.respondentRef] })
+          : col.tagScopeGuids
+            ? applySurveyCellScope(data, { tagGuids: col.tagScopeGuids })
+            : data
+      )
     }
     return codeGuids.map((codeGuid) =>
       columns.map((col) => {
@@ -335,6 +304,7 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
   }, [])
 
   const handleRemoveGroupBy = useCallback((entry: GroupByEntry) => {
+    if (entry.kind === 'respondents') respondentsDismissed.current = true
     const key = groupByKey(entry)
     setGroupBy((p) => p.filter((e) => groupByKey(e) !== key))
   }, [])
@@ -352,12 +322,12 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
       guid: analysisGuid,
       toolType: 'codes-in-documents',
       name,
-      config: { codeGuids, docFilter, groupBy }
+      config: { codeGuids, docFilter, groupBy, questionScope }
     })
-    setBaseline({ codeGuids, docFilter, groupBy })
+    setBaseline({ codeGuids, docFilter, groupBy, questionScope })
     if (inTab) inTab.onSaved(analysisGuid, name)
     else setTimeout(() => window.close(), 200)
-  }, [analysisGuid, codeGuids, docFilter, groupBy, inTab, setBaseline])
+  }, [analysisGuid, codeGuids, docFilter, groupBy, questionScope, inTab, setBaseline])
 
   // Register the save handler so the TabBar's unsaved-changes dialog
   // can fire it when the user picks Save while closing this tab.
@@ -487,6 +457,11 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
             }} />
           )}
         </div>
+
+        {/* Questions scope \u2014 only meaningful when a survey is analysed. */}
+        {hasSurveyInScope(filteredSourceGuids, data) && (
+          <QuestionScopeBox value={questionScope} onChange={setQuestionScope} data={data} />
+        )}
 
         {/* Results Grid \u2014 entire section accepts code drops. */}
         <div

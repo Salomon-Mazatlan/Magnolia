@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import type { AnalysisInitData } from '../../models/types'
 import { Icon, faChartBar, faChevronDown, faChevronRight, faCircleInfo } from '../Icon'
 import { toolColors } from '../../utils/tool-colors'
@@ -7,7 +7,7 @@ import {
   emptyDocumentFilter,
   type DocumentFilterState
 } from '../DocumentSelector/DocumentSelector'
-import { truncate, codeFrequencyInSource, toCsv, resolveFilteredSources, applySurveyCellScope, tagColumnSources } from './analysis-helpers'
+import { truncate, codeFrequencyInSource, toCsv, resolveFilteredSources, applySurveyCellScope } from './analysis-helpers'
 import { generateGuid } from '../../utils/guid'
 import {
   type GroupByEntry,
@@ -18,6 +18,12 @@ import {
   migrateLegacyGroupBy,
   GroupByChips
 } from './group-by'
+import {
+  buildSurveyAwareColumns,
+  hasSurveyInScope,
+  QuestionScopeBox,
+  type QuestionScopeRef
+} from './survey-grouping'
 import { useLiveAnalysisData } from './use-live-analysis-data'
 import { EditableTitleSuffix } from '../EditableTitleSuffix'
 import { renameSavedAnalysis } from '../../utils/rename-saved-analysis'
@@ -32,6 +38,7 @@ interface Props {
     docFilter: DocumentFilterState
     groupByTags?: string[]
     groupBy?: GroupByEntry[]
+    questionScope?: QuestionScopeRef[]
     guid: string
     name: string
   }
@@ -51,11 +58,18 @@ export function CodeFrequencies({ data: propData, savedConfig, inTab }: Props) {
   const [groupBy, setGroupBy] = useState<GroupByEntry[]>(
     () => savedConfig?.groupBy ?? migrateLegacyGroupBy(savedConfig?.groupByTags)
   )
+  const [questionScope, setQuestionScope] = useState<QuestionScopeRef[]>(savedConfig?.questionScope ?? [])
+  const respondentsDismissed = useRef(false)
   const live = useLiveAnalysisData()
   // Scope survey-cell selections to the tag filter so all metrics are
   // cell-precise (a survey tagged via one respondent counts only that
   // respondent's coded cells). No-op when no tag constraint is active.
-  const data = useMemo(() => applySurveyCellScope({ ...propData, ...live }, docFilter), [propData, live, docFilter])
+  // The Questions scope narrows the analysis to the chosen survey
+  // questions on top of that.
+  const data = useMemo(() => {
+    const base = applySurveyCellScope({ ...propData, ...live }, docFilter)
+    return questionScope.length > 0 ? applySurveyCellScope(base, { questionScope }) : base
+  }, [propData, live, docFilter, questionScope])
   const [docSectionOpen, setDocSectionOpen] = useState(false)
   const [dropOver, setDropOver] = useState(false)
   const [tagDropOver, setTagDropOver] = useState(false)
@@ -70,13 +84,14 @@ export function CodeFrequencies({ data: propData, savedConfig, inTab }: Props) {
   // Dirty tracking (see useToolDirtyState — baseline is the saved
   // config or empty defaults; refreshed on save, restored on discard).
   const currentConfig = useMemo(
-    () => ({ codeGuids, docFilter, groupBy }),
-    [codeGuids, docFilter, groupBy]
+    () => ({ codeGuids, docFilter, groupBy, questionScope }),
+    [codeGuids, docFilter, groupBy, questionScope]
   )
   const initialBaseline = useMemo(() => ({
     codeGuids: savedConfig?.codeGuids ?? [],
     docFilter: savedConfig?.docFilter ?? emptyDocumentFilter(),
-    groupBy: savedConfig?.groupBy ?? migrateLegacyGroupBy(savedConfig?.groupByTags)
+    groupBy: savedConfig?.groupBy ?? migrateLegacyGroupBy(savedConfig?.groupByTags),
+    questionScope: savedConfig?.questionScope ?? []
   }), [])
   const { dirty, baseline, setBaseline } = useToolDirtyState(currentConfig, initialBaseline, inTab)
 
@@ -84,12 +99,24 @@ export function CodeFrequencies({ data: propData, savedConfig, inTab }: Props) {
     setCodeGuids(baseline.codeGuids)
     setDocFilter(baseline.docFilter)
     setGroupBy(baseline.groupBy)
+    setQuestionScope(baseline.questionScope ?? [])
   }, [baseline])
 
   const filteredSourceGuids = useMemo(
     () => resolveFilteredSources(data, docFilter.sourceGuids, docFilter.tagGuids, docFilter.tagExcludeGuids, docFilter.typeInclude, docFilter.typeExclude),
     [data, docFilter]
   )
+
+  // Auto-add "Respondents" grouping when a survey first enters scope on a
+  // fresh, never-saved analysis. Removing the chip sets the dismissed
+  // flag so it isn't re-added.
+  useEffect(() => {
+    if (respondentsDismissed.current || savedConfig) return
+    if (groupBy.some((e) => e.kind === 'respondents')) return
+    if (hasSurveyInScope(filteredSourceGuids, data)) {
+      setGroupBy((p) => mergeGroupBy(p, [{ kind: 'respondents' }]))
+    }
+  }, [filteredSourceGuids, data, groupBy, savedConfig])
 
   const codeMap = useMemo(() => {
     const m = new Map<string, { name: string; color?: string }>()
@@ -103,86 +130,28 @@ export function CodeFrequencies({ data: propData, savedConfig, inTab }: Props) {
     return m
   }, [data.sources])
 
-  // Column build: copied from ResultsInDocuments, with the subtotal slot
-  // skipped because cells here are percentages and "summing" percentages
-  // is a misleading weighted average rather than a meaningful subtotal.
-  const { columns, headerGroups, hasGroupedHeader } = useMemo(() => {
-    if (groupBy.length === 0) {
-      const cols: { id: string; label: string; sourceGuids: string[]; isSubtotal?: boolean; tagScopeGuids?: string[] }[] = filteredSourceGuids.map((g) => ({
-        id: g,
-        label: sourceMap.get(g) || 'Document',
-        sourceGuids: [g]
-      }))
-      return { columns: cols, headerGroups: [] as { id: string; label: string | null; span: number }[], hasGroupedHeader: false }
-    }
-    const descendantFolderGuids = (rootGuid: string): Set<string> => {
-      const set = new Set<string>([rootGuid])
-      let added = true
-      while (added) {
-        added = false
-        for (const f of (data.folders || [])) {
-          if (f.parentGuid && set.has(f.parentGuid) && !set.has(f.guid)) {
-            set.add(f.guid)
-            added = true
-          }
-        }
-      }
-      return set
-    }
-    const cols: { id: string; label: string; sourceGuids: string[]; isSubtotal?: boolean; tagScopeGuids?: string[] }[] = []
-    const groups: { id: string; label: string | null; span: number }[] = []
-    for (const entry of groupBy) {
-      if (entry.kind === 'tag') {
-        const tag = data.tags.find((t) => t.guid === entry.tagGuid)
-        if (!tag) continue
-        const members = tagColumnSources(data, entry.tagGuid, filteredSourceGuids)
-        cols.push({ id: `tag:${entry.tagGuid}`, label: tag.value || tag.name || 'Tag', sourceGuids: members, tagScopeGuids: [entry.tagGuid] })
-        groups.push({ id: `tag:${entry.tagGuid}`, label: null, span: 1 })
-      } else if (entry.kind === 'category') {
-        const cat = data.categories.find((c) => c.guid === entry.categoryGuid)
-        if (!cat) continue
-        const childTags = data.tags.filter((t) => t.categoryGuid === entry.categoryGuid)
-        if (childTags.length === 0) continue
-        const before = cols.length
-        for (const tag of childTags) {
-          const members = tagColumnSources(data, tag.guid, filteredSourceGuids)
-          cols.push({ id: `cat:${entry.categoryGuid}:tag:${tag.guid}`, label: tag.value || tag.name || 'Tag', sourceGuids: members, tagScopeGuids: [tag.guid] })
-        }
-        groups.push({ id: `cat:${entry.categoryGuid}`, label: cat.name, span: cols.length - before })
-      } else {
-        const folder = (data.folders || []).find((f) => f.guid === entry.folderGuid)
-        if (!folder) continue
-        const folderSet = descendantFolderGuids(entry.folderGuid)
-        const folderDocs = filteredSourceGuids.filter((g) => {
-          const fg = data.sourceFolder?.[g]
-          return fg ? folderSet.has(fg) : false
-        })
-        if (folderDocs.length === 0) continue
-        const before = cols.length
-        for (const docGuid of folderDocs) {
-          cols.push({ id: `folder:${entry.folderGuid}:doc:${docGuid}`, label: sourceMap.get(docGuid) || 'Document', sourceGuids: [docGuid] })
-        }
-        groups.push({ id: `folder:${entry.folderGuid}`, label: folder.name, span: cols.length - before })
-      }
-    }
-    const taggedGuids = new Set(cols.filter((c) => !c.isSubtotal).flatMap((c) => c.sourceGuids))
-    const otherGuids = filteredSourceGuids.filter((g) => !taggedGuids.has(g))
-    if (otherGuids.length > 0) {
-      cols.push({ id: '__other', label: 'Other', sourceGuids: otherGuids })
-      groups.push({ id: '__other', label: null, span: 1 })
-    }
-    const hasGroupedHeader = groups.some((g) => g.label !== null)
-    return { columns: cols, headerGroups: groups, hasGroupedHeader }
-  }, [filteredSourceGuids, groupBy, data.tags, data.tagMembers, data.categories, data.folders, data.sourceFolder, sourceMap])
+  // Column build via the shared, survey-aware builder. Subtotals are
+  // skipped because cells here are percentages, where a "sum" is a
+  // misleading weighted average rather than a meaningful subtotal.
+  const { columns, headerGroups, hasGroupedHeader } = useMemo(
+    () => buildSurveyAwareColumns(groupBy, data, filteredSourceGuids, sourceMap, { includeSubtotals: false }),
+    [filteredSourceGuids, groupBy, data, sourceMap]
+  )
 
   // Grid: percentage values
   const grid = useMemo(() => {
     // Per-column survey-cell scope: a tag column counts only that tag's
-    // cells, so a survey grouped under a respondent tag contributes only
-    // that respondent's coded cells. Precompute one scoped data per column.
+    // cells; a respondent column counts only that respondent's cells.
     const colData = new Map<string, AnalysisInitData>()
     for (const col of columns) {
-      colData.set(col.id, col.tagScopeGuids ? applySurveyCellScope(data, { tagGuids: col.tagScopeGuids }) : data)
+      colData.set(
+        col.id,
+        col.respondentRef
+          ? applySurveyCellScope(data, { respondentScope: [col.respondentRef] })
+          : col.tagScopeGuids
+            ? applySurveyCellScope(data, { tagGuids: col.tagScopeGuids })
+            : data
+      )
     }
     return codeGuids.map((codeGuid) =>
       columns.map((col) => {
@@ -246,6 +215,7 @@ export function CodeFrequencies({ data: propData, savedConfig, inTab }: Props) {
   }, [])
 
   const handleRemoveGroupBy = useCallback((entry: GroupByEntry) => {
+    if (entry.kind === 'respondents') respondentsDismissed.current = true
     const key = groupByKey(entry)
     setGroupBy((p) => p.filter((e) => groupByKey(e) !== key))
   }, [])
@@ -263,12 +233,12 @@ export function CodeFrequencies({ data: propData, savedConfig, inTab }: Props) {
       guid: analysisGuid,
       toolType: 'code-frequencies',
       name,
-      config: { codeGuids, docFilter, groupBy }
+      config: { codeGuids, docFilter, groupBy, questionScope }
     })
-    setBaseline({ codeGuids, docFilter, groupBy })
+    setBaseline({ codeGuids, docFilter, groupBy, questionScope })
     if (inTab) inTab.onSaved(analysisGuid, name)
     else setTimeout(() => window.close(), 200)
-  }, [analysisGuid, codeGuids, docFilter, groupBy, inTab, setBaseline])
+  }, [analysisGuid, codeGuids, docFilter, groupBy, questionScope, inTab, setBaseline])
 
   useRegisterToolSave(inTab?.tabId, () => {
     if (isExisting) {
@@ -488,6 +458,11 @@ export function CodeFrequencies({ data: propData, savedConfig, inTab }: Props) {
             }} />
           )}
         </div>
+
+        {/* Questions scope \u2014 only meaningful when a survey is analysed. */}
+        {hasSurveyInScope(filteredSourceGuids, data) && (
+          <QuestionScopeBox value={questionScope} onChange={setQuestionScope} data={data} />
+        )}
 
         {/* Results Grid \u2014 entire section accepts code drops. */}
         <div

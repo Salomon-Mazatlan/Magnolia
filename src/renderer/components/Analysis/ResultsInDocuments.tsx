@@ -1,11 +1,22 @@
-import { useState, useMemo, useCallback } from 'react'
-import type { AnalysisInitData, Query, QueryResult } from '../../models/types'
-import { Icon, faFileSearchCorner, faChevronDown, faChevronRight, faXmark, faFolder, faTag, faTags } from '../Icon'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import type { AnalysisInitData, Query, QueryResult, SurveyEntityRef } from '../../models/types'
+import { Icon, faFileSearchCorner, faChevronDown, faChevronRight, faXmark } from '../Icon'
 import { toolColors } from '../../utils/tool-colors'
 import { executeQuery } from '../../utils/query-engine'
-import { truncate, toCsv, binarizeGrid } from './analysis-helpers'
+import { truncate, toCsv, binarizeGrid, applySurveyCellScope } from './analysis-helpers'
 import { generateGuid } from '../../utils/guid'
-import { parseGroupByDrop } from './group-by'
+import {
+  parseGroupByDrop,
+  mergeGroupBy,
+  groupByKey,
+  GroupByChips
+} from './group-by'
+import {
+  buildSurveyAwareColumns,
+  hasSurveyInScope,
+  QuestionScopeBox,
+  type QuestionScopeRef
+} from './survey-grouping'
 import { useLiveAnalysisData } from './use-live-analysis-data'
 import { EditableTitleSuffix } from '../EditableTitleSuffix'
 import { renameSavedAnalysis } from '../../utils/rename-saved-analysis'
@@ -24,6 +35,8 @@ type GroupByEntry =
   | { kind: 'tag'; tagGuid: string }
   | { kind: 'category'; categoryGuid: string }
   | { kind: 'folder'; folderGuid: string }
+  // Each in-scope survey becomes a band of its respondents.
+  | { kind: 'respondents' }
 
 interface Props {
   data: AnalysisInitData
@@ -33,6 +46,8 @@ interface Props {
     groupBy?: GroupByEntry[]
     /** Legacy shape, pre-category support. Migrated on load. */
     groupByTags?: string[]
+    /** Survey questions the analysis is scoped to (empty = all). */
+    questionScope?: QuestionScopeRef[]
     guid: string
     name: string
   }
@@ -59,7 +74,16 @@ function isQueryDrag(e: React.DragEvent): boolean {
 
 export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props) {
   const live = useLiveAnalysisData()
-  const data = useMemo(() => ({ ...propData, ...live }), [propData, live])
+  const [questionScope, setQuestionScope] = useState<QuestionScopeRef[]>(savedConfig?.questionScope ?? [])
+  const data = useMemo(() => {
+    const base = { ...propData, ...live }
+    // Scope survey selections to the chosen questions so query results
+    // (built from these selections) honour the Questions box.
+    return questionScope.length > 0 ? applySurveyCellScope(base, { questionScope }) : base
+  }, [propData, live, questionScope])
+  // Once the user removes the auto-added Respondents grouping, don't
+  // re-seed it (they can drag it back from the Document Browser).
+  const respondentsDismissed = useRef(false)
   const [queryGuids, setQueryGuids] = useState<string[]>(savedConfig?.queryGuids ?? [])
   // Initial group-by state. Prefer the new `groupBy` if present, else
   // migrate the legacy `groupByTags` (string[] of tag guids) into the
@@ -83,8 +107,8 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
 
   // Dirty tracking (see useToolDirtyState).
   const currentConfig = useMemo(
-    () => ({ queryGuids, groupBy }),
-    [queryGuids, groupBy]
+    () => ({ queryGuids, groupBy, questionScope }),
+    [queryGuids, groupBy, questionScope]
   )
   const initialBaseline = useMemo(() => {
     let initialGroupBy: GroupByEntry[] = []
@@ -94,7 +118,8 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
     }
     return {
       queryGuids: savedConfig?.queryGuids ?? [],
-      groupBy: initialGroupBy
+      groupBy: initialGroupBy,
+      questionScope: savedConfig?.questionScope ?? []
     }
   }, [])
   const { dirty, baseline, setBaseline } = useToolDirtyState(currentConfig, initialBaseline, inTab)
@@ -102,6 +127,7 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
   const handleDiscard = useCallback(() => {
     setQueryGuids(baseline.queryGuids)
     setGroupBy(baseline.groupBy)
+    setQuestionScope(baseline.questionScope ?? [])
   }, [baseline])
 
   // Map saved query guids to their definitions
@@ -189,129 +215,36 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
     return Array.from(guids)
   }, [queryResults])
 
-  // Build the flat column list AND the optional spanning-header row.
-  // - With no group-by: one column per document, no spanning header.
-  // - With group-by: each entry becomes one column (tag) or N columns
-  //   (category, one per child tag). Categories add a spanning header
-  //   group above their tag columns; standalone tags and the trailing
-  //   "Other" column get an empty header slot of span 1.
-  const { columns, headerGroups, hasGroupedHeader } = useMemo(() => {
-    if (groupBy.length === 0) {
-      const cols: { id: string; label: string; sourceGuids: string[]; isSubtotal?: boolean }[] = resultSourceGuids.map((g) => ({
-        id: g,
-        label: sourceMap.get(g) || 'Document',
-        sourceGuids: [g]
-      }))
-      return { columns: cols, headerGroups: [] as { id: string; label: string | null; span: number }[], hasGroupedHeader: false }
-    }
-    // Build the set of folder guids that descend from a given folder
-    // (inclusive). Used by folder-kind entries to flatten subfolders
-    // into the same band — sub-folder docs roll up to the dropped
-    // folder unless the user explicitly drops them individually.
-    const descendantFolderGuids = (rootGuid: string): Set<string> => {
-      const set = new Set<string>([rootGuid])
-      let added = true
-      while (added) {
-        added = false
-        for (const f of (data.folders || [])) {
-          if (f.parentGuid && set.has(f.parentGuid) && !set.has(f.guid)) {
-            set.add(f.guid)
-            added = true
-          }
-        }
-      }
-      return set
-    }
-    const cols: { id: string; label: string; sourceGuids: string[]; isSubtotal?: boolean }[] = []
-    const groups: { id: string; label: string | null; span: number }[] = []
-    for (const entry of groupBy) {
-      if (entry.kind === 'tag') {
-        const tag = data.tags.find((t) => t.guid === entry.tagGuid)
-        if (!tag) continue
-        const members = (data.tagMembers[entry.tagGuid] || []).filter((g) => resultSourceGuids.includes(g))
-        cols.push({ id: `tag:${entry.tagGuid}`, label: tag.value || tag.name || 'Tag', sourceGuids: members })
-        groups.push({ id: `tag:${entry.tagGuid}`, label: null, span: 1 })
-      } else if (entry.kind === 'category') {
-        const cat = data.categories.find((c) => c.guid === entry.categoryGuid)
-        if (!cat) continue
-        const childTags = data.tags.filter((t) => t.categoryGuid === entry.categoryGuid)
-        if (childTags.length === 0) continue
-        const before = cols.length
-        // Tag sub-columns
-        for (const tag of childTags) {
-          const members = (data.tagMembers[tag.guid] || []).filter((g) => resultSourceGuids.includes(g))
-          cols.push({
-            id: `cat:${entry.categoryGuid}:tag:${tag.guid}`,
-            label: tag.value || tag.name || 'Tag',
-            sourceGuids: members
-          })
-        }
-        // Category subtotal: union of all child-tag members so a doc
-        // tagged with two of the category's tags is only counted once
-        // per query in this column. Sits at the right edge of the
-        // category band and is included in the band's header span.
-        const subtotalSet = new Set<string>()
-        for (const tag of childTags) {
-          for (const g of (data.tagMembers[tag.guid] || [])) {
-            if (resultSourceGuids.includes(g)) subtotalSet.add(g)
-          }
-        }
-        cols.push({
-          id: `cat:${entry.categoryGuid}:subtotal`,
-          label: 'Subtotal',
-          sourceGuids: Array.from(subtotalSet),
-          isSubtotal: true
-        })
-        groups.push({ id: `cat:${entry.categoryGuid}`, label: cat.name, span: cols.length - before })
-      } else {
-        // Folder entry: gather every document that lives anywhere
-        // beneath the dropped folder, in result-doc order, and emit
-        // one sub-row per doc plus a folder subtotal.
-        const folder = (data.folders || []).find((f) => f.guid === entry.folderGuid)
-        if (!folder) continue
-        const folderSet = descendantFolderGuids(entry.folderGuid)
-        const folderDocs = resultSourceGuids.filter((g) => {
-          const fg = data.sourceFolder?.[g]
-          return fg ? folderSet.has(fg) : false
-        })
-        if (folderDocs.length === 0) continue
-        const before = cols.length
-        for (const docGuid of folderDocs) {
-          cols.push({
-            id: `folder:${entry.folderGuid}:doc:${docGuid}`,
-            label: sourceMap.get(docGuid) || 'Document',
-            sourceGuids: [docGuid]
-          })
-        }
-        // Folder subtotal — same role as the category one: aggregates
-        // hits across every descendant doc in this folder band.
-        cols.push({
-          id: `folder:${entry.folderGuid}:subtotal`,
-          label: 'Subtotal',
-          sourceGuids: [...folderDocs],
-          isSubtotal: true
-        })
-        groups.push({ id: `folder:${entry.folderGuid}`, label: folder.name, span: cols.length - before })
-      }
-    }
-    // "Other" deliberately ignores subtotal columns when computing the
-    // catch-all set — a doc that landed in a category subtotal is still
-    // covered by one of that category's tag columns, so it's not "Other".
-    const taggedGuids = new Set(cols.filter((c) => !c.isSubtotal).flatMap((c) => c.sourceGuids))
-    const otherGuids = resultSourceGuids.filter((g) => !taggedGuids.has(g))
-    if (otherGuids.length > 0) {
-      cols.push({ id: '__other', label: 'Other', sourceGuids: otherGuids })
-      groups.push({ id: '__other', label: null, span: 1 })
-    }
-    const hasGroupedHeader = groups.some((g) => g.label !== null)
-    return { columns: cols, headerGroups: groups, hasGroupedHeader }
-  }, [resultSourceGuids, groupBy, data.tags, data.tagMembers, data.categories, data.folders, data.sourceFolder, sourceMap])
+  // Column build via the shared, survey-aware builder. Candidate sources
+  // are the documents that appear in any query's results; surveys among
+  // them expand into per-respondent bands when "Respondents" is active.
+  const { columns, headerGroups, hasGroupedHeader } = useMemo(
+    () => buildSurveyAwareColumns(groupBy, data, resultSourceGuids, sourceMap),
+    [resultSourceGuids, groupBy, data, sourceMap]
+  )
 
-  // Grid: queryGuids.length rows × columns.length cols
+  // Auto-add "Respondents" grouping when survey results first appear on a
+  // fresh, never-saved analysis; removing the chip prevents re-adding.
+  useEffect(() => {
+    if (respondentsDismissed.current || savedConfig) return
+    if (groupBy.some((e) => e.kind === 'respondents')) return
+    if (hasSurveyInScope(resultSourceGuids, data)) {
+      setGroupBy((p) => mergeGroupBy(p, [{ kind: 'respondents' }]))
+    }
+  }, [resultSourceGuids, data, groupBy, savedConfig])
+
+  // Grid: queryGuids.length rows × columns.length cols. A respondent
+  // column counts only the results from that respondent's cells (query
+  // results carry surveyCell.respondentId); other columns match by
+  // source guid as before.
   const grid = useMemo(() => {
     return queryGuids.map((qGuid) => {
       const results = queryResults.get(qGuid) || []
       return columns.map((col) => {
+        if (col.respondentRef) {
+          const { sourceGuid, id } = col.respondentRef
+          return results.filter((r) => r.sourceGuid === sourceGuid && r.surveyCell?.respondentId === id).length
+        }
         const colGuids = new Set(col.sourceGuids)
         return results.filter((r) => colGuids.has(r.sourceGuid)).length
       })
@@ -469,34 +402,20 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
     window.api.exportCsv(toCsv(rows), 'results-in-documents.csv')
   }, [columns, rowLayout, queryGuids, showGrid, queryMap, showRowTotals, showColTotals, showGrandTotal, hasGroupedHeader])
 
-  const groupKey = (e: GroupByEntry): string =>
-    e.kind === 'tag' ? `t:${e.tagGuid}`
-      : e.kind === 'category' ? `c:${e.categoryGuid}`
-        : `f:${e.folderGuid}`
-
-  const addGroupEntries = useCallback((entries: GroupByEntry[]) => {
-    setGroupBy((prev) => {
-      const seen = new Set(prev.map(groupKey))
-      const fresh = entries.filter((e) => {
-        const key = groupKey(e)
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-      })
-      return [...prev, ...fresh]
-    })
-  }, [])
-
   const handleTagDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     setTagDropOver(false)
-    // Reuse the shared parser so all tools handle tag/category/folder
-    // drops identically — including the side-channel name MIME that
-    // gives chips a fallback label when this analysis window's snapshot
-    // doesn't contain the dropped entity.
+    // Shared parser + merge so all tools handle tag/category/folder/
+    // respondents drops identically.
     const fresh = parseGroupByDrop(e)
-    if (fresh.length > 0) addGroupEntries(fresh)
-  }, [addGroupEntries])
+    if (fresh.length > 0) setGroupBy((p) => mergeGroupBy(p, fresh))
+  }, [])
+
+  const handleRemoveGroupBy = useCallback((entry: GroupByEntry) => {
+    if (entry.kind === 'respondents') respondentsDismissed.current = true
+    const key = groupByKey(entry)
+    setGroupBy((p) => p.filter((e) => groupByKey(e) !== key))
+  }, [])
 
   const handleRename = useCallback((newName: string) => {
     setAnalysisName(newName)
@@ -511,12 +430,12 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
       guid: analysisGuid,
       toolType: 'results-in-documents',
       name,
-      config: { queryGuids, groupBy }
+      config: { queryGuids, groupBy, questionScope }
     })
-    setBaseline({ queryGuids, groupBy })
+    setBaseline({ queryGuids, groupBy, questionScope })
     if (inTab) inTab.onSaved(analysisGuid, name)
     else setTimeout(() => window.close(), 200)
-  }, [analysisGuid, queryGuids, groupBy, inTab, setBaseline])
+  }, [analysisGuid, queryGuids, groupBy, questionScope, inTab, setBaseline])
 
   useRegisterToolSave(inTab?.tabId, () => {
     if (isExisting) {
@@ -622,64 +541,20 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
               pointerEvents: 'none'
             }} />
           )}
-          {groupBy.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', position: 'relative', zIndex: 1 }}>
-              {groupBy.map((entry) => {
-                if (entry.kind === 'tag') {
-                  const tag = data.tags.find((t) => t.guid === entry.tagGuid)
-                  return (
-                    <span key={`t:${entry.tagGuid}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: 'var(--radius-sm)' }}>
-                      <Icon icon={faTag} style={{ fontSize: 10, color: 'var(--text-muted)' }} />
-                      {tag?.value || tag?.name || 'Tag'}
-                      <span onClick={() => setGroupBy((p) => p.filter((e) => !(e.kind === 'tag' && e.tagGuid === entry.tagGuid)))} style={{ fontSize: 9, color: 'var(--text-muted)', cursor: 'pointer' }}><Icon icon={faXmark} /></span>
-                    </span>
-                  )
-                }
-                if (entry.kind === 'category') {
-                  const cat = data.categories.find((c) => c.guid === entry.categoryGuid)
-                  const childCount = data.tags.filter((t) => t.categoryGuid === entry.categoryGuid).length
-                  return (
-                    <span key={`c:${entry.categoryGuid}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 600, border: '1px solid var(--border-color)' }}>
-                      <Icon icon={faTags} style={{ fontSize: 10, color: 'var(--text-muted)' }} />
-                      {cat?.name || 'Category'}
-                      <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({childCount})</span>
-                      <span onClick={() => setGroupBy((p) => p.filter((e) => !(e.kind === 'category' && e.categoryGuid === entry.categoryGuid)))} style={{ fontSize: 9, color: 'var(--text-muted)', cursor: 'pointer' }}><Icon icon={faXmark} /></span>
-                    </span>
-                  )
-                }
-                // folder
-                const folder = (data.folders || []).find((f) => f.guid === entry.folderGuid)
-                // Count descendant docs that actually appear in the
-                // current result set, so the chip's subtitle reflects
-                // what the user will see in the grid (not the raw
-                // folder size).
-                const folderSet = new Set<string>([entry.folderGuid])
-                let added = true
-                while (added) {
-                  added = false
-                  for (const f of (data.folders || [])) {
-                    if (f.parentGuid && folderSet.has(f.parentGuid) && !folderSet.has(f.guid)) {
-                      folderSet.add(f.guid)
-                      added = true
-                    }
-                  }
-                }
-                const docCount = resultSourceGuids.filter((g) => {
-                  const fg = data.sourceFolder?.[g]
-                  return fg ? folderSet.has(fg) : false
-                }).length
-                return (
-                  <span key={`f:${entry.folderGuid}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontWeight: 600, border: '1px dashed var(--border-color)' }}>
-                    <Icon icon={faFolder} style={{ fontSize: 10, color: 'var(--text-muted)' }} />
-                    {folder?.name || 'Folder'}
-                    <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}>({docCount})</span>
-                    <span onClick={() => setGroupBy((p) => p.filter((e) => !(e.kind === 'folder' && e.folderGuid === entry.folderGuid)))} style={{ fontSize: 9, color: 'var(--text-muted)', cursor: 'pointer' }}><Icon icon={faXmark} /></span>
-                  </span>
-                )
-              })}
-            </div>
-          )}
+          <div style={{ position: 'relative', zIndex: 1 }}>
+            <GroupByChips
+              groupBy={groupBy}
+              data={data}
+              candidateSourceGuids={resultSourceGuids}
+              onRemove={handleRemoveGroupBy}
+            />
+          </div>
         </div>
+
+        {/* Questions scope — only meaningful when a survey is analysed. */}
+        {hasSurveyInScope(resultSourceGuids, data) && (
+          <QuestionScopeBox value={questionScope} onChange={setQuestionScope} data={data} />
+        )}
 
         {/* Missing documents warning */}
         {missingDocCount > 0 && (
