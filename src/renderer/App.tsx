@@ -283,6 +283,10 @@ function App() {
   const codeStore = useCodeStore()
   const tagStore = useTagStore()
   const queryStore = useQueryStore()
+  // The Reports tool only accepts Saved Queries / Analyses / Quotes /
+  // Memos — not documents or codes. Dim those two panels while it's the
+  // active tab so the unavailable drag sources read as unavailable.
+  const reportsToolActive = parseAnalysisTabId(documentStore.viewedDocumentGuid)?.toolType === 'reports'
   const logbookStore = useLogbookStore()
   const memoStore = useMemoStore()
 
@@ -2252,7 +2256,7 @@ function App() {
                     if (panels.length > 0) panels.push(<PanelResizeHandle key="rh-d" style={rh} />)
                     panels.push(
                       <Panel key="documents" defaultSize={35} minSize={15}>
-                        <div style={{ height: '100%' }} onMouseDown={() => setActivePanel('documents')}>
+                        <div style={{ height: '100%', opacity: reportsToolActive ? 0.62 : 1, transition: 'opacity 0.15s' }} title={reportsToolActive ? 'Documents can’t be added to a report' : undefined} onMouseDown={() => setActivePanel('documents')}>
                           <DocumentBrowser
                             onImport={handleImportDocument}
                             onSurveyImport={queueSurveyImport}
@@ -2269,7 +2273,7 @@ function App() {
                     if (panels.length > 0) panels.push(<PanelResizeHandle key="rh-c" style={rh} />)
                     panels.push(
                       <Panel key="codes" defaultSize={35} minSize={15}>
-                        <div style={{ height: '100%' }} onMouseDown={() => setActivePanel('codes')}>
+                        <div style={{ height: '100%', opacity: reportsToolActive ? 0.62 : 1, transition: 'opacity 0.15s' }} title={reportsToolActive ? 'Codes can’t be added to a report' : undefined} onMouseDown={() => setActivePanel('codes')}>
                           <CodeBrowser onNewCode={handleNewCode} onClose={() => closePanel('codes')} />
                         </div>
                       </Panel>

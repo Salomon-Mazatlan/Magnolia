@@ -10,7 +10,7 @@
  * per-analysis options, save / reopen, and PDF export of the non-
  * analysis content. Analysis-table generation lands in a later phase.
  */
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import type { AnalysisInitData, AnalysisToolType } from '../../models/types'
 import {
   Icon,
@@ -30,6 +30,7 @@ import { EditableTitleSuffix } from '../EditableTitleSuffix'
 import { renameSavedAnalysis } from '../../utils/rename-saved-analysis'
 import { useToolDirtyState } from '../../hooks/use-tool-dirty-state'
 import { useRegisterToolSave } from '../../hooks/use-register-tool-save'
+import { useAnalysisTabsStore } from '../../stores/analysis-tabs-store'
 import { useQueryStore } from '../../stores/query-store'
 import { useProjectStore } from '../../stores/project-store'
 import { useQuoteStore } from '../../stores/quote-store'
@@ -38,6 +39,7 @@ import {
   exportReportPdf,
   reportItemTypeLabel,
   resolveItemLabel,
+  resolveItemSnippet,
   type ReportItem,
   type AnalysisItemOptions
 } from './report-export'
@@ -62,8 +64,8 @@ const ANALYSIS_CAPS: Record<string, { totalsOnly?: boolean; binary?: boolean; vi
   'codes-in-documents': { totalsOnly: true, binary: true, visual: true },
   'results-in-documents': { totalsOnly: true, binary: true, visual: true },
   'code-cooccurrences': { totalsOnly: true, binary: true, visual: true },
-  'code-frequencies': { visual: true },
-  'code-orders': { visual: true },
+  'code-frequencies': {},
+  'code-orders': {},
   'word-frequencies': {},
   'relationship-map': {}
 }
@@ -135,13 +137,19 @@ function isAcceptedDrag(e: React.DragEvent): boolean {
 }
 
 export function Reports({ savedConfig, inTab }: Props) {
-  const [title, setTitle] = useState<string>(savedConfig?.title ?? '')
   const [items, setItems] = useState<ReportItem[]>(savedConfig?.items ?? [])
   const [analysisGuid] = useState(savedConfig?.guid ?? generateGuid())
+  // The report's title is the analysis name, edited inline in the header
+  // (active on open for a new report). It doubles as the PDF's <h1>.
   const [analysisName, setAnalysisName] = useState(savedConfig?.name ?? '')
-  const [showSaveDialog, setShowSaveDialog] = useState(false)
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
   const isExisting = !!savedConfig?.guid
+  // True once the report has been saved at least once, so an inline title
+  // edit persists the rename instead of waiting for the first save.
+  const savedRef = useRef(isExisting)
+  // The latest committed title, read synchronously by Save / Export so a
+  // just-typed name isn't missed by a stale render of analysisName.
+  const nameRef = useRef(savedConfig?.name ?? '')
 
   // Live store reads so item cards always show current names.
   const savedQueries = useQueryStore((s) => s.savedQueries)
@@ -151,11 +159,8 @@ export function Reports({ savedConfig, inTab }: Props) {
   // Subscribe so labels recompute when the referenced entities change.
   void savedQueries; void savedAnalyses; void quotes; void memos
 
-  const currentConfig = useMemo(() => ({ title, items }), [title, items])
-  const initialBaseline = useMemo(
-    () => ({ title: savedConfig?.title ?? '', items: savedConfig?.items ?? [] }),
-    []
-  )
+  const currentConfig = useMemo(() => ({ items }), [items])
+  const initialBaseline = useMemo(() => ({ items: savedConfig?.items ?? [] }), [])
   const { dirty, baseline, setBaseline } = useToolDirtyState(currentConfig, initialBaseline, inTab)
 
   const insertItemsAt = useCallback((index: number, newItems: ReportItem[]) => {
@@ -181,6 +186,9 @@ export function Reports({ savedConfig, inTab }: Props) {
 
   const handleDropAt = useCallback((index: number, e: React.DragEvent) => {
     e.preventDefault()
+    // Stop the drop from also bubbling to the list container's onDrop,
+    // which would insert / move the item a second time.
+    e.stopPropagation()
     setDragOverIdx(null)
     const reorderId = e.dataTransfer.getData(REORDER_MIME)
     if (reorderId) {
@@ -210,47 +218,52 @@ export function Reports({ savedConfig, inTab }: Props) {
 
   const handleSave = useCallback((name: string) => {
     setAnalysisName(name)
-    setShowSaveDialog(false)
+    nameRef.current = name
+    savedRef.current = true
     window.api.sendAnalysisAction('save-analysis', {
       guid: analysisGuid,
       toolType: 'reports',
       name,
-      config: { title, items }
+      config: { items }
     })
-    setBaseline({ title, items })
+    setBaseline({ items })
     if (inTab) inTab.onSaved(analysisGuid, name)
     else setTimeout(() => window.close(), 200)
-  }, [analysisGuid, title, items, inTab, setBaseline])
+  }, [analysisGuid, items, inTab, setBaseline])
 
-  const handleRename = useCallback((newName: string) => {
-    setAnalysisName(newName)
-    renameSavedAnalysis(analysisGuid, newName)
-    if (inTab) inTab.onSaved('', newName)
+  // Commit an inline title edit: always track the new name; persist the
+  // rename only once the report has been saved (before that the name is
+  // just carried into the first save).
+  const commitTitle = useCallback((newName: string) => {
+    const name = newName.trim()
+    if (!name) return
+    nameRef.current = name
+    setAnalysisName(name)
+    // Reflect the title in the tab header immediately, like the other
+    // tools do on rename. Set it directly (not via onSaved) so it doesn't
+    // clear the unsaved-changes flag for an unsaved report.
+    if (inTab?.tabId) useAnalysisTabsStore.getState().setTitle(inTab.tabId, name)
+    if (savedRef.current) renameSavedAnalysis(analysisGuid, name)
   }, [analysisGuid, inTab])
 
   const handleDiscard = useCallback(() => {
-    setTitle(baseline.title)
     setItems(baseline.items)
   }, [baseline])
 
   useRegisterToolSave(inTab?.tabId, () => {
-    if (isExisting) {
-      handleSave(analysisName)
-      return true
-    }
-    setShowSaveDialog(true)
-    return false
+    handleSave(nameRef.current.trim() || 'Untitled Report')
+    return true
   })
 
   const [exporting, setExporting] = useState(false)
   const handleExport = useCallback(async () => {
     setExporting(true)
     try {
-      await exportReportPdf(title, items)
+      await exportReportPdf(nameRef.current || analysisName, items)
     } finally {
       setExporting(false)
     }
-  }, [title, items])
+  }, [analysisName, items])
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -258,8 +271,13 @@ export function Reports({ savedConfig, inTab }: Props) {
       <div style={{ padding: '14px 20px 6px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
           <Icon icon={faClipboardList} className="analysis-header-icon" style={{ fontSize: 16 }} />
-          Report{isExisting ? ':' : ''}
-          {isExisting && <EditableTitleSuffix name={analysisName} onRename={handleRename} />}
+          Report:
+          <EditableTitleSuffix
+            name={analysisName}
+            onRename={commitTitle}
+            autoEdit={!isExisting}
+            placeholder="Untitled report"
+          />
         </h2>
         <div style={{ flex: 1 }} />
         <button className="secondary" style={{ fontSize: 11, padding: '4px 14px' }} onClick={() => (inTab ? inTab.onClose() : window.close())}>
@@ -274,11 +292,11 @@ export function Reports({ savedConfig, inTab }: Props) {
           {exporting ? 'Exporting…' : 'Export PDF'}
         </button>
         {isExisting ? (
-          <button style={{ fontSize: 11, padding: '4px 14px' }} disabled={!dirty} onClick={() => handleSave(analysisName)}>
+          <button style={{ fontSize: 11, padding: '4px 14px' }} disabled={!dirty} onClick={() => handleSave(nameRef.current.trim() || 'Untitled Report')}>
             {dirty ? 'Update Report' : 'Saved'}
           </button>
         ) : (
-          <button style={{ fontSize: 11, padding: '4px 14px' }} onClick={() => setShowSaveDialog(true)}>
+          <button style={{ fontSize: 11, padding: '4px 14px' }} onClick={() => handleSave(nameRef.current.trim() || 'Untitled Report')}>
             Save Report
           </button>
         )}
@@ -290,8 +308,6 @@ export function Reports({ savedConfig, inTab }: Props) {
         <span style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 4 }}>Drag in:</span>
         <PaletteChip block="section" icon={faHeading1} label="Section" />
         <PaletteChip block="text" icon={faFont} label="Text" />
-        <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>…or drag Saved Queries, Analyses, Quotes &amp; Memos from the panels</span>
       </div>
 
       {/* The report list */}
@@ -300,21 +316,9 @@ export function Reports({ savedConfig, inTab }: Props) {
         onDragOver={(e) => { if (isAcceptedDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }}
         onDrop={(e) => handleDropAt(items.length, e)}
       >
-        {/* Report title — always the first list item. */}
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ display: 'block', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)', marginBottom: 4 }}>Report title</label>
-          <input
-            type="text"
-            value={title}
-            placeholder="Untitled report"
-            onChange={(e) => setTitle(e.target.value)}
-            style={{ width: '100%', maxWidth: 520, fontSize: 16, fontWeight: 600, padding: '6px 10px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
-          />
-        </div>
-
         {items.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)', border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-            Drag Saved Queries, Analyses, Quotes, or Memos here — or drop a Section / Text block from the toolbar — to build the report.
+            Drag saved queries, analyses, quotes, and memos onto the canvas to build your report
           </div>
         ) : (
           <div>
@@ -340,32 +344,6 @@ export function Reports({ savedConfig, inTab }: Props) {
         )}
       </div>
 
-      {/* Save dialog */}
-      {showSaveDialog && (
-        <div className="modal-overlay" onClick={() => setShowSaveDialog(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Save Report</h2>
-            <input
-              autoFocus
-              type="text"
-              defaultValue={analysisName || title}
-              placeholder="Report name"
-              style={{ width: '100%' }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleSave((e.target as HTMLInputElement).value.trim() || 'Untitled Report')
-                if (e.key === 'Escape') setShowSaveDialog(false)
-              }}
-            />
-            <div className="modal-actions">
-              <button className="secondary" onClick={() => setShowSaveDialog(false)}>Cancel</button>
-              <button onClick={(e) => {
-                const input = (e.target as HTMLElement).parentElement!.parentElement!.querySelector('input') as HTMLInputElement
-                handleSave(input.value.trim() || 'Untitled Report')
-              }}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -421,6 +399,17 @@ function ReportRow({
           <Icon icon={faXmark} style={{ fontSize: 12 }} />
         </span>
       </div>
+
+      {/* Quote / memo: a preview of the content. */}
+      {(item.kind === 'quote' || item.kind === 'memo') && (() => {
+        const snippet = resolveItemSnippet(item)
+        if (!snippet) return null
+        return (
+          <div style={{ marginTop: 6, paddingLeft: 28, fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'pre-wrap', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+            {item.kind === 'quote' ? `“${snippet}”` : snippet}
+          </div>
+        )
+      })()}
 
       {/* Section: editable heading text. */}
       {item.kind === 'section' && (

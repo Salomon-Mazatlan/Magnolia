@@ -95,6 +95,20 @@ export function resolveItemLabel(item: ReportItem): string {
   }
 }
 
+/** Content preview for a quote / memo, shown on the on-screen card.
+ *  Null for item kinds that have no body of their own. */
+export function resolveItemSnippet(item: ReportItem): string | null {
+  if (item.kind === 'quote') {
+    const qt = useQuoteStore.getState().quotes.find((s) => s.guid === item.refGuid)
+    return qt ? qt.text : null
+  }
+  if (item.kind === 'memo') {
+    const m = useMemoStore.getState().findMemo(item.refGuid)
+    return m ? m.content || '' : null
+  }
+  return null
+}
+
 /** Icon/label hint for an item's type, for the on-screen card. */
 export function reportItemTypeLabel(item: ReportItem): string {
   switch (item.kind) {

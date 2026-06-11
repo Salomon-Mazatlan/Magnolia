@@ -7,6 +7,12 @@ interface Props {
    *  (Enter or blur). Not called when the user hits Escape, when the
    *  trimmed value is empty, or when it equals the existing name. */
   onRename: (newName: string) => void
+  /** Start in edit mode — e.g. a freshly-opened, unnamed report whose
+   *  title should be focused and ready to type. */
+  autoEdit?: boolean
+  /** Shown when the name is empty (as placeholder text in the input and
+   *  as muted display text in the span). */
+  placeholder?: string
 }
 
 /**
@@ -16,9 +22,9 @@ interface Props {
  * Relationships tool so the saved-thing's name reads as part of the
  * header without crowding it.
  */
-export function EditableTitleSuffix({ name, onRename }: Props) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
+export function EditableTitleSuffix({ name, onRename, autoEdit, placeholder }: Props) {
+  const [editing, setEditing] = useState(!!autoEdit)
+  const [draft, setDraft] = useState(autoEdit ? name : '')
 
   const startEdit = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -37,6 +43,7 @@ export function EditableTitleSuffix({ name, onRename }: Props) {
       <input
         autoFocus
         value={draft}
+        placeholder={placeholder}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={commit}
         onKeyDown={(e) => {
@@ -78,7 +85,7 @@ export function EditableTitleSuffix({ name, onRename }: Props) {
         cursor: 'pointer'
       }}
     >
-      {name}
+      {name || placeholder || ''}
     </span>
   )
 }
