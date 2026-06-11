@@ -10,17 +10,27 @@
  * where the zustand stores already live. This hook subscribes the tool
  * to those stores and reshapes them into the same flat structures the
  * snapshot used, so all downstream code (group-by builder, code maps,
- * tag chips) keeps working unchanged.
+ * tag chips, Document Selector) keeps working unchanged.
  *
- * Fields we DON'T make live yet: sources, sourceContents,
- * sourceSelections — they're large and the staleness-sensitive Group
- * By + code-drop bugs don't depend on them.
+ * Document-derived fields (sources, sourceContents, sourceSelections,
+ * and the per-survey surveyCodableCells / surveyEntityLabels) are now
+ * live too: a document added — or a selection coded — after the tool
+ * opened immediately flows into the Document Selector and the results.
+ * Each is memoised on the store reference so the reshape only re-runs
+ * when documents actually change.
  */
 import { useMemo } from 'react'
-import type { AnalysisInitData, Code } from '../../models/types'
+import type {
+  AnalysisInitData,
+  Code,
+  PlainTextSelection,
+  SurveyFormatData
+} from '../../models/types'
 import { useCodeStore } from '../../stores/code-store'
 import { useTagStore } from '../../stores/tag-store'
 import { useDocumentStore } from '../../stores/document-store'
+import { buildCellText } from '../../utils/survey/cell-text'
+import { buildSurveyEntityLabels } from '../../utils/survey/survey-labels'
 
 function flattenCodesWithParent(
   codes: Code[],
@@ -38,14 +48,18 @@ export type LiveAnalysisData = Pick<
   AnalysisInitData,
   'codes' | 'tags' | 'categories' | 'folders' | 'tagMembers' | 'sourceFolder'
   | 'respondentTagMembers' | 'questionTagMembers'
+  | 'sources' | 'sourceContents' | 'sourceSelections'
+  | 'surveyCodableCells' | 'surveyEntityLabels'
 >
 
 export function useLiveAnalysisData(): LiveAnalysisData {
   const codesTree = useCodeStore((s) => s.codes)
   const tags = useTagStore((s) => s.tags)
   const categories = useTagStore((s) => s.categories)
+  const docSources = useDocumentStore((s) => s.sources)
   const docFolders = useDocumentStore((s) => s.folders)
   const sourceFolder = useDocumentStore((s) => s.sourceFolder)
+  const sourceContents = useDocumentStore((s) => s.sourceContents)
 
   const codes = useMemo(() => flattenCodesWithParent(codesTree), [codesTree])
   const folders = useMemo(
@@ -76,5 +90,55 @@ export function useLiveAnalysisData(): LiveAnalysisData {
     [categories]
   )
 
-  return { codes, tags: slimTags, categories: slimCategories, folders, tagMembers, respondentTagMembers, questionTagMembers, sourceFolder }
+  // Document-derived fields. Reshaped to exactly mirror
+  // buildAnalysisInitData() so every consumer keeps working unchanged.
+  const sources = useMemo(
+    () => docSources.map((s) => ({
+      guid: s.guid,
+      name: s.name,
+      sourceType: s.sourceType,
+      duration: (s.formatData as { duration?: number } | undefined)?.duration
+    })),
+    [docSources]
+  )
+  const sourceSelections = useMemo(() => {
+    const m: Record<string, PlainTextSelection[]> = {}
+    for (const src of docSources) m[src.guid] = src.selections
+    return m
+  }, [docSources])
+  const surveyCodableCells = useMemo(() => {
+    const m: NonNullable<AnalysisInitData['surveyCodableCells']> = {}
+    for (const src of docSources) {
+      if (src.sourceType !== 'survey') continue
+      const survey = (src.formatData as SurveyFormatData | undefined)?.survey
+      if (!survey) continue
+      const cells: { respondentId: string; questionId: string; text: string }[] = []
+      const openEnded = survey.questions.filter((q) => q.type === 'open-ended')
+      for (const r of survey.respondents) {
+        for (const q of openEnded) {
+          const text = buildCellText(r.answers[q.id])
+          if (text) cells.push({ respondentId: r.id, questionId: q.id, text })
+        }
+      }
+      m[src.guid] = cells
+    }
+    return m
+  }, [docSources])
+  const surveyEntityLabels = useMemo(() => buildSurveyEntityLabels(docSources), [docSources])
+
+  return {
+    codes,
+    tags: slimTags,
+    categories: slimCategories,
+    folders,
+    tagMembers,
+    respondentTagMembers,
+    questionTagMembers,
+    sourceFolder,
+    sources,
+    sourceContents,
+    sourceSelections,
+    surveyCodableCells,
+    surveyEntityLabels
+  }
 }
