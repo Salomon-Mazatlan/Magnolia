@@ -158,6 +158,7 @@ const EXPORT_CSS = `
   .report-toc .toc-l0 { font-weight: 600; margin-top: 7px; }
   .report-toc .toc-l1 { padding-left: 18px; }
   .report-toc .toc-l2 { padding-left: 36px; font-size: 10.5px; }
+  .report-toc .toc-num { flex-shrink: 0; margin-right: 7px; font-variant-numeric: tabular-nums; }
   .report-toc .toc-label { flex-shrink: 1; }
   .report-toc .toc-dots { flex: 1 1 auto; min-width: 14px; border-bottom: 1px dotted #bbb; margin: 0 5px; position: relative; top: -3px; }
   .report-toc .toc-page { flex-shrink: 0; color: #555; }
@@ -253,8 +254,10 @@ function buildExportScript(pageH: number, pageW: number): string {
 function buildReportBody(items: ReportItem[]): string {
   // Indent each TOC entry by its level: a Section sits at the left, a
   // Subsection one step in, and content items under whichever heading
-  // currently applies (one step deeper than that heading).
+  // currently applies (one step deeper than that heading). Hierarchical
+  // numbering (1, 1.1, 1.1.1) tracks the same depth.
   let headingDepth = -1
+  const counters = [0, 0, 0]
   const toc = items
     .map((it) => {
       const id = reportAnchorId(it)
@@ -266,7 +269,10 @@ function buildReportBody(items: ReportItem[]): string {
         depth = Math.max(0, headingDepth + 1)
       }
       depth = Math.min(depth, 2)
-      return `<a class="toc-entry toc-l${depth}" href="#${id}"><span class="toc-label">${escHtml(resolveItemLabel(it))}</span><span class="toc-dots"></span><span class="toc-page" data-toc="${id}"></span></a>`
+      counters[depth]++
+      for (let k = depth + 1; k < counters.length; k++) counters[k] = 0
+      const num = counters.slice(0, depth + 1).join('.')
+      return `<a class="toc-entry toc-l${depth}" href="#${id}"><span class="toc-num">${num}</span><span class="toc-label">${escHtml(resolveItemLabel(it))}</span><span class="toc-dots"></span><span class="toc-page" data-toc="${id}"></span></a>`
     })
     .join('')
   const tocHtml = items.length
