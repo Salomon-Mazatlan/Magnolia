@@ -14,6 +14,9 @@ interface Props {
   style?: React.CSSProperties
   /** Called on Enter. Return text to prepend to the new line, or null for default behavior. */
   onEnterKey?: () => string | null
+  /** Show the H1 / H2 heading buttons. Default true; pass false where
+   *  headings aren't wanted (e.g. report Text blocks). */
+  headings?: boolean
 }
 
 function ToolbarButton({
@@ -64,7 +67,7 @@ function ToolbarButton({
  * Typing produces rich text immediately; the value prop and onChange
  * callback use plain markdown strings.
  */
-export function MarkdownEditor({ value, onChange, autoFocus, style, onEnterKey }: Props) {
+export function MarkdownEditor({ value, onChange, autoFocus, style, onEnterKey, headings = true }: Props) {
   const onEnterKeyRef = useRef(onEnterKey)
   onEnterKeyRef.current = onEnterKey
 
@@ -139,22 +142,26 @@ export function MarkdownEditor({ value, onChange, autoFocus, style, onEnterKey }
           }}
         >
           {/* Headings */}
-          <ToolbarButton
-            active={editor.isActive('heading', { level: 1 })}
-            onClick={() => toggle(() => editor.chain().toggleHeading({ level: 1 }).run())}
-            title="Heading 1"
-          >
-            <Icon icon={faHeading1} style={{ fontSize: 14 }} />
-          </ToolbarButton>
-          <ToolbarButton
-            active={editor.isActive('heading', { level: 2 })}
-            onClick={() => toggle(() => editor.chain().toggleHeading({ level: 2 }).run())}
-            title="Heading 2"
-          >
-            <Icon icon={faHeading2} style={{ fontSize: 14 }} />
-          </ToolbarButton>
+          {headings && (
+            <>
+              <ToolbarButton
+                active={editor.isActive('heading', { level: 1 })}
+                onClick={() => toggle(() => editor.chain().toggleHeading({ level: 1 }).run())}
+                title="Heading 1"
+              >
+                <Icon icon={faHeading1} style={{ fontSize: 14 }} />
+              </ToolbarButton>
+              <ToolbarButton
+                active={editor.isActive('heading', { level: 2 })}
+                onClick={() => toggle(() => editor.chain().toggleHeading({ level: 2 }).run())}
+                title="Heading 2"
+              >
+                <Icon icon={faHeading2} style={{ fontSize: 14 }} />
+              </ToolbarButton>
 
-          <div style={{ width: 1, height: 16, background: 'var(--border-color)', margin: '0 3px', flexShrink: 0 }} />
+              <div style={{ width: 1, height: 16, background: 'var(--border-color)', margin: '0 3px', flexShrink: 0 }} />
+            </>
+          )}
 
           {/* Inline formatting */}
           <ToolbarButton

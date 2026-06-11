@@ -22,7 +22,7 @@ import { useDocumentStore } from '../../stores/document-store'
 import { TOOL_REGISTRY } from '../../utils/tool-registry'
 import { renderAnalysisItemHtml, REPORT_TABLE_CSS } from './report-analysis'
 import { renderQueryItemHtml, REPORT_QUERY_CSS } from './report-query'
-import type { AnalysisToolType, Quote } from '../../models/types'
+import type { AnalysisToolType, Quote, SurveyFormatData } from '../../models/types'
 
 /** Per-tool display options chosen for an analysis item, mirroring the
  *  toggles the analysis tool itself exposes. Applied when the table is
@@ -40,7 +40,7 @@ export interface AnalysisItemOptions {
 }
 
 export type ReportItem =
-  | { id: string; kind: 'section'; title: string }
+  | { id: string; kind: 'section'; title: string; level?: 1 | 2 }
   | { id: string; kind: 'text'; content: string }
   | { id: string; kind: 'query'; refGuid: string }
   | { id: string; kind: 'quote'; refGuid: string }
@@ -113,7 +113,7 @@ export function resolveItemSnippet(item: ReportItem): string | null {
 export function reportItemTypeLabel(item: ReportItem): string {
   switch (item.kind) {
     case 'section':
-      return 'Section'
+      return item.level === 2 ? 'Subsection' : 'Section'
     case 'text':
       return 'Text'
     case 'query':
@@ -141,18 +141,39 @@ function freshQuoteText(q: Quote): string {
   return q.text
 }
 
+/** For a survey-cell quote, a citation fragment naming the respondent and
+ *  the question (number + text). Empty for non-survey quotes or when the
+ *  survey can't be resolved. Returns HTML-escaped content. */
+function surveyCitation(q: Quote): string {
+  if (!q.surveyCell) return ''
+  const src = useDocumentStore.getState().sources.find((s) => s.guid === q.sourceGuid)
+  const survey = (src?.formatData as SurveyFormatData | undefined)?.survey
+  if (!survey) return ''
+  const rIdx = survey.respondents.findIndex((r) => r.id === q.surveyCell!.respondentId)
+  const qIdx = survey.questions.findIndex((qq) => qq.id === q.surveyCell!.questionId)
+  const respLabel = (rIdx >= 0 ? survey.respondents[rIdx]?.displayName : '') || (rIdx >= 0 ? `Respondent ${rIdx + 1}` : 'Respondent')
+  let cite = ` · ${escHtml(respLabel)}`
+  if (qIdx >= 0) {
+    const qText = (survey.questions[qIdx]?.text ?? '').trim()
+    cite += ` · Q${qIdx + 1}${qText ? `: “${escHtml(qText)}”` : ''}`
+  }
+  return cite
+}
+
 const EXPORT_CSS = `
   .report-toc { margin: 8px 0 24px 0; }
   .report-toc ol { margin: 6px 0 0 0; padding-left: 22px; }
   .report-toc li { margin: 2px 0; font-size: 11px; }
   .report-toc a { color: #1155cc; text-decoration: none; }
   .report-block { margin: 0 0 20px 0; break-inside: avoid; page-break-inside: avoid; }
-  h2.report-section { font-size: 15px; font-weight: 600; color: #222; margin: 26px 0 10px 0; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  h2.report-section { font-weight: 600; color: #222; margin: 24px 0 9px 0; }
+  h2.report-section.report-h1 { font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  h2.report-section.report-h2 { font-size: 13px; color: #333; }
   .report-item-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #999; margin: 0 0 4px 0; }
   .report-text { font-size: 11px; color: #222; }
   .report-text p { margin: 0 0 6px 0; }
   .report-text u { text-decoration: underline; }
-  .report-quote { border-left: 3px solid #ccc; padding: 2px 0 2px 12px; margin: 0; color: #333; font-style: italic; }
+  .report-quote { border-left: 3px solid #ccc; padding: 2px 0 2px 12px; margin: 0; color: #333; }
   .report-quote .src { display: block; font-style: normal; font-size: 10px; color: #888; margin-top: 4px; }
   .report-memo .memo-content { font-size: 11px; color: #222; }
   /* Wide analysis tables that overflow the page get rotated + scaled in
@@ -181,7 +202,7 @@ function renderItem(item: ReportItem): string {
   const anchor = reportAnchorId(item)
   switch (item.kind) {
     case 'section':
-      return `<h2 class="report-section" id="${anchor}">${escHtml(item.title || 'Section')}</h2>`
+      return `<h2 class="report-section report-h${item.level ?? 1}" id="${anchor}">${escHtml(item.title || 'Section')}</h2>`
     case 'text':
       return `<div class="report-block report-text" id="${anchor}">${markdownToHtml(item.content)}</div>`
     case 'query':
@@ -202,7 +223,7 @@ function renderQuote(guid: string, anchor: string): string {
   return (
     `<div class="report-block report-quote-block" id="${anchor}">` +
     `<blockquote class="report-quote">${escHtml(text)}` +
-    `<span class="src">— ${escHtml(q.sourceName)}</span>` +
+    `<span class="src">— ${escHtml(q.sourceName)}${surveyCitation(q)}</span>` +
     `</blockquote></div>`
   )
 }

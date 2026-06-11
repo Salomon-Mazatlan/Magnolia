@@ -10,13 +10,14 @@
  * per-analysis options, save / reopen, and PDF export of the non-
  * analysis content. Analysis-table generation lands in a later phase.
  */
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef, useLayoutEffect, useEffect } from 'react'
 import type { AnalysisInitData, AnalysisToolType } from '../../models/types'
 import {
   Icon,
   faClipboardList,
   faXmark,
   faHeading1,
+  faHeading2,
   faFont,
   faBars,
   faMagnifyingGlass,
@@ -73,7 +74,7 @@ const ANALYSIS_CAPS: Record<string, { totalsOnly?: boolean; binary?: boolean; vi
 function itemIcon(item: ReportItem) {
   switch (item.kind) {
     case 'section':
-      return faHeading1
+      return item.level === 2 ? faHeading2 : faHeading1
     case 'text':
       return faFont
     case 'query':
@@ -96,7 +97,7 @@ function parseDrop(e: React.DragEvent): ReportItem[] {
     return [
       which === 'text'
         ? { id: generateGuid(), kind: 'text', content: '' }
-        : { id: generateGuid(), kind: 'section', title: '' }
+        : { id: generateGuid(), kind: 'section', title: '', level: 1 }
     ]
   }
   const queryRaw = e.dataTransfer.getData('application/x-magnolia-query')
@@ -141,15 +142,22 @@ export function Reports({ savedConfig, inTab }: Props) {
   const [analysisGuid] = useState(savedConfig?.guid ?? generateGuid())
   // The report's title is the analysis name, edited inline in the header
   // (active on open for a new report). It doubles as the PDF's <h1>.
-  const [analysisName, setAnalysisName] = useState(savedConfig?.name ?? '')
+  const [analysisName, setAnalysisName] = useState(savedConfig?.name ?? savedConfig?.title ?? '')
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+  // FLIP reordering animation: row element + last-known-position refs.
+  const rowEls = useRef(new Map<string, HTMLDivElement>())
+  const prevTops = useRef(new Map<string, number>())
+  const prevOrderRef = useRef('')
   const isExisting = !!savedConfig?.guid
   // True once the report has been saved at least once, so an inline title
   // edit persists the rename instead of waiting for the first save.
   const savedRef = useRef(isExisting)
   // The latest committed title, read synchronously by Save / Export so a
   // just-typed name isn't missed by a stale render of analysisName.
-  const nameRef = useRef(savedConfig?.name ?? '')
+  const nameRef = useRef(savedConfig?.name ?? savedConfig?.title ?? '')
+  // Skip the persist-to-config effect on first mount, so merely opening a
+  // report doesn't dirty the project.
+  const persistMountRef = useRef(true)
 
   // Live store reads so item cards always show current names.
   const savedQueries = useQueryStore((s) => s.savedQueries)
@@ -265,6 +273,44 @@ export function Reports({ savedConfig, inTab }: Props) {
     }
   }, [analysisName, items])
 
+  // FLIP: when the item order changes, slide each row from its previous
+  // position to its new one. Fires only on reorder (not on content edits),
+  // so typing in a Text block never triggers an animation.
+  useLayoutEffect(() => {
+    const order = items.map((i) => i.id).join(',')
+    const orderChanged = prevOrderRef.current !== '' && order !== prevOrderRef.current
+    const newTops = new Map<string, number>()
+    rowEls.current.forEach((el, id) => newTops.set(id, el.offsetTop))
+    if (orderChanged) {
+      newTops.forEach((newTop, id) => {
+        const prev = prevTops.current.get(id)
+        const el = rowEls.current.get(id)
+        if (prev != null && el && prev !== newTop) {
+          el.style.transition = 'none'
+          el.style.transform = `translateY(${prev - newTop}px)`
+          requestAnimationFrame(() => {
+            el.style.transition = 'transform 0.22s ease'
+            el.style.transform = ''
+          })
+        }
+      })
+    }
+    prevTops.current = newTops
+    prevOrderRef.current = order
+  }, [items])
+
+  // Persist the working report (title + items) to the per-tab config so it
+  // survives tab switches / remounts and project reopen — even before the
+  // report is saved. Skips the first mount so opening a report doesn't
+  // dirty the project. InlineAnalysisTab ignores config when deriving its
+  // analysis data, so these writes stay cheap.
+  useEffect(() => {
+    if (persistMountRef.current) { persistMountRef.current = false; return }
+    const tabId = inTab?.tabId
+    if (!tabId) return
+    useAnalysisTabsStore.getState().setConfig(tabId, { title: analysisName, items })
+  }, [analysisName, items, inTab?.tabId])
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* Title row + actions */}
@@ -323,7 +369,10 @@ export function Reports({ savedConfig, inTab }: Props) {
         ) : (
           <div>
             {items.map((item, idx) => (
-              <div key={item.id}>
+              <div
+                key={item.id}
+                ref={(el) => { if (el) rowEls.current.set(item.id, el); else rowEls.current.delete(item.id) }}
+              >
                 {/* Drop indicator before this row. */}
                 <div
                   onDragOver={(e) => { if (isAcceptedDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverIdx(idx) } }}
@@ -411,21 +460,38 @@ function ReportRow({
         )
       })()}
 
-      {/* Section: editable heading text. */}
+      {/* Section: editable heading text + H1 / H2 level. */}
       {item.kind === 'section' && (
-        <input
-          type="text"
-          value={item.title}
-          placeholder="Section heading"
-          onChange={(e) => onUpdate({ title: e.target.value })}
-          style={{ width: '100%', marginTop: 8, fontSize: 14, fontWeight: 600, padding: '5px 8px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
-        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8 }}>
+          <div style={{ display: 'inline-flex', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', overflow: 'hidden', flexShrink: 0 }}>
+            {([[1, 'Section'], [2, 'Subsection']] as const).map(([lvl, label]) => {
+              const active = (item.level ?? 1) === lvl
+              return (
+                <button
+                  key={lvl}
+                  onClick={() => onUpdate({ level: lvl })}
+                  title={`${label} (H${lvl})`}
+                  style={{ fontSize: 11, fontWeight: 600, padding: '5px 10px', border: 'none', cursor: 'pointer', background: active ? 'var(--accent)' : 'var(--bg-tertiary)', color: active ? '#fff' : 'var(--text-secondary)' }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
+          <input
+            type="text"
+            value={item.title}
+            placeholder="Section heading"
+            onChange={(e) => onUpdate({ title: e.target.value })}
+            style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 600, padding: '5px 8px', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-input)', color: 'var(--text-primary)' }}
+          />
+        </div>
       )}
 
-      {/* Text: inline rich-text editor (stored as markdown). */}
+      {/* Text: inline rich-text editor (stored as markdown; no headings). */}
       {item.kind === 'text' && (
         <div style={{ marginTop: 8 }}>
-          <MarkdownEditor value={item.content} onChange={(md) => onUpdate({ content: md })} style={{ minHeight: 90 }} />
+          <MarkdownEditor value={item.content} onChange={(md) => onUpdate({ content: md })} style={{ minHeight: 90 }} headings={false} />
         </div>
       )}
 

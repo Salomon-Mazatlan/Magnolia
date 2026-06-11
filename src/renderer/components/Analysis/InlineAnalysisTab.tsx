@@ -54,7 +54,13 @@ export function InlineAnalysisTab({ tabId }: Props) {
     return buildAnalysisInitData(instance.toolType as AnalysisToolType, {
       savedConfig: resolveSavedConfig(instance, savedAnalyses ?? [])
     })
-  }, [instance, savedAnalyses, isQueryBuilder])
+    // Re-derive only when the tool identity / saved analyses change — NOT on
+    // every ad-hoc config write. A tool reads savedConfig once on mount and
+    // gets live store data from useLiveAnalysisData, so rebuilding on each
+    // config write (e.g. a Report persisting its items per edit) would be
+    // wasted work.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instance?.toolType, instance?.savedAnalysisGuid, savedAnalyses, isQueryBuilder])
 
   const queryBuilderData = useMemo(() => {
     if (!instance || !isQueryBuilder) return null
