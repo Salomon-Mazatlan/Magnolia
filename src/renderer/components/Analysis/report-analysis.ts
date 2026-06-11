@@ -19,6 +19,7 @@ import {
   binarizeGrid
 } from './analysis-helpers'
 import { buildSurveyAwareColumns, type AnalysisColumn } from './survey-grouping'
+import { buildExportSvg } from './RelationshipMap/svg-export'
 import { emptyDocumentFilter } from '../DocumentSelector/DocumentSelector'
 import { executeQuery } from '../../utils/query-engine'
 import { stripFormatting } from '../../utils/strip-formatting'
@@ -66,6 +67,8 @@ export const REPORT_TABLE_CSS = `
   table.report-grid td.pctcell { min-width: 42px; height: 26px; padding: 0 6px; text-align: center; font-style: italic; font-size: 9px; color: #6a7b90; background: #f7f9fb; }
   table.report-grid tr.total td { border-top: 2px solid #aab4c0; font-weight: 700; background: #eef1f5; }
   .cw { height: 26px; display: flex; align-items: center; justify-content: center; }
+  .report-map { margin: 6px 0 10px; text-align: center; }
+  .report-map svg { max-width: 100%; height: auto; display: inline-block; }
 `
 
 function pctOf(value: number, total: number): string {
@@ -496,6 +499,15 @@ function wordFrequenciesHtml(config: any, _options: AnalysisItemOptions): string
 
 /** Render one analysis item: regenerate its table fresh, or a short
  *  placeholder for tools not yet implemented / deleted analyses. */
+// ── Relationship Map (static SVG snapshot) ─────────────────────────
+
+/** Render a saved Relationship Map to an inline SVG scaled to the page
+ *  width, via the same headless exporter as the tool's "Export SVG". */
+function relationshipMapHtml(config: any): string {
+  const svg = buildExportSvg(config?.elements ?? [], config?.connections ?? [], config?.freeTexts ?? [])
+  return `<div class="report-map">${svg}</div>`
+}
+
 export function renderAnalysisItemHtml(
   item: Extract<ReportItem, { kind: 'analysis' }>,
   anchor: string
@@ -526,6 +538,9 @@ export function renderAnalysisItemHtml(
         break
       case 'word-frequencies':
         inner = wordFrequenciesHtml(sa.config, item.options)
+        break
+      case 'relationship-map':
+        inner = relationshipMapHtml(sa.config)
         break
       default:
         inner = `<div class="empty">${escHtml(sa.name)} — table generation for ${escHtml(toolLabel)} is coming soon.</div>`
