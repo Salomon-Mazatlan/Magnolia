@@ -18,10 +18,15 @@ export interface FootPedalMappings {
  *  ("Clean") for backwards compatibility with older preference files. */
 export type ThemeId = '' | 'dark' | 'granola' | 'granola-dark' | 'high-contrast' | 'magnolia' | 'magnolia-dark'
 
+/** Paper size for PDFs Magnolia exports. Values are Electron
+ *  printToPDF `pageSize` strings. */
+export type PaperSize = 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal' | 'Tabloid'
+
 export interface Preferences {
   footPedalMappings: FootPedalMappings
   defaultPlaybackSpeed: number
   theme: ThemeId
+  paperSize: PaperSize
 }
 
 const DEFAULT_PREFERENCES: Preferences = {
@@ -33,7 +38,8 @@ const DEFAULT_PREFERENCES: Preferences = {
     fastForwardSeconds: 5
   },
   defaultPlaybackSpeed: 1.0,
-  theme: 'magnolia'
+  theme: 'magnolia',
+  paperSize: 'A4'
 }
 
 interface PreferencesState extends Preferences {
@@ -57,6 +63,7 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
           footPedalMappings: { ...DEFAULT_PREFERENCES.footPedalMappings, ...prefs.footPedalMappings },
           defaultPlaybackSpeed: prefs.defaultPlaybackSpeed ?? DEFAULT_PREFERENCES.defaultPlaybackSpeed,
           theme: (prefs.theme ?? DEFAULT_PREFERENCES.theme) as ThemeId,
+          paperSize: (prefs.paperSize ?? DEFAULT_PREFERENCES.paperSize) as PaperSize,
           loaded: true
         })
       } else {
@@ -68,9 +75,9 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
   },
 
   save: async () => {
-    const { footPedalMappings, defaultPlaybackSpeed, theme } = get()
+    const { footPedalMappings, defaultPlaybackSpeed, theme, paperSize } = get()
     try {
-      await window.api.savePreferences({ footPedalMappings, defaultPlaybackSpeed, theme })
+      await window.api.savePreferences({ footPedalMappings, defaultPlaybackSpeed, theme, paperSize })
     } catch { /* ignore */ }
   },
 
@@ -113,6 +120,7 @@ if (typeof window !== 'undefined' && window.api?.onPreferencesUpdate) {
       footPedalMappings: { ...DEFAULT_PREFERENCES.footPedalMappings, ...(prefs.footPedalMappings || {}) },
       defaultPlaybackSpeed: prefs.defaultPlaybackSpeed ?? DEFAULT_PREFERENCES.defaultPlaybackSpeed,
       theme: (prefs.theme ?? DEFAULT_PREFERENCES.theme) as ThemeId,
+      paperSize: (prefs.paperSize ?? DEFAULT_PREFERENCES.paperSize) as PaperSize,
       loaded: true
     })
   })

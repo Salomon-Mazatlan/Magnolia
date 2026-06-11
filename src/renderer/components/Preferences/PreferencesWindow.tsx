@@ -22,10 +22,14 @@ interface FootPedalMappings {
 
 type ThemeId = '' | 'dark' | 'granola' | 'granola-dark' | 'high-contrast' | 'magnolia' | 'magnolia-dark'
 
+/** Paper size for exported PDFs — Electron printToPDF `pageSize` values. */
+type PaperSize = 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal' | 'Tabloid'
+
 interface Preferences {
   footPedalMappings: FootPedalMappings
   defaultPlaybackSpeed: number
   theme: ThemeId
+  paperSize: PaperSize
 }
 
 const DEFAULT_PREFS: Preferences = {
@@ -41,10 +45,13 @@ const DEFAULT_PREFS: Preferences = {
   // reports prefers-color-scheme: dark — handled by apply-theme.ts
   // on first paint). Existing pref files that already carry a saved
   // theme (including the legacy '' for Clean) override this.
-  theme: 'magnolia'
+  theme: 'magnolia',
+  paperSize: 'A4'
 }
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2]
+
+const PAPER_SIZE_OPTIONS: PaperSize[] = ['A4', 'A3', 'A5', 'Letter', 'Legal', 'Tabloid']
 
 interface ThemeOption {
   id: ThemeId
@@ -63,7 +70,7 @@ const THEME_OPTIONS: ThemeOption[] = [
   { id: 'high-contrast', label: 'High Contrast', swatch: { bg: '#000000', surface: '#ffffff', accent: '#ffff00' } }
 ]
 
-type CategoryId = 'appearance' | 'media-playback' | 'updates' | 'support'
+type CategoryId = 'appearance' | 'media-playback' | 'paper-size' | 'updates' | 'support'
 
 interface Category {
   id: CategoryId
@@ -73,6 +80,7 @@ interface Category {
 const CATEGORIES: Category[] = [
   { id: 'appearance',     label: 'Appearance' },
   { id: 'media-playback', label: 'Media Playback' },
+  { id: 'paper-size',     label: 'Paper Size' },
   { id: 'updates',        label: 'Updates' },
   { id: 'support',        label: 'Support Magnolia' }
 ]
@@ -307,6 +315,38 @@ function MediaPlaybackSettings({
         </select>
       </div>
     </>
+  )
+}
+
+/** Paper Size — its own Preferences category. Page size for the PDFs
+ *  Magnolia exports. */
+function PaperSizeSettings({
+  prefs,
+  save
+}: {
+  prefs: Preferences
+  save: (updated: Preferences) => void
+}) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: 'var(--text-secondary)' }}>Paper Size</h3>
+      <p style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.5 }}>
+        Page size for PDFs Magnolia exports (coded documents, query results, codebooks, the logbook, and survey summaries).
+      </p>
+      <select
+        value={prefs.paperSize}
+        onChange={(e) => save({ ...prefs, paperSize: e.target.value as PaperSize })}
+        style={{
+          padding: '4px 8px', fontSize: 12,
+          border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)',
+          background: 'var(--bg-input)', color: 'var(--text-primary)', cursor: 'pointer'
+        }}
+      >
+        {PAPER_SIZE_OPTIONS.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+    </div>
   )
 }
 
@@ -644,6 +684,9 @@ export function PreferencesWindow({ onClose }: PreferencesWindowProps = {}) {
           )}
           {selected.id === 'media-playback' && (
             <MediaPlaybackSettings prefs={prefs} updateMapping={updateMapping} save={save} />
+          )}
+          {selected.id === 'paper-size' && (
+            <PaperSizeSettings prefs={prefs} save={save} />
           )}
           {selected.id === 'updates' && <UpdatesSettings />}
           {selected.id === 'support' && <SupportSettings />}

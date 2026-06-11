@@ -8,6 +8,28 @@ import { serializeCodebook } from './qdpx/codebook-serializer'
 import { deserializeCodebook } from './qdpx/codebook-deserializer'
 import type { Project, Code } from '../renderer/models/types'
 
+/** Paper sizes offered in Preferences, mapped to Electron printToPDF
+ *  `pageSize` strings. */
+type ExportPaperSize = 'A4' | 'A3' | 'A5' | 'Letter' | 'Legal' | 'Tabloid'
+const VALID_PAPER_SIZES = new Set<ExportPaperSize>(['A4', 'A3', 'A5', 'Letter', 'Legal', 'Tabloid'])
+
+/** Read the user's chosen export paper size from the persisted
+ *  preferences file. Read at export time (rather than passed from the
+ *  renderer) so every export call site honours it without change.
+ *  Falls back to A4 — the Preferences default — on any miss. */
+async function readExportPaperSize(): Promise<ExportPaperSize> {
+  try {
+    const prefsPath = join(app.getPath('userData'), 'magnolia-preferences.json')
+    if (existsSync(prefsPath)) {
+      const prefs = JSON.parse(await readFile(prefsPath, 'utf-8'))
+      if (typeof prefs?.paperSize === 'string' && VALID_PAPER_SIZES.has(prefs.paperSize as ExportPaperSize)) {
+        return prefs.paperSize as ExportPaperSize
+      }
+    }
+  } catch { /* ignore — fall back to default */ }
+  return 'A4'
+}
+
 export function registerIpcHandlers(): void {
   ipcMain.handle('get-file-size', async (_event, filePath: string) => {
     try {
@@ -406,6 +428,7 @@ export function registerIpcHandlers(): void {
         const hasFooter = !!footerTemplate
         const displayHeaderFooter = hasHeader || hasFooter
         const pdfBuffer = await win.webContents.printToPDF({
+          pageSize: await readExportPaperSize(),
           printBackground: true,
           margins: {
             // When a header/footer template is supplied, the page
