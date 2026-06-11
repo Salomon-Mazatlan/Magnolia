@@ -507,6 +507,10 @@ function SupportSettings() {
         Sponsors. The link opens in your browser.
       </p>
 
+      <p style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginBottom: 16, lineHeight: 1.6 }}>
+        Magnolia was created by and is maintained by Dr Cale Davis.
+      </p>
+
       {/* The main window's setWindowOpenHandler routes target=_blank links
           through shell.openExternal, so this opens in the default browser. */}
       <a
