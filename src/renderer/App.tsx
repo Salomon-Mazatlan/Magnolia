@@ -74,6 +74,7 @@ import { AnalysisPopover } from './components/Toolbar/AnalysisPopover'
 import { StudioPopover } from './components/Toolbar/StudioPopover'
 import { WindowControls } from './components/Toolbar/WindowControls'
 import type { Project, Query, CodeCondition, Code, TextSource, QDASet, LogbookInitData, AnalysisInitData, AnalysisToolType, PlainTextSelection, Memo, MemoEditInitData, SurveyCellScopeArgs } from './models/types'
+import { buildSurveyEntityLabels } from './utils/survey/survey-labels'
 
 /** Fold the survey-cell scope carried by an analysis cell-click into the
  *  documentFilter of the Query being generated, so it re-runs against the
@@ -160,6 +161,18 @@ function describeQuery(
       .map((g) => tags.find((tg) => tg.guid === g)?.name)
       .filter(Boolean) as string[]
     if (excludeNames.length > 0) parts.push('NOT ' + excludeNames.join(', '))
+  }
+  if (df.questionScope?.length || df.respondentScope?.length) {
+    // Resolve respondent/question display names from the survey sources.
+    const labels = buildSurveyEntityLabels(sources)
+    if (df.questionScope?.length) {
+      const names = df.questionScope.map((r) => labels?.[r.sourceGuid]?.questions?.[r.id]).filter(Boolean) as string[]
+      parts.push(names.length > 0 && names.length <= 2 ? names.join(', ') : `${df.questionScope.length} question${df.questionScope.length > 1 ? 's' : ''}`)
+    }
+    if (df.respondentScope?.length) {
+      const names = df.respondentScope.map((r) => labels?.[r.sourceGuid]?.respondents?.[r.id]).filter(Boolean) as string[]
+      parts.push(names.length > 0 && names.length <= 2 ? names.join(', ') : `${df.respondentScope.length} respondent${df.respondentScope.length > 1 ? 's' : ''}`)
+    }
   }
   if (parts.length > 0) name += ' IN ' + parts.join(', ')
   return name

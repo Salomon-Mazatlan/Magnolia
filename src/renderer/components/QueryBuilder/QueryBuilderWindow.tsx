@@ -22,7 +22,8 @@ import { generateGuid } from '../../utils/guid'
 function describeDocFilter(
   df: Query['documentFilter'],
   sources: { guid: string; name: string }[],
-  tags: { guid: string; name: string; value?: string }[]
+  tags: { guid: string; name: string; value?: string }[],
+  surveyEntityLabels?: Record<string, { respondents: Record<string, string>; questions: Record<string, string> }>
 ): string {
   const parts: string[] = []
   // Name explicitly-picked documents only — not the full resolved source
@@ -46,6 +47,14 @@ function describeDocFilter(
   if (df.tagExcludeGuids && df.tagExcludeGuids.length > 0) {
     const exNames = df.tagExcludeGuids.map((g) => tags.find((tg) => tg.guid === g)?.name).filter(Boolean) as string[]
     if (exNames.length > 0) parts.push('NOT ' + exNames.join(', '))
+  }
+  if (df.questionScope && df.questionScope.length > 0) {
+    const names = df.questionScope.map((r) => surveyEntityLabels?.[r.sourceGuid]?.questions?.[r.id]).filter(Boolean) as string[]
+    parts.push(names.length > 0 && names.length <= 2 ? names.join(', ') : `${df.questionScope.length} question${df.questionScope.length > 1 ? 's' : ''}`)
+  }
+  if (df.respondentScope && df.respondentScope.length > 0) {
+    const names = df.respondentScope.map((r) => surveyEntityLabels?.[r.sourceGuid]?.respondents?.[r.id]).filter(Boolean) as string[]
+    parts.push(names.length > 0 && names.length <= 2 ? names.join(', ') : `${df.respondentScope.length} respondent${df.respondentScope.length > 1 ? 's' : ''}`)
   }
   return parts.length > 0 ? ' IN ' + parts.join(', ') : ''
 }
@@ -202,6 +211,21 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
     questionScope: questionScope.map((r) => ({ sourceGuid: r.sourceGuid, id: r.id })),
     respondentScope: respondentScope.map((r) => ({ sourceGuid: r.sourceGuid, id: r.id }))
   }), [docFilter, questionScope, respondentScope])
+
+  // Whether a survey is within the current Document Selector scope. The
+  // selector emits its resolved document set into docFilter.sourceGuids,
+  // so an active filter is "in scope" iff that resolved set includes a
+  // survey; an empty filter means all documents, so any survey qualifies.
+  // Drives whether the survey-cell scope editors are shown — there's no
+  // point scoping by question/respondent when no survey is being queried.
+  const surveyInScope = useMemo(() => {
+    const surveyGuids = Object.keys(data?.surveyEntityLabels ?? {})
+    if (surveyGuids.length === 0) return false
+    const filtered = docFilter.sourceGuids.length > 0 || docFilter.folderGuids.length > 0 || docFilter.tagGuids.length > 0 || docFilter.typeInclude.length > 0
+    if (!filtered) return true
+    const sg = new Set(surveyGuids)
+    return docFilter.sourceGuids.some((g) => sg.has(g))
+  }, [data, docFilter])
   const currentConfig = useMemo(
     () => ({ docFilter: docFilterForCompare, codeCondition }),
     [docFilterForCompare, codeCondition]
@@ -437,7 +461,7 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
       return true
     }
     const condName = codeCondition ? describeCondition(codeCondition, data?.codes ?? []) : ''
-    const filterName = data ? describeDocFilter(buildDocumentFilter(), data.sources, data.tags) : ''
+    const filterName = data ? describeDocFilter(buildDocumentFilter(), data.sources, data.tags, data.surveyEntityLabels) : ''
     setSaveQueryName(condName + filterName)
     setShowSaveDialog(true)
     return false
@@ -520,7 +544,7 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
               const condName = codeCondition
                 ? describeCondition(codeCondition, data.codes)
                 : ''
-              const filterName = describeDocFilter(buildDocumentFilter(), data.sources, data.tags)
+              const filterName = describeDocFilter(buildDocumentFilter(), data.sources, data.tags, data.surveyEntityLabels)
               setSaveQueryName(condName + filterName)
               setShowSaveDialog(true)
             }
@@ -595,10 +619,11 @@ export function QueryBuilderWindow({ initData, inTab }: Props = {}) {
               )}
             </div>
 
-            {/* ── Survey scope: limit the listed surveys to specific
-                questions / respondents. Only shown when the project has
-                surveys. Empty = all questions / all respondents. ── */}
-            {data.surveyEntityLabels && Object.keys(data.surveyEntityLabels).length > 0 && (
+            {/* ── Survey scope: limit the queried survey(s) to specific
+                questions / respondents. Shown only when a survey is within
+                the Document Selector scope. Empty = all questions / all
+                respondents. ── */}
+            {surveyInScope && (
               <>
                 <QuestionScopeBox value={questionScope} onChange={setQuestionScope} data={data} />
                 <RespondentScopeBox value={respondentScope} onChange={setRespondentScope} data={data} />
