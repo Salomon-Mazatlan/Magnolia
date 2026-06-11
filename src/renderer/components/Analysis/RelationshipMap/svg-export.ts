@@ -1,12 +1,7 @@
 import type { MapElement, MapConnection, FreeTextElement, MapElementKind } from './types'
 import { ELEMENT_COLORS, ANALYSIS_TOOL_COLORS } from './types'
-import {
-  bezPathFromPorts,
-  arcMidpoint,
-  parseArcPath,
-  distributePortsForElement,
-  computePortPosition
-} from './bezier-utils'
+import { arcMidpoint, parseArcPath } from './bezier-utils'
+import { computeConnectionPath } from './MapConnection'
 
 function escapeXml(str: string): string {
   return str
@@ -85,38 +80,15 @@ const CHEV_SIZE = 5
 function connectionSvg(
   conn: MapConnection,
   elements: MapElement[],
+  freeTexts: FreeTextElement[],
   allConnections: MapConnection[]
 ): { lines: string; overlay: string } {
-  const fromEl = elements.find((e) => e.id === conn.fromId)
-  const toEl = elements.find((e) => e.id === conn.toId)
-  if (!fromEl || !toEl) return { lines: '', overlay: '' }
-
-  const fromCenter = { x: fromEl.x + fromEl.width / 2, y: fromEl.y + fromEl.height / 2 }
-  const toCenter = { x: toEl.x + toEl.width / 2, y: toEl.y + toEl.height / 2 }
-
-  // Port distribution (same as MapConnection.tsx)
-  const fromConns = allConnections.filter((c) => c.fromId === conn.fromId || c.toId === conn.fromId)
-  const fromTargets = new Map<string, { x: number; y: number }>()
-  for (const c of fromConns) {
-    const otherId = c.fromId === conn.fromId ? c.toId : c.fromId
-    const other = elements.find((e) => e.id === otherId)
-    if (other) fromTargets.set(c.id, { x: other.x + other.width / 2, y: other.y + other.height / 2 })
-  }
-  const fromPorts = distributePortsForElement(fromEl, fromConns.map((c) => c.id), fromTargets)
-
-  const toConns = allConnections.filter((c) => c.fromId === conn.toId || c.toId === conn.toId)
-  const toTargets = new Map<string, { x: number; y: number }>()
-  for (const c of toConns) {
-    const otherId = c.fromId === conn.toId ? c.toId : c.fromId
-    const other = elements.find((e) => e.id === otherId)
-    if (other) toTargets.set(c.id, { x: other.x + other.width / 2, y: other.y + other.height / 2 })
-  }
-  const toPorts = distributePortsForElement(toEl, toConns.map((c) => c.id), toTargets)
-
-  const fromEdge = fromPorts.get(conn.id) || computePortPosition(fromEl, toCenter, 0)
-  const toEdge = toPorts.get(conn.id) || computePortPosition(toEl, fromCenter, 0)
-
-  const path = bezPathFromPorts(fromEdge, fromCenter, toEdge, toCenter)
+  // Reuse the live canvas path computation so the export never drifts:
+  // ports on the rounded outline, outward-normal bezier handles, sibling
+  // fan-out, and free-text endpoints all match the on-screen rendering.
+  const result = computeConnectionPath(conn, elements, freeTexts, allConnections)
+  if (!result) return { lines: '', overlay: '' }
+  const { path, fromEdge, toEdge } = result
 
   // Line (behind boxes)
   const lines = `<path d="${path}" fill="none" stroke="${STROKE_COLOR}" stroke-width="2"/>`
@@ -295,7 +267,7 @@ export function buildExportSvg(
   // 2. Element boxes
   // 3. Free text
   // 4. Connection overlays — arrowheads and labels (in front of boxes)
-  const connResults = connections.map((c) => connectionSvg(c, elements, connections))
+  const connResults = connections.map((c) => connectionSvg(c, elements, freeTexts, connections))
   const linesSvg = connResults.map((r) => r.lines).join('\n')
   const overlaysSvg = connResults.map((r) => r.overlay).join('\n')
   const elementsSvg = elements.map(elementSvg).join('\n')
