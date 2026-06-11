@@ -163,7 +163,10 @@ const EXPORT_CSS = `
   h2.report-section { font-weight: 600; color: #222; margin: 24px 0 9px 0; }
   h2.report-section.report-h1 { font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
   h2.report-section.report-h2 { font-size: 13px; color: #333; }
-  .report-item-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #999; margin: 0 0 4px 0; }
+  /* Per-item titles (Query / Analysis / Memo / Map) as a third heading
+     level nested under Section (h1) and Subsection (h2): dark, semibold,
+     sentence case — not the old grey all-caps. */
+  .report-item-head { font-size: 12px; font-weight: 600; color: #333; margin: 0 0 7px 0; }
   .report-text { font-size: 11px; color: #222; }
   .report-text p { margin: 0 0 6px 0; }
   .report-text u { text-decoration: underline; }
