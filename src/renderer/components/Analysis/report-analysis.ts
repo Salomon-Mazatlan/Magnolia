@@ -35,14 +35,37 @@ export const REPORT_TABLE_CSS = `
   table.report-table th, table.report-table td { border: 1px solid #ddd; padding: 3px 6px; text-align: center; white-space: nowrap; }
   table.report-table th.rowhead, table.report-table td.rowhead { text-align: left; font-weight: 600; }
   table.report-table th { background: #f3f4f6; color: #555; font-size: 9px; font-weight: 600; }
-  table.report-table td.sub { background: #eef1f5; font-weight: 600; }
-  table.report-table td.pct { background: #f6f7f9; font-style: italic; color: #666; }
-  table.report-table tr.total td { border-top: 2px solid #bbb; font-weight: 700; }
   table.report-table td.zero { color: #bbb; }
   table.report-co td.co-seq { text-align: left; white-space: normal; line-height: 1.8; }
   .co-chip { display: inline-block; white-space: nowrap; }
   .co-chip .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 3px; vertical-align: middle; }
   .co-arrow { color: #aaa; margin: 0 5px; }
+  /* Grid tables, matching the on-screen Codes-in-Documents / Results-in-
+     Documents / Co-Occurrences look: rotated headers, fixed 50x32 cells,
+     subtotal / band tints, and (in Visual mode) sized colour boxes. */
+  table.report-grid { border-collapse: collapse; font-size: 10px; margin: 4px 0 12px 0; }
+  table.report-grid th, table.report-grid td { border: 1px solid #dde2e8; }
+  table.report-grid th.corner { text-align: left; vertical-align: bottom; padding: 5px 8px; font-weight: 700; color: #444; font-size: 10px; background: #f4f6f8; }
+  table.report-grid th.col { width: 30px; min-width: 30px; max-width: 30px; vertical-align: bottom; padding: 6px 0 5px; background: #f4f6f8; }
+  /* Vertical headers (read bottom-to-top) keep long document / respondent
+     names from overflowing the way the on-screen diagonal labels would in
+     a fixed-width PDF page. */
+  table.report-grid th.col .vlabel { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; font-size: 9px; color: #586271; margin: 0 auto; max-height: 130px; }
+  table.report-grid th.col.sub { background: #e6ebf1; }
+  table.report-grid th.col.sub .vlabel { font-style: italic; font-weight: 700; color: #3a4a60; }
+  table.report-grid th.col.band { background: #eef2f6; }
+  table.report-grid th.col.totalhead { background: #e9edf2; }
+  table.report-grid th.col.totalhead .vlabel { font-weight: 700; color: #2a3340; }
+  table.report-grid th.band-label { text-align: center; font-size: 9px; font-weight: 700; color: #3a4a60; background: #eef2f6; padding: 3px 4px; white-space: nowrap; overflow: hidden; }
+  table.report-grid td.rowname { text-align: left; font-weight: 600; padding: 4px 8px; max-width: 190px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #222; }
+  table.report-grid td.cell { width: 30px; height: 26px; padding: 0; text-align: center; color: #333; }
+  table.report-grid td.cell.sub { background: #eef1f6; font-weight: 700; }
+  table.report-grid td.cell.band { background: #f6f8fb; }
+  table.report-grid td.cell.zero { color: #c8cdd4; }
+  table.report-grid td.totalcell { min-width: 32px; height: 26px; padding: 0 6px; text-align: center; font-weight: 700; border-left: 2px solid #c4ccd6; color: #222; }
+  table.report-grid td.pctcell { min-width: 42px; height: 26px; padding: 0 6px; text-align: center; font-style: italic; font-size: 9px; color: #6a7b90; background: #f7f9fb; }
+  table.report-grid tr.total td { border-top: 2px solid #aab4c0; font-weight: 700; background: #eef1f5; }
+  .cw { height: 26px; display: flex; align-items: center; justify-content: center; }
 `
 
 function pctOf(value: number, total: number): string {
@@ -50,14 +73,22 @@ function pctOf(value: number, total: number): string {
   return ((value / total) * 100).toFixed(1) + '%'
 }
 
-/** Light→strong tint for a "visual" heatmap cell, mirroring the on-screen
- *  red ramp. */
-function heatStyle(value: number, maxVal: number): string {
-  if (value <= 0) return ''
-  const ratio = Math.min(1, value / Math.max(1, maxVal))
-  const g = Math.round(235 - ratio * 150)
-  const b = Math.round(235 - ratio * 150)
-  return ` style="background:rgb(255,${g},${b})"`
+function trunc(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s
+}
+
+/** A sized colour box for a "Visual" cell, replicating the on-screen
+ *  grid exactly: box size 6→24px and an rgb red ramp scaled by the
+ *  value's share of the (non-subtotal) max; empty cells get a tiny grey
+ *  square. */
+function visualBox(v: number, maxVal: number): string {
+  const ratio = v > 0 ? Math.min(1, v / Math.max(1, maxVal)) : 0
+  const size = v > 0 ? 5 + ratio * 15 : 3
+  const r = Math.round(180 + ratio * 75)
+  const g = Math.round(180 - ratio * 100)
+  const b = Math.round(180 - ratio * 100)
+  const color = v > 0 ? `rgb(${r},${g},${b})` : '#e9eef5'
+  return `<div style="width:${size}px;height:${size}px;background:${color};border-radius:2px"></div>`
 }
 
 /** Wrap a table; flag wide ones so the export CSS can rotate/scale them
@@ -75,50 +106,88 @@ function renderGridTableHtml(
   rowLabel: string,
   rowNames: string[],
   columns: AnalysisColumn[],
+  headerGroups: { label: string | null; span: number }[],
   grid: number[][],
   opts: { binary: boolean; visual: boolean; totalsOnly: boolean }
 ): string {
+  const { binary, visual, totalsOnly } = opts
   const rowTotals = grid.map((row) => row.reduce((s, v, j) => (columns[j].isSubtotal ? s : s + v), 0))
   const colTotals = columns.map((_, j) => grid.reduce((s, row) => s + row[j], 0))
   const grandTotal = rowTotals.reduce((a, b) => a + b, 0)
   let maxVal = 1
   for (let i = 0; i < grid.length; i++) for (let j = 0; j < columns.length; j++) if (!columns[j].isSubtotal && grid[i][j] > maxVal) maxVal = grid[i][j]
 
-  const { binary, visual, totalsOnly } = opts
+  // Band membership (labelled groups), for the faint tint behind grouped
+  // columns — matches the on-screen treatment.
+  const inBand = new Array(columns.length).fill(false)
+  {
+    let cursor = 0
+    for (const g of headerGroups) {
+      if (g.label !== null) for (let i = 0; i < g.span; i++) inBand[cursor + i] = true
+      cursor += g.span
+    }
+  }
+  const colCls = (j: number) => (columns[j].isSubtotal ? ' sub' : inBand[j] ? ' band' : '')
+
   const visIdx = columns.map((_, j) => j).filter((j) => (totalsOnly ? columns[j].isSubtotal : true))
+  const grouped = !totalsOnly && headerGroups.some((g) => g.label !== null)
 
+  // Grouped band header row (spanning category/folder/survey names).
+  let groupedRow = ''
+  if (grouped) {
+    const spans: number[] = []
+    let cursor = 0
+    for (const g of headerGroups) {
+      let extra = 0
+      for (let k = cursor; k < cursor + g.span; k++) if (columns[k]?.isSubtotal) extra++
+      spans.push(g.span + extra)
+      cursor += g.span
+    }
+    const cells = headerGroups
+      .map((g, gi) => (g.label !== null ? `<th class="band-label" colspan="${spans[gi]}">${escHtml(g.label)}</th>` : `<th colspan="${spans[gi]}"></th>`))
+      .join('')
+    groupedRow = `<tr><th class="corner"></th>${cells}<th></th><th></th></tr>`
+  }
+
+  // Rotated column header row.
   const headCells = visIdx
-    .map((j) => `<th class="${columns[j].isSubtotal ? 'sub' : ''}">${escHtml(columns[j].label)}</th>${columns[j].isSubtotal ? '<th class="sub">%</th>' : ''}`)
+    .map((j) => {
+      const th = `<th class="col${colCls(j)}"><div class="vlabel">${escHtml(trunc(columns[j].label, 26))}</div></th>`
+      const pctTh = columns[j].isSubtotal ? `<th class="col sub"><div class="vlabel">%</div></th>` : ''
+      return th + pctTh
+    })
     .join('')
-  const thead = `<tr><th class="rowhead">${escHtml(rowLabel)}</th>${headCells}<th>Total</th><th>% of Total</th></tr>`
+  const headerRow = `<tr><th class="corner">${escHtml(rowLabel)}</th>${headCells}<th class="col totalhead"><div class="vlabel">Total</div></th><th class="col totalhead"><div class="vlabel">% of Total</div></th></tr>`
 
+  // Body rows — Visual mode draws a sized box; Numeric shows the count.
   const body = rowNames
     .map((name, i) => {
       const cells = visIdx
         .map((j) => {
           const v = grid[i][j]
-          const cls = columns[j].isSubtotal ? 'sub' : v === 0 ? 'zero' : ''
-          const style = visual && !columns[j].isSubtotal ? heatStyle(v, maxVal) : ''
-          const main = `<td class="${cls}"${style}>${v}</td>`
-          const pctCell = columns[j].isSubtotal ? `<td class="pct">${binary ? '–' : pctOf(grid[i][j], rowTotals[i]) || '–'}</td>` : ''
-          return main + pctCell
+          const zero = v === 0 && !columns[j].isSubtotal
+          const inner = visual ? visualBox(v, maxVal) : String(v)
+          const cell = `<td class="cell${colCls(j)}${zero ? ' zero' : ''}"><div class="cw">${inner}</div></td>`
+          const pctCell = columns[j].isSubtotal ? `<td class="pctcell">${binary ? '–' : pctOf(v, rowTotals[i]) || '–'}</td>` : ''
+          return cell + pctCell
         })
         .join('')
-      return `<tr><td class="rowhead">${escHtml(name)}</td>${cells}<td>${rowTotals[i]}</td><td class="pct">${pctOf(rowTotals[i], grandTotal) || '–'}</td></tr>`
+      return `<tr><td class="rowname">${escHtml(name)}</td>${cells}<td class="totalcell">${rowTotals[i]}</td><td class="pctcell">${pctOf(rowTotals[i], grandTotal) || '–'}</td></tr>`
     })
     .join('')
 
+  // Total row is always numeric (the on-screen margins never become boxes).
   const totalCells = visIdx
     .map((j) => {
-      const ct = colTotals[j]
-      const cls = columns[j].isSubtotal ? 'sub' : ''
-      const pctCell = columns[j].isSubtotal ? `<td class="pct">${binary ? '–' : pctOf(ct, grandTotal) || '–'}</td>` : ''
-      return `<td class="${cls}">${ct}</td>${pctCell}`
+      const cell = `<td class="cell${colCls(j)}"><div class="cw">${colTotals[j]}</div></td>`
+      const pctCell = columns[j].isSubtotal ? `<td class="pctcell">${binary ? '–' : pctOf(colTotals[j], grandTotal) || '–'}</td>` : ''
+      return cell + pctCell
     })
     .join('')
-  const totalRow = `<tr class="total"><td class="rowhead">Total</td>${totalCells}<td>${grandTotal}</td><td class="pct">${grandTotal ? '100.0%' : '–'}</td></tr>`
+  const totalRow = `<tr class="total"><td class="rowname">Total</td>${totalCells}<td class="totalcell">${grandTotal}</td><td class="pctcell">${grandTotal ? '100.0%' : '–'}</td></tr>`
 
-  return wrapTable(`<thead>${thead}</thead><tbody>${body}${totalRow}</tbody>`, visIdx.length)
+  const wide = visIdx.length > 12
+  return `<div class="report-wide${wide ? ' report-wide-rotate' : ''}"><table class="report-grid">${groupedRow}${headerRow}${body}${totalRow}</table></div>`
 }
 
 /** Per-column survey-cell scope, exactly as the grid tools do it. */
@@ -155,7 +224,7 @@ function codesInDocumentsHtml(config: any, options: AnalysisItemOptions): string
   const filtered = resolveFilteredSources(data, docFilter.sourceGuids ?? [], docFilter.tagGuids ?? [], docFilter.tagExcludeGuids ?? [], docFilter.typeInclude ?? [], docFilter.typeExclude ?? [])
   const sourceMap = new Map<string, string>(data.sources.map((s) => [s.guid, s.name]))
   const codeMap = new Map(data.codes.map((c) => [c.guid, c]))
-  const { columns } = buildSurveyAwareColumns(config?.groupBy ?? [], data, filtered, sourceMap)
+  const { columns, headerGroups } = buildSurveyAwareColumns(config?.groupBy ?? [], data, filtered, sourceMap)
   const colData = buildColData(columns, data)
   let grid = codeGuids.map((cg) =>
     columns.map((col) => {
@@ -165,7 +234,7 @@ function codesInDocumentsHtml(config: any, options: AnalysisItemOptions): string
   )
   if (options.binary) grid = binarizeGrid(grid)
   const names = codeGuids.map((cg) => codeMap.get(cg)?.name ?? 'Code')
-  return renderGridTableHtml('Code', names, columns, grid, { binary: !!options.binary, visual: !!options.visual, totalsOnly: !!options.totalsOnly })
+  return renderGridTableHtml('Code', names, columns, headerGroups, grid, { binary: !!options.binary, visual: !!options.visual, totalsOnly: !!options.totalsOnly })
 }
 
 // ── Results in Documents ───────────────────────────────────────────
@@ -204,7 +273,7 @@ function resultsInDocumentsHtml(config: any, options: AnalysisItemOptions): stri
   const resultSourceGuids = new Set<string>()
   for (const results of queryResults.values()) for (const r of results) resultSourceGuids.add(r.sourceGuid)
 
-  const { columns } = buildSurveyAwareColumns(config?.groupBy ?? [], data, Array.from(resultSourceGuids), sourceMap)
+  const { columns, headerGroups } = buildSurveyAwareColumns(config?.groupBy ?? [], data, Array.from(resultSourceGuids), sourceMap)
 
   let grid = queryGuids.map((qGuid) => {
     const results = queryResults.get(qGuid) || []
@@ -219,7 +288,7 @@ function resultsInDocumentsHtml(config: any, options: AnalysisItemOptions): stri
   })
   if (options.binary) grid = binarizeGrid(grid)
   const names = queryGuids.map((g) => queryMap.get(g)?.name ?? 'Query')
-  return renderGridTableHtml('Query', names, columns, grid, { binary: !!options.binary, visual: !!options.visual, totalsOnly: !!options.totalsOnly })
+  return renderGridTableHtml('Query', names, columns, headerGroups, grid, { binary: !!options.binary, visual: !!options.visual, totalsOnly: !!options.totalsOnly })
 }
 
 // ── Code Frequencies (percentage grid, no totals/subtotals) ─────────
@@ -241,15 +310,13 @@ function codeFrequenciesHtml(config: any, options: AnalysisItemOptions): string 
       return total / col.sourceGuids.length
     })
   )
-  const visual = !!options.visual
   const thead = `<tr><th class="rowhead">Code</th>${columns.map((c) => `<th>${escHtml(c.label)}</th>`).join('')}</tr>`
   const body = codeGuids
     .map((cg, i) => {
       const cells = columns
         .map((_, j) => {
           const v = grid[i][j]
-          const style = visual ? heatStyle(v, 100) : ''
-          return `<td class="${v === 0 ? 'zero' : ''}"${style}>${v.toFixed(1)}%</td>`
+          return `<td class="${v === 0 ? 'zero' : ''}">${v.toFixed(1)}%</td>`
         })
         .join('')
       return `<tr><td class="rowhead">${escHtml(codeMap.get(cg)?.name ?? 'Code')}</td>${cells}</tr>`
@@ -279,10 +346,12 @@ function codeCoOccurrencesHtml(config: any, options: AnalysisItemOptions): strin
   for (const row of matrix) for (const v of row) if (v > maxVal) maxVal = v
   const visual = !!options.visual
   const totalsOnly = !!options.totalsOnly
+  const dot = (color?: string) => `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color || '#888'};flex-shrink:0"></span>`
 
-  const thead = totalsOnly
-    ? `<tr><th class="rowhead"></th><th>Total</th><th>% of Total</th></tr>`
-    : `<tr><th class="rowhead"></th>${colCodeGuids.map((g) => `<th>${escHtml(codeMap.get(g)?.name ?? 'Code')}</th>`).join('')}<th>Total</th><th>% of Total</th></tr>`
+  const colHead = totalsOnly
+    ? ''
+    : colCodeGuids.map((g) => `<th class="col"><div class="vlabel">${escHtml(trunc(codeMap.get(g)?.name ?? 'Code', 26))}</div></th>`).join('')
+  const headerRow = `<tr><th class="corner"></th>${colHead}<th class="col totalhead"><div class="vlabel">Total</div></th><th class="col totalhead"><div class="vlabel">% of Total</div></th></tr>`
 
   const body = rowCodeGuids
     .map((rg, i) => {
@@ -291,21 +360,21 @@ function codeCoOccurrencesHtml(config: any, options: AnalysisItemOptions): strin
         ? ''
         : colCodeGuids
             .map((cg, j) => {
-              if (rg === cg) return '<td class="zero">—</td>'
+              if (rg === cg) return '<td class="cell zero"><div class="cw">—</div></td>'
               const v = matrix[i][j]
-              const style = visual ? heatStyle(v, maxVal) : ''
-              return `<td class="${v === 0 ? 'zero' : ''}"${style}>${v}</td>`
+              const inner = visual ? visualBox(v, maxVal) : String(v)
+              return `<td class="cell${v === 0 ? ' zero' : ''}"><div class="cw">${inner}</div></td>`
             })
             .join('')
-      return `<tr><td class="rowhead">${escHtml(name)}</td>${cells}<td>${rowTotals[i]}</td><td class="pct">${pctOf(rowTotals[i], grandTotal) || '–'}</td></tr>`
+      return `<tr><td class="rowname"><span style="display:inline-flex;align-items:center;gap:4px">${dot(codeMap.get(rg)?.color)}${escHtml(name)}</span></td>${cells}<td class="totalcell">${rowTotals[i]}</td><td class="pctcell">${pctOf(rowTotals[i], grandTotal) || '–'}</td></tr>`
     })
     .join('')
 
-  const totalRow = totalsOnly
-    ? `<tr class="total"><td class="rowhead">Total</td><td>${grandTotal}</td><td class="pct">${grandTotal ? '100.0%' : '–'}</td></tr>`
-    : `<tr class="total"><td class="rowhead">Total</td>${colTotals.map((ct) => `<td>${ct}</td>`).join('')}<td>${grandTotal}</td><td class="pct">${grandTotal ? '100.0%' : '–'}</td></tr>`
+  const totalCells = totalsOnly ? '' : colTotals.map((ct) => `<td class="cell"><div class="cw">${ct}</div></td>`).join('')
+  const totalRow = `<tr class="total"><td class="rowname">Total</td>${totalCells}<td class="totalcell">${grandTotal}</td><td class="pctcell">${grandTotal ? '100.0%' : '–'}</td></tr>`
 
-  return wrapTable(`<thead>${thead}</thead><tbody>${body}${totalRow}</tbody>`, totalsOnly ? 0 : colCodeGuids.length)
+  const wide = (totalsOnly ? 0 : colCodeGuids.length) > 12
+  return `<div class="report-wide${wide ? ' report-wide-rotate' : ''}"><table class="report-grid">${headerRow}${body}${totalRow}</table></div>`
 }
 
 // ── Code Orders (ordered code sequence per document) ───────────────
