@@ -14,7 +14,7 @@ import { useState, useMemo, useCallback, useRef, useLayoutEffect, useEffect } fr
 import type { AnalysisInitData, AnalysisToolType } from '../../models/types'
 import {
   Icon,
-  faClipboardList,
+  faNotebookTabs,
   faXmark,
   faHeading1,
   faHeading2,
@@ -84,7 +84,7 @@ function itemIcon(item: ReportItem) {
     case 'memo':
       return faStickyNote
     case 'analysis':
-      return TOOL_REGISTRY[item.toolType]?.icon ?? faClipboardList
+      return TOOL_REGISTRY[item.toolType]?.icon ?? faNotebookTabs
   }
 }
 
@@ -137,6 +137,19 @@ function isAcceptedDrag(e: React.DragEvent): boolean {
   )
 }
 
+/** True when the drag is an existing row being reordered (vs. an external
+ *  item being added). */
+function isReorderDrag(e: React.DragEvent): boolean {
+  return e.dataTransfer.types.includes(REORDER_MIME)
+}
+
+/** Reordering an existing row is a 'move'; everything else is a 'copy'.
+ *  The dropEffect MUST match the drag's effectAllowed or the browser
+ *  rejects the drop (which is why reorder drops silently did nothing). */
+function dropEffectFor(e: React.DragEvent): 'move' | 'copy' {
+  return isReorderDrag(e) ? 'move' : 'copy'
+}
+
 export function Reports({ savedConfig, inTab }: Props) {
   const [items, setItems] = useState<ReportItem[]>(savedConfig?.items ?? [])
   const [analysisGuid] = useState(savedConfig?.guid ?? generateGuid())
@@ -144,6 +157,11 @@ export function Reports({ savedConfig, inTab }: Props) {
   // (active on open for a new report). It doubles as the PDF's <h1>.
   const [analysisName, setAnalysisName] = useState(savedConfig?.name ?? savedConfig?.title ?? '')
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+  // The row currently being drag-reordered (dimmed as a placeholder while
+  // a ghost of it follows the cursor). Ref mirror for use inside the drag
+  // handlers, which fire before a state update would be visible.
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const draggingIdRef = useRef<string | null>(null)
   // FLIP reordering animation: row element + last-known-position refs.
   const rowEls = useRef(new Map<string, HTMLDivElement>())
   const prevTops = useRef(new Map<string, number>())
@@ -180,31 +198,46 @@ export function Reports({ savedConfig, inTab }: Props) {
     })
   }, [])
 
-  const moveItem = useCallback((id: string, index: number) => {
+  // Live reorder while dragging a row handle: drop the dragged item where
+  // the pointer sits (by the other rows' vertical midpoints) so the list
+  // reflows under the cursor. No-ops when the order is unchanged so we
+  // don't thrash renders mid-drag.
+  const liveReorder = useCallback((dragId: string, clientY: number) => {
     setItems((prev) => {
-      const from = prev.findIndex((it) => it.id === id)
-      if (from === -1) return prev
-      const next = [...prev]
-      const [moved] = next.splice(from, 1)
-      const adjusted = from < index ? index - 1 : index
-      next.splice(Math.max(0, Math.min(adjusted, next.length)), 0, moved)
+      const dragged = prev.find((it) => it.id === dragId)
+      if (!dragged) return prev
+      const others = prev.filter((it) => it.id !== dragId)
+      let insertBefore = others.length
+      for (let i = 0; i < others.length; i++) {
+        const el = rowEls.current.get(others[i].id)
+        if (!el) continue
+        const rect = el.getBoundingClientRect()
+        if (clientY < rect.top + rect.height / 2) { insertBefore = i; break }
+      }
+      const next = [...others.slice(0, insertBefore), dragged, ...others.slice(insertBefore)]
+      if (next.every((it, i) => it.id === prev[i].id)) return prev
       return next
     })
+  }, [])
+
+  const endReorder = useCallback(() => {
+    draggingIdRef.current = null
+    setDraggingId(null)
   }, [])
 
   const handleDropAt = useCallback((index: number, e: React.DragEvent) => {
     e.preventDefault()
     // Stop the drop from also bubbling to the list container's onDrop,
-    // which would insert / move the item a second time.
+    // which would insert the item a second time.
     e.stopPropagation()
     setDragOverIdx(null)
-    const reorderId = e.dataTransfer.getData(REORDER_MIME)
-    if (reorderId) {
-      moveItem(reorderId, index)
+    if (e.dataTransfer.types.includes(REORDER_MIME)) {
+      // A row reorder is finalised live during dragover; just end it.
+      endReorder()
       return
     }
     insertItemsAt(index, parseDrop(e))
-  }, [insertItemsAt, moveItem])
+  }, [insertItemsAt, endReorder])
 
   const removeItem = useCallback((id: string) => {
     setItems((prev) => prev.filter((it) => it.id !== id))
@@ -283,6 +316,9 @@ export function Reports({ savedConfig, inTab }: Props) {
     rowEls.current.forEach((el, id) => newTops.set(id, el.offsetTop))
     if (orderChanged) {
       newTops.forEach((newTop, id) => {
+        // The dragged row is represented by the cursor ghost; let it snap
+        // to its slot rather than sliding under the pointer.
+        if (id === draggingIdRef.current) return
         const prev = prevTops.current.get(id)
         const el = rowEls.current.get(id)
         if (prev != null && el && prev !== newTop) {
@@ -316,7 +352,7 @@ export function Reports({ savedConfig, inTab }: Props) {
       {/* Title row + actions */}
       <div style={{ padding: '14px 20px 6px', flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-secondary)' }}>
-          <Icon icon={faClipboardList} className="analysis-header-icon" style={{ fontSize: 16 }} />
+          <Icon icon={faNotebookTabs} className="analysis-header-icon" style={{ fontSize: 16 }} />
           Report:
           <EditableTitleSuffix
             name={analysisName}
@@ -359,7 +395,12 @@ export function Reports({ savedConfig, inTab }: Props) {
       {/* The report list */}
       <div
         style={{ flex: 1, overflow: 'auto', padding: '14px 20px' }}
-        onDragOver={(e) => { if (isAcceptedDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy' } }}
+        onDragOver={(e) => {
+          if (!isAcceptedDrag(e)) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = dropEffectFor(e)
+          if (isReorderDrag(e) && draggingIdRef.current) liveReorder(draggingIdRef.current, e.clientY)
+        }}
         onDrop={(e) => handleDropAt(items.length, e)}
       >
         {items.length === 0 ? (
@@ -372,10 +413,18 @@ export function Reports({ savedConfig, inTab }: Props) {
               <div
                 key={item.id}
                 ref={(el) => { if (el) rowEls.current.set(item.id, el); else rowEls.current.delete(item.id) }}
+                // While a row reorder is in flight, make the OTHER rows
+                // ignore pointer events so dragover falls through to the
+                // list container (live reorder) instead of their editable
+                // fields showing a text caret as if the item could be
+                // dropped inside them. The dragged row itself must keep
+                // pointer events — disabling them on the drag source
+                // cancels the native drag.
+                style={{ opacity: draggingId === item.id ? 0.4 : 1, pointerEvents: draggingId && draggingId !== item.id ? 'none' : undefined }}
               >
                 {/* Drop indicator before this row. */}
                 <div
-                  onDragOver={(e) => { if (isAcceptedDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setDragOverIdx(idx) } }}
+                  onDragOver={(e) => { if (isAcceptedDrag(e)) { e.preventDefault(); e.dataTransfer.dropEffect = dropEffectFor(e); if (!isReorderDrag(e)) setDragOverIdx(idx) } }}
                   onDragLeave={() => setDragOverIdx((c) => (c === idx ? null : c))}
                   onDrop={(e) => handleDropAt(idx, e)}
                   style={{ height: 8, borderRadius: 2, background: dragOverIdx === idx ? 'var(--accent)' : 'transparent' }}
@@ -386,6 +435,18 @@ export function Reports({ savedConfig, inTab }: Props) {
                   onRemove={() => removeItem(item.id)}
                   onUpdate={(patch) => updateItem(item.id, patch)}
                   onSetOption={(key, value) => setAnalysisOption(item.id, key, value)}
+                  onReorderStart={(e) => {
+                    e.dataTransfer.setData(REORDER_MIME, item.id)
+                    e.dataTransfer.effectAllowed = 'move'
+                    const rowEl = rowEls.current.get(item.id)
+                    if (rowEl) {
+                      const rect = rowEl.getBoundingClientRect()
+                      e.dataTransfer.setDragImage(rowEl, e.clientX - rect.left, e.clientY - rect.top)
+                    }
+                    draggingIdRef.current = item.id
+                    setDraggingId(item.id)
+                  }}
+                  onReorderEnd={endReorder}
                 />
               </div>
             ))}
@@ -419,13 +480,17 @@ function ReportRow({
   label,
   onRemove,
   onUpdate,
-  onSetOption
+  onSetOption,
+  onReorderStart,
+  onReorderEnd
 }: {
   item: ReportItem
   label: string
   onRemove: () => void
   onUpdate: (patch: Partial<ReportItem>) => void
   onSetOption: (key: keyof AnalysisItemOptions, value: boolean) => void
+  onReorderStart: (e: React.DragEvent) => void
+  onReorderEnd: () => void
 }) {
   const caps = item.kind === 'analysis' ? ANALYSIS_CAPS[item.toolType] ?? {} : {}
   return (
@@ -433,11 +498,12 @@ function ReportRow({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span
           draggable
-          onDragStart={(e) => { e.dataTransfer.setData(REORDER_MIME, item.id); e.dataTransfer.effectAllowed = 'move' }}
+          onDragStart={onReorderStart}
+          onDragEnd={onReorderEnd}
           title="Drag to reorder"
-          style={{ cursor: 'grab', color: 'var(--text-muted)', flexShrink: 0, display: 'inline-flex' }}
+          style={{ cursor: 'grab', color: 'var(--text-muted)', flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '6px 7px', margin: '-4px -3px', borderRadius: 'var(--radius-sm)' }}
         >
-          <Icon icon={faBars} style={{ fontSize: 12 }} />
+          <Icon icon={faBars} style={{ fontSize: 16 }} />
         </span>
         <Icon icon={itemIcon(item)} style={{ fontSize: 12, color: 'var(--text-muted)', flexShrink: 0 }} />
         <span style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)', flexShrink: 0 }}>{reportItemTypeLabel(item)}</span>

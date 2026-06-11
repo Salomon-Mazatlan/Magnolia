@@ -80,6 +80,7 @@ import {
   SquaresIntersect,
   Book,
   NotebookPen,
+  NotebookTabs,
   PenLine,
   Settings,
   MessageSquare,
@@ -162,6 +163,7 @@ export const faFileSearchCorner = FileSearchCorner
 export const faSquaresIntersect = SquaresIntersect
 export const faBook = Book
 export const faNotebookPen = NotebookPen
+export const faNotebookTabs = NotebookTabs
 export const faPenLine = PenLine
 export const faGear = Settings
 export const faMessageSquare = MessageSquare
