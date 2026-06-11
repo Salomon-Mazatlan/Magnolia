@@ -387,7 +387,7 @@ export function Reports({ savedConfig, inTab }: Props) {
 
       {/* Tool toolbar: draggable Section / Text blocks. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 20px', borderBottom: '1px solid var(--border-color)', background: 'var(--bg-panel)', flexShrink: 0 }}>
-        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 4 }}>Drag in:</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 4 }}>Drag to add:</span>
         <PaletteChip block="section" icon={faHeading1} label="Section" />
         <PaletteChip block="text" icon={faFont} label="Text" />
       </div>

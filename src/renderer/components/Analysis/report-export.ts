@@ -19,6 +19,7 @@ import { useProjectStore } from '../../stores/project-store'
 import { useQuoteStore } from '../../stores/quote-store'
 import { useMemoStore } from '../../stores/memo-store'
 import { useDocumentStore } from '../../stores/document-store'
+import { usePreferencesStore } from '../../stores/preferences-store'
 import { TOOL_REGISTRY } from '../../utils/tool-registry'
 import { renderAnalysisItemHtml, REPORT_TABLE_CSS } from './report-analysis'
 import { renderQueryItemHtml, REPORT_QUERY_CSS } from './report-query'
@@ -163,10 +164,13 @@ function surveyCitation(q: Quote): string {
 }
 
 const EXPORT_CSS = `
-  .report-toc { margin: 8px 0 24px 0; }
+  .report-toc { margin: 8px 0 24px 0; page-break-after: always; break-after: page; }
   .report-toc ol { margin: 6px 0 0 0; padding-left: 22px; }
-  .report-toc li { margin: 2px 0; font-size: 11px; }
-  .report-toc a { color: #1155cc; text-decoration: none; }
+  .report-toc li { margin: 3px 0; font-size: 11px; }
+  .report-toc a { color: #1155cc; text-decoration: none; display: flex; align-items: baseline; }
+  .report-toc .toc-label { flex-shrink: 1; }
+  .report-toc .toc-dots { flex: 1 1 auto; min-width: 14px; border-bottom: 1px dotted #bbb; margin: 0 5px; position: relative; top: -3px; }
+  .report-toc .toc-page { flex-shrink: 0; color: #555; }
   .report-block { margin: 0 0 20px 0; break-inside: avoid; page-break-inside: avoid; }
   h2.report-section { font-weight: 600; color: #222; margin: 24px 0 9px 0; }
   h2.report-section.report-h1 { font-size: 16px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
@@ -183,18 +187,38 @@ const EXPORT_CSS = `
   .report-wide { overflow: hidden; }
 ` + REPORT_TABLE_CSS + REPORT_QUERY_CSS
 
-/** Runs in the export window (before printToPDF) to shrink any analysis
- *  table that's wider than the page to fit, preserving aspect ratio, so
- *  wide grids (many documents / respondents) don't clip off the page. */
-const FIT_WIDE_TABLES_SCRIPT = `<script>
+// Paper dimensions (inches, portrait) for the supported export sizes.
+const PAPER_INCHES: Record<string, [number, number]> = {
+  A4: [8.27, 11.69], A3: [11.69, 16.54], A5: [5.83, 8.27],
+  Letter: [8.5, 11], Legal: [8.5, 14], Tabloid: [11, 17]
+}
+
+/** The printable content box of one page, in CSS px (96 dpi), given the
+ *  user's export paper size and the export's fixed margins (0.95in top/
+ *  bottom for the header/footer, 0.5in sides). */
+function pageMetrics(): { h: number; w: number } {
+  const size = usePreferencesStore.getState().paperSize || 'A4'
+  const [wIn, hIn] = PAPER_INCHES[size] || PAPER_INCHES.A4
+  return { h: Math.round((hIn - 0.95 * 2) * 96), w: Math.round((wIn - 0.5 * 2) * 96) }
+}
+
+/** Runs in the export window before printToPDF: (1) scales over-wide
+ *  analysis tables to fit, then (2) estimates each TOC target's page —
+ *  Chromium printToPDF has no target-counter — and writes the numbers in.
+ *  Pagination is simulated over the body's flow blocks (the report blocks
+ *  are break-inside:avoid, so a block that won't fit jumps to the next
+ *  page), starting after the TOC's own page break. */
+function buildExportScript(pageH: number, pageW: number): string {
+  return `<script>
 (function () {
+  var PAGE_H = ${pageH}, PAGE_W = ${pageW};
+  if (PAGE_W > 0) document.body.style.width = PAGE_W + 'px';
+
   var wraps = document.querySelectorAll('.report-wide');
   for (var i = 0; i < wraps.length; i++) {
-    var wrap = wraps[i];
-    var table = wrap.querySelector('table');
+    var wrap = wraps[i], table = wrap.querySelector('table');
     if (!table) continue;
-    var avail = wrap.clientWidth;
-    var w = table.scrollWidth;
+    var avail = wrap.clientWidth, w = table.scrollWidth;
     if (avail > 0 && w > avail) {
       var scale = avail / w;
       table.style.transformOrigin = 'top left';
@@ -203,24 +227,50 @@ const FIT_WIDE_TABLES_SCRIPT = `<script>
       wrap.style.overflow = 'hidden';
     }
   }
+
+  var toc = document.querySelector('.report-toc');
+  if (!toc || !PAGE_H) return;
+  var page = Math.floor((toc.offsetTop + toc.offsetHeight) / PAGE_H) + 2;
+  var y = 0, pageOf = {}, passed = false, kids = document.body.children;
+  for (var k = 0; k < kids.length; k++) {
+    var el = kids[k];
+    if (el === toc) { passed = true; continue; }
+    if (!passed || el.tagName === 'SCRIPT') continue;
+    var cs = getComputedStyle(el);
+    var blockH = el.offsetHeight;
+    var h = blockH + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+    if (cs.breakInside === 'avoid' && blockH <= PAGE_H && y > 0 && y + blockH > PAGE_H) { page++; y = 0; }
+    if (el.id && pageOf[el.id] == null) pageOf[el.id] = page;
+    var ids = el.querySelectorAll('[id]');
+    for (var j = 0; j < ids.length; j++) if (pageOf[ids[j].id] == null) pageOf[ids[j].id] = page;
+    y += h;
+    while (y > PAGE_H) { page++; y -= PAGE_H; }
+  }
+  var spans = toc.querySelectorAll('.toc-page');
+  for (var s = 0; s < spans.length; s++) {
+    var id = spans[s].getAttribute('data-toc');
+    if (pageOf[id] != null) spans[s].textContent = pageOf[id];
+  }
 })();
 </script>`
+}
 
 /** Build the report body (TOC + items). Each item gets an anchor the TOC
  *  links to. */
 function buildReportBody(items: ReportItem[]): string {
   const toc = items
-    .map(
-      (it) =>
-        `<li><a href="#${reportAnchorId(it)}">${escHtml(resolveItemLabel(it))}</a></li>`
-    )
+    .map((it) => {
+      const id = reportAnchorId(it)
+      return `<li><a href="#${id}"><span class="toc-label">${escHtml(resolveItemLabel(it))}</span><span class="toc-dots"></span><span class="toc-page" data-toc="${id}"></span></a></li>`
+    })
     .join('')
   const tocHtml = items.length
     ? `<div class="report-toc"><div class="section-heading">Contents</div><ol>${toc}</ol></div>`
     : ''
 
   const body = items.map((it) => renderItem(it)).join('')
-  return tocHtml + body + FIT_WIDE_TABLES_SCRIPT
+  const { h, w } = pageMetrics()
+  return tocHtml + body + buildExportScript(h, w)
 }
 
 function renderItem(item: ReportItem): string {
