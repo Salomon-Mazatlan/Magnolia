@@ -758,6 +758,7 @@ export type AnalysisToolType =
   | 'code-orders'
   | 'word-frequencies'
   | 'relationship-map'
+  | 'reports'
 
 export interface AnalysisInitData {
   toolType: AnalysisToolType

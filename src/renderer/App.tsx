@@ -31,7 +31,8 @@ const ANALYSIS_TOOL_TITLES: Record<string, string> = {
   'results-in-documents': 'Results in Documents',
   'code-frequencies': 'Code Frequencies',
   'code-orders': 'Code Orders',
-  'word-frequencies': 'Word Frequencies'
+  'word-frequencies': 'Word Frequencies',
+  'reports': 'Report'
 }
 
 /** Flatten a code tree, tagging each code with its parent guid */

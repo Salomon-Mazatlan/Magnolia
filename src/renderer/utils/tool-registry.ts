@@ -10,7 +10,8 @@ import {
   faChartColumn,
   faBarsStaggered,
   faFont,
-  faCircleNodes
+  faCircleNodes,
+  faClipboardList
 } from '../components/Icon'
 import type { IconComponent } from '../components/Icon'
 
@@ -44,6 +45,7 @@ export const TOOL_REGISTRY: Record<string, ToolDef> = {
   'code-orders':           { icon: faBarsStaggered,    label: 'Code Orders',          color: '#2080D8', description: 'See the order in which codes appear in each document' },  // blue
   'word-frequencies':      { icon: faFont,             label: 'Word Frequencies',     color: '#6848E0', description: 'See which words often appear' },                           // indigo
   'relationship-map':      { icon: faCircleNodes,      label: 'Relationships',        color: '#A830D0', description: 'Map relationships between different things' },             // violet
+  'reports':               { icon: faClipboardList,    label: 'Reports',              color: '#607080', description: 'Compile results into an exportable PDF report' },          // slate
 }
 
 /** Backward-compatible color map (used by many components) */

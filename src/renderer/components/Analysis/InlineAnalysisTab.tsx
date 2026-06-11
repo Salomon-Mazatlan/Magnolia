@@ -31,6 +31,7 @@ import { CodeFrequencies } from './CodeFrequencies'
 import { CodeOrders } from './CodeOrders'
 import { WordFrequencies } from './WordFrequencies'
 import { ResultsInDocuments } from './ResultsInDocuments'
+import { Reports } from './Reports'
 import { QueryBuilderWindow } from '../QueryBuilder/QueryBuilderWindow'
 import { MemoFab } from '../Memos/MemoFab'
 import type { AnalysisToolType } from '../../models/types'
@@ -188,6 +189,8 @@ function dispatch(
       return <CodeOrders data={data} savedConfig={savedConfig} inTab={inTab} />
     case 'word-frequencies':
       return <WordFrequencies data={data} savedConfig={savedConfig} inTab={inTab} />
+    case 'reports':
+      return <Reports data={data} savedConfig={savedConfig} inTab={inTab} />
     default:
       return <div style={{ padding: 20, color: 'var(--text-muted)' }}>Unknown tool: {toolType}</div>
   }

@@ -34,6 +34,7 @@ export type ToolKind =
   | 'code-frequencies'
   | 'code-orders'
   | 'word-frequencies'
+  | 'reports'
   | 'query-builder'
 
 export interface AnalysisTabInstance {

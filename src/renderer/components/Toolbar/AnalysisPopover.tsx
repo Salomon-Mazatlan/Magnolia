@@ -26,7 +26,8 @@ const ANALYSIS_TOOL_ORDER: AnalysisToolType[] = [
   'code-orders',
   'code-frequencies',
   'word-frequencies',
-  'relationship-map'
+  'relationship-map',
+  'reports'
 ]
 
 interface Props {
