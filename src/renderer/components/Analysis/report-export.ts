@@ -21,6 +21,7 @@ import { useMemoStore } from '../../stores/memo-store'
 import { useDocumentStore } from '../../stores/document-store'
 import { TOOL_REGISTRY } from '../../utils/tool-registry'
 import { renderAnalysisItemHtml, REPORT_TABLE_CSS } from './report-analysis'
+import { renderQueryItemHtml, REPORT_QUERY_CSS } from './report-query'
 import type { AnalysisToolType, Quote } from '../../models/types'
 
 /** Per-tool display options chosen for an analysis item, mirroring the
@@ -143,7 +144,7 @@ const EXPORT_CSS = `
   /* Wide analysis tables that overflow the page get rotated + scaled in
      a later phase; this wrapper is the hook for that. */
   .report-wide { overflow: hidden; }
-` + REPORT_TABLE_CSS
+` + REPORT_TABLE_CSS + REPORT_QUERY_CSS
 
 /** Build the report body (TOC + items). Each item gets an anchor the TOC
  *  links to. */
@@ -170,7 +171,7 @@ function renderItem(item: ReportItem): string {
     case 'text':
       return `<div class="report-block report-text" id="${anchor}">${markdownToHtml(item.content)}</div>`
     case 'query':
-      return renderQueryPlaceholder(item.refGuid, anchor)
+      return renderQueryItemHtml(item.refGuid, anchor)
     case 'quote':
       return renderQuote(item.refGuid, anchor)
     case 'memo':
@@ -199,18 +200,6 @@ function renderMemo(guid: string, anchor: string): string {
     `<div class="report-block report-memo" id="${anchor}">` +
     `<div class="report-item-head">Memo</div>` +
     `<div class="memo-content">${markdownToHtml(m.content || '')}</div>` +
-    `</div>`
-  )
-}
-
-// Placeholders — replaced by live regeneration in a later phase.
-function renderQueryPlaceholder(guid: string, anchor: string): string {
-  const q = useQueryStore.getState().savedQueries.find((s) => s.guid === guid)
-  const name = q?.name ?? '(deleted query)'
-  return (
-    `<div class="report-block" id="${anchor}">` +
-    `<div class="report-item-head">Query</div>` +
-    `<div class="empty">${escHtml(name)} — results generated on export (coming soon)</div>` +
     `</div>`
   )
 }
