@@ -218,14 +218,13 @@ export function QuotesPane({ onClose, onPopOut, isPoppedOut }: Props) {
                       WebkitLineClamp: 2,
                       WebkitBoxOrient: 'vertical',
                       lineHeight: '15px',
-                      fontStyle: 'italic',
                       color: 'var(--text-primary)'
                     }}>
                       {(() => {
                         const src = sources.find((s) => s.guid === q.sourceGuid)
                         const st = src?.sourceType || sourceTypeFromFilename(q.sourceName)
                         const clean = stripFormatting(q.text, st)
-                        return `"${clean.slice(0, 120)}${clean.length > 120 ? '...' : ''}"`
+                        return `${clean.slice(0, 120)}${clean.length > 120 ? '...' : ''}`
                       })()}
                     </span>
                   )}
