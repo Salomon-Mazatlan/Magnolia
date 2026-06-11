@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import { Fragment, useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import type { AnalysisInitData } from '../../models/types'
 import { Icon, faFileCodeCorner, faChevronDown, faChevronRight } from '../Icon'
 import { toolColors } from '../../utils/tool-colors'
@@ -7,7 +7,7 @@ import {
   emptyDocumentFilter,
   type DocumentFilterState
 } from '../DocumentSelector/DocumentSelector'
-import { truncate, countCodeInSource, toCsv, resolveFilteredSources, applySurveyCellScope, binarizeGrid } from './analysis-helpers'
+import { truncate, countCodeInSource, toCsv, pctOfTotal, resolveFilteredSources, applySurveyCellScope, binarizeGrid } from './analysis-helpers'
 import { generateGuid } from '../../utils/guid'
 import {
   type GroupByEntry,
@@ -242,6 +242,23 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
   }, [columns, headerGroups])
   const BAND_TINT = 'color-mix(in srgb, var(--text-secondary) 4%, transparent)'
   const SUBTOTAL_TINT = 'color-mix(in srgb, var(--text-secondary) 10%, transparent)'
+  // Tint for the derived percentage columns (subtotal-% and % of total).
+  const PCT_TINT = 'color-mix(in srgb, var(--text-secondary) 6%, transparent)'
+
+  // Each subtotal column is followed by an adjacent "% of row total"
+  // column, so a category/folder band's spanning header must widen by
+  // the number of subtotal columns it contains.
+  const headerGroupSpans = useMemo(() => {
+    const spans: number[] = []
+    let cursor = 0
+    for (const g of headerGroups) {
+      let extra = 0
+      for (let k = cursor; k < cursor + g.span; k++) if (columns[k]?.isSubtotal) extra++
+      spans.push(g.span + extra)
+      cursor += g.span
+    }
+    return spans
+  }, [headerGroups, columns])
 
   const addCodes = useCallback((guids: string[]) => {
     setCodeGuids((prev) => {
@@ -287,14 +304,35 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
   }, [grandTotal, codeGuids, filteredSourceGuids])
 
   const handleExportCsv = useCallback(() => {
-    const colNames = columns.map((c) => c.label)
-    const rows: string[][] = [['Code', ...colNames, 'Total']]
+    // Header: each subtotal column gains a "% of Row Total" column, and
+    // a "% of Total" column follows the grand Total.
+    const header: string[] = ['Code']
+    columns.forEach((c) => {
+      header.push(c.label)
+      if (c.isSubtotal) header.push('% of Row Total')
+    })
+    header.push('Total', '% of Total')
+    const rows: string[][] = [header]
     for (let i = 0; i < codeGuids.length; i++) {
-      rows.push([codeMap.get(codeGuids[i])?.name || '', ...showGrid[i].map(String), String(showRowTotals[i])])
+      const cells: string[] = [codeMap.get(codeGuids[i])?.name || '']
+      columns.forEach((c, j) => {
+        cells.push(String(showGrid[i][j]))
+        // R1 (subtotal as % of row total) is not meaningful in Binary
+        // view — see the on-screen guard.
+        if (c.isSubtotal) cells.push(binaryMode ? '' : pctOfTotal(showGrid[i][j], showRowTotals[i]))
+      })
+      cells.push(String(showRowTotals[i]), pctOfTotal(showRowTotals[i], showGrandTotal))
+      rows.push(cells)
     }
-    rows.push(['Total', ...showColTotals.map(String), String(showGrandTotal)])
+    const totalRow: string[] = ['Total']
+    columns.forEach((c, j) => {
+      totalRow.push(String(showColTotals[j]))
+      if (c.isSubtotal) totalRow.push(binaryMode ? '' : pctOfTotal(showColTotals[j], showGrandTotal))
+    })
+    totalRow.push(String(showGrandTotal), pctOfTotal(showGrandTotal, showGrandTotal))
+    rows.push(totalRow)
     window.api.exportCsv(toCsv(rows), 'codes-in-documents.csv')
-  }, [columns, codeGuids, showGrid, codeMap, showRowTotals, showColTotals, showGrandTotal])
+  }, [columns, codeGuids, showGrid, codeMap, showRowTotals, showColTotals, showGrandTotal, binaryMode])
 
   const handleTagDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -497,10 +535,10 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                   {hasGroupedHeader && (
                     <tr>
                       <th style={{ padding: '0 6px 4px', borderBottom: '1px solid var(--border-color)' }} />
-                      {headerGroups.map((g) => (
+                      {headerGroups.map((g, gi) => (
                         <th
                           key={`hg:${g.id}`}
-                          colSpan={g.span}
+                          colSpan={headerGroupSpans[gi]}
                           style={{
                             padding: '4px 6px',
                             borderBottom: '1px solid var(--border-color)',
@@ -516,36 +554,47 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                           {g.label ?? ''}
                         </th>
                       ))}
+                      {/* Spacers above the Total and % of Total columns. */}
+                      <th style={{ borderBottom: '1px solid var(--border-color)' }} />
                       <th style={{ borderBottom: '1px solid var(--border-color)' }} />
                     </tr>
                   )}
                   <tr>
                     <th style={{ padding: 4, borderBottom: '1px solid var(--border-color)', textAlign: 'left', minWidth: 100, verticalAlign: 'bottom' }}>Code</th>
                     {columns.map((col, j) => (
-                      <th
-                        key={col.id}
-                        style={{
-                          width: 50, minWidth: 50, maxWidth: 50,
-                          borderBottom: '1px solid var(--border-color)',
-                          background: col.isSubtotal ? SUBTOTAL_TINT : (inBand[j] ? BAND_TINT : undefined),
-                          verticalAlign: 'bottom', height: 80, padding: 0, position: 'relative'
-                        }}
-                      >
-                        <div style={{
-                          position: 'absolute', bottom: 6, left: '50%',
-                          transformOrigin: 'bottom left', transform: 'rotate(-20deg)',
-                          whiteSpace: 'nowrap', fontSize: 10,
-                          overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130,
-                          fontStyle: col.isSubtotal ? 'italic' : undefined,
-                          fontWeight: col.isSubtotal ? 700 : undefined,
-                          color: col.isSubtotal ? 'var(--text-secondary)' : undefined
-                        }}>
-                          {truncate(col.label, 24)}
-                        </div>
-                      </th>
+                      <Fragment key={col.id}>
+                        <th
+                          style={{
+                            width: 50, minWidth: 50, maxWidth: 50,
+                            borderBottom: '1px solid var(--border-color)',
+                            background: col.isSubtotal ? SUBTOTAL_TINT : (inBand[j] ? BAND_TINT : undefined),
+                            verticalAlign: 'bottom', height: 80, padding: 0, position: 'relative'
+                          }}
+                        >
+                          <div style={{
+                            position: 'absolute', bottom: 6, left: '50%',
+                            transformOrigin: 'bottom left', transform: 'rotate(-20deg)',
+                            whiteSpace: 'nowrap', fontSize: 10,
+                            overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 130,
+                            fontStyle: col.isSubtotal ? 'italic' : undefined,
+                            fontWeight: col.isSubtotal ? 700 : undefined,
+                            color: col.isSubtotal ? 'var(--text-secondary)' : undefined
+                          }}>
+                            {truncate(col.label, 24)}
+                          </div>
+                        </th>
+                        {col.isSubtotal && (
+                          <th title="Subtotal as % of row total" style={{ width: 50, minWidth: 50, maxWidth: 50, background: SUBTOTAL_TINT, borderBottom: '1px solid var(--border-color)', verticalAlign: 'bottom', height: 80, padding: 0, position: 'relative' }}>
+                            <div style={{ position: 'absolute', bottom: 6, left: '50%', transformOrigin: 'bottom left', transform: 'rotate(-20deg)', whiteSpace: 'nowrap', fontSize: 10, fontWeight: 700, fontStyle: 'italic', color: 'var(--text-secondary)' }}>%</div>
+                          </th>
+                        )}
+                      </Fragment>
                     ))}
                     <th style={{ width: 50, minWidth: 50, maxWidth: 50, borderBottom: '1px solid var(--border-color)', verticalAlign: 'bottom', height: 80, padding: 0, position: 'relative' }}>
                       <div style={{ position: 'absolute', bottom: 6, left: '50%', transformOrigin: 'bottom left', transform: 'rotate(-20deg)', whiteSpace: 'nowrap', fontSize: 10, fontWeight: 700 }}>Total</div>
+                    </th>
+                    <th title="Row total as % of grand total" style={{ width: 50, minWidth: 50, maxWidth: 50, background: PCT_TINT, borderBottom: '1px solid var(--border-color)', verticalAlign: 'bottom', height: 80, padding: 0, position: 'relative' }}>
+                      <div style={{ position: 'absolute', bottom: 6, left: '50%', transformOrigin: 'bottom left', transform: 'rotate(-20deg)', whiteSpace: 'nowrap', fontSize: 10, fontWeight: 700, fontStyle: 'italic', color: 'var(--text-secondary)' }}>% of Total</div>
                     </th>
                   </tr>
                 </thead>
@@ -585,7 +634,8 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                         const b = Math.round(180 - ratio * 100)
                         const boxColor = val > 0 ? `rgb(${r},${g},${b})` : 'var(--bg-tertiary)'
                         return (
-                          <td key={col.id} onClick={() => handleDoubleClick(i, j)} style={{
+                          <Fragment key={col.id}>
+                          <td onClick={() => handleDoubleClick(i, j)} style={{
                             width: 50, minWidth: 50, maxWidth: 50, padding: 0,
                             borderBottom: '1px solid var(--border-color)',
                             background: col.isSubtotal ? SUBTOTAL_TINT : (inBand[j] ? BAND_TINT : undefined),
@@ -606,6 +656,22 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                               ) : val}
                             </div>
                           </td>
+                          {col.isSubtotal && (
+                            <td style={{
+                              width: 50, minWidth: 50, maxWidth: 50, height: 32,
+                              borderBottom: '1px solid var(--border-color)',
+                              background: SUBTOTAL_TINT,
+                              textAlign: 'center', fontStyle: 'italic', fontWeight: 600, fontSize: 10,
+                              color: 'var(--text-secondary)'
+                            }}>
+                              {/* In Binary view the subtotal collapses to a
+                                  0/1 incidence flag while the row total sums
+                                  individual incidences, so the ratio is not
+                                  on a comparable scale — show "–" instead. */}
+                              {binaryMode ? '–' : (pctOfTotal(showGrid[i][j], showRowTotals[i]) || '–')}
+                            </td>
+                          )}
+                          </Fragment>
                         )
                       })}
                       <td onClick={() => handleRowTotalClick(i)} style={{
@@ -620,6 +686,15 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                       }}>
                         {showRowTotals[i]}
                       </td>
+                      <td style={{
+                        width: 50, minWidth: 50, maxWidth: 50, height: 32,
+                        borderBottom: '1px solid var(--border-color)',
+                        background: PCT_TINT,
+                        textAlign: 'center', fontStyle: 'italic', fontWeight: 600, fontSize: 10,
+                        color: 'var(--text-secondary)'
+                      }}>
+                        {pctOfTotal(showRowTotals[i], showGrandTotal) || '–'}
+                      </td>
                     </tr>
                     )
                   })}
@@ -627,7 +702,8 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                   <tr>
                     <td style={{ padding: '4px 6px', borderTop: '2px solid var(--border-color)', fontWeight: 700 }}>Total</td>
                     {showColTotals.map((ct, j) => (
-                      <td key={columns[j].id} onClick={() => handleColTotalClick(j)} style={{
+                      <Fragment key={columns[j].id}>
+                      <td onClick={() => handleColTotalClick(j)} style={{
                         width: 50, minWidth: 50, maxWidth: 50, height: 32,
                         borderTop: '2px solid var(--border-color)',
                         background: columns[j].isSubtotal ? SUBTOTAL_TINT : (inBand[j] ? BAND_TINT : undefined),
@@ -639,6 +715,18 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                       }}>
                         {ct}
                       </td>
+                      {columns[j].isSubtotal && (
+                        <td style={{
+                          width: 50, minWidth: 50, maxWidth: 50, height: 32,
+                          borderTop: '2px solid var(--border-color)',
+                          background: SUBTOTAL_TINT,
+                          textAlign: 'center', fontStyle: 'italic', fontWeight: 600, fontSize: 10,
+                          color: 'var(--text-secondary)'
+                        }}>
+                          {binaryMode ? '–' : (pctOfTotal(ct, showGrandTotal) || '–')}
+                        </td>
+                      )}
+                      </Fragment>
                     ))}
                     <td onClick={handleGrandTotalClick} style={{
                       width: 50, minWidth: 50, maxWidth: 50, height: 32,
@@ -651,6 +739,15 @@ export function CodesInDocuments({ data: propData, savedConfig, inTab }: Props) 
                       opacity: showGrandTotal === 0 ? 0.4 : 1
                     }}>
                       {showGrandTotal}
+                    </td>
+                    <td style={{
+                      width: 50, minWidth: 50, maxWidth: 50, height: 32,
+                      borderTop: '2px solid var(--border-color)',
+                      background: PCT_TINT,
+                      textAlign: 'center', fontStyle: 'italic', fontWeight: 600, fontSize: 10,
+                      color: 'var(--text-secondary)'
+                    }}>
+                      {pctOfTotal(showGrandTotal, showGrandTotal) || '–'}
                     </td>
                   </tr>
                 </tbody>

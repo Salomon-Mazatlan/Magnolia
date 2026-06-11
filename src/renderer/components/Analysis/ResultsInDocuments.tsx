@@ -3,7 +3,7 @@ import type { AnalysisInitData, Query, QueryResult, SurveyEntityRef } from '../.
 import { Icon, faFileSearchCorner, faChevronDown, faChevronRight, faXmark } from '../Icon'
 import { toolColors } from '../../utils/tool-colors'
 import { executeQuery } from '../../utils/query-engine'
-import { truncate, toCsv, binarizeGrid, applySurveyCellScope } from './analysis-helpers'
+import { truncate, toCsv, pctOfTotal, binarizeGrid, applySurveyCellScope } from './analysis-helpers'
 import { generateGuid } from '../../utils/guid'
 import {
   parseGroupByDrop,
@@ -383,7 +383,7 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
     const queryNames = queryGuids.map((g) => queryMap.get(g)?.name || '')
     const headerRow: string[] = []
     if (hasGroupedHeader) headerRow.push('Category')
-    headerRow.push('Item', ...queryNames, 'Total')
+    headerRow.push('Item', ...queryNames, 'Total', '% of Total')
     const rows: string[][] = [headerRow]
     for (let j = 0; j < columns.length; j++) {
       const col = columns[j]
@@ -392,12 +392,12 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
       if (hasGroupedHeader) row.push(layout.groupLabel ?? '')
       row.push(col.label)
       for (let i = 0; i < queryGuids.length; i++) row.push(String(showGrid[i][j]))
-      row.push(String(showColTotals[j]))
+      row.push(String(showColTotals[j]), pctOfTotal(showColTotals[j], showGrandTotal))
       rows.push(row)
     }
     const totalRow: string[] = []
     if (hasGroupedHeader) totalRow.push('')
-    totalRow.push('Total', ...showRowTotals.map(String), String(showGrandTotal))
+    totalRow.push('Total', ...showRowTotals.map(String), String(showGrandTotal), pctOfTotal(showGrandTotal, showGrandTotal))
     rows.push(totalRow)
     window.api.exportCsv(toCsv(rows), 'results-in-documents.csv')
   }, [columns, rowLayout, queryGuids, showGrid, queryMap, showRowTotals, showColTotals, showGrandTotal, hasGroupedHeader])
@@ -657,6 +657,9 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
                     <th style={{ width: 50, minWidth: 50, maxWidth: 50, borderBottom: '1px solid var(--border-color)', verticalAlign: 'bottom', height: 80, padding: 0, position: 'relative' }}>
                       <div style={{ position: 'absolute', bottom: 6, left: '50%', transformOrigin: 'bottom left', transform: 'rotate(-20deg)', whiteSpace: 'nowrap', fontSize: 10, fontWeight: 700 }}>Total</div>
                     </th>
+                    <th title="Row total as % of grand total" style={{ width: 50, minWidth: 50, maxWidth: 50, background: 'color-mix(in srgb, var(--text-secondary) 6%, transparent)', borderBottom: '1px solid var(--border-color)', verticalAlign: 'bottom', height: 80, padding: 0, position: 'relative' }}>
+                      <div style={{ position: 'absolute', bottom: 6, left: '50%', transformOrigin: 'bottom left', transform: 'rotate(-20deg)', whiteSpace: 'nowrap', fontSize: 10, fontWeight: 700, fontStyle: 'italic', color: 'var(--text-secondary)' }}>% of Total</div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -800,6 +803,17 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
                         }}>
                           {showColTotals[j]}
                         </td>
+                        {/* Row total as % of grand total */}
+                        <td style={{
+                          width: 50, minWidth: 50, maxWidth: 50, height: 32,
+                          borderBottom: '1px solid var(--border-color)',
+                          borderTop: col.isSubtotal ? '1px solid var(--border-color)' : undefined,
+                          background: 'color-mix(in srgb, var(--text-secondary) 6%, transparent)',
+                          textAlign: 'center', fontStyle: 'italic', fontWeight: 600, fontSize: 10,
+                          color: 'var(--text-secondary)'
+                        }}>
+                          {pctOfTotal(showColTotals[j], showGrandTotal) || '–'}
+                        </td>
                       </tr>
                     )
                   })}
@@ -835,6 +849,15 @@ export function ResultsInDocuments({ data: propData, savedConfig, inTab }: Props
                       opacity: showGrandTotal === 0 ? 0.4 : 1
                     }}>
                       {showGrandTotal}
+                    </td>
+                    <td style={{
+                      width: 50, minWidth: 50, maxWidth: 50, height: 32,
+                      borderTop: '2px solid var(--border-color)',
+                      background: 'color-mix(in srgb, var(--text-secondary) 6%, transparent)',
+                      textAlign: 'center', fontStyle: 'italic', fontWeight: 600, fontSize: 10,
+                      color: 'var(--text-secondary)'
+                    }}>
+                      {pctOfTotal(showGrandTotal, showGrandTotal) || '–'}
                     </td>
                   </tr>
                 </tbody>

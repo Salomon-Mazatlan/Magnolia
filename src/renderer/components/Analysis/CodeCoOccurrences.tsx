@@ -7,7 +7,7 @@ import {
   emptyDocumentFilter,
   type DocumentFilterState
 } from '../DocumentSelector/DocumentSelector'
-import { truncate, countCoOccurrences, toCsv, resolveFilteredSources, applySurveyCellScope, binarizeGrid } from './analysis-helpers'
+import { truncate, countCoOccurrences, toCsv, pctOfTotal, resolveFilteredSources, applySurveyCellScope, binarizeGrid } from './analysis-helpers'
 import { generateGuid } from '../../utils/guid'
 import { useLiveAnalysisData } from './use-live-analysis-data'
 import { EditableTitleSuffix } from '../EditableTitleSuffix'
@@ -219,11 +219,11 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
   const handleExportCsv = useCallback(() => {
     const colNames = colCodeGuids.map((g) => codeMap.get(g)?.name || 'Code')
     const rowNames = rowCodeGuids.map((g) => codeMap.get(g)?.name || 'Code')
-    const rows: string[][] = [['', ...colNames, 'Total']]
+    const rows: string[][] = [['', ...colNames, 'Total', '% of Total']]
     for (let i = 0; i < rowCodeGuids.length; i++) {
-      rows.push([rowNames[i], ...showMatrix[i].map(String), String(showRowTotals[i])])
+      rows.push([rowNames[i], ...showMatrix[i].map(String), String(showRowTotals[i]), pctOfTotal(showRowTotals[i], showGrandTotal)])
     }
-    rows.push(['Total', ...showColTotals.map(String), String(showGrandTotal)])
+    rows.push(['Total', ...showColTotals.map(String), String(showGrandTotal), pctOfTotal(showGrandTotal, showGrandTotal)])
     window.api.exportCsv(toCsv(rows), 'code-cooccurrences.csv')
   }, [rowCodeGuids, colCodeGuids, showMatrix, codeMap, showRowTotals, showColTotals, showGrandTotal])
 
@@ -407,6 +407,9 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
                     <th style={{ width: 50, minWidth: 50, maxWidth: 50, borderBottom: '1px solid var(--border-color)', verticalAlign: 'bottom', height: 80, padding: 0, position: 'relative' }}>
                       <div style={{ position: 'absolute', bottom: 6, left: '50%', transformOrigin: 'bottom left', transform: 'rotate(-20deg)', whiteSpace: 'nowrap', fontSize: 10, fontWeight: 700 }}>Total</div>
                     </th>
+                    <th title="Row total as % of grand total" style={{ width: 50, minWidth: 50, maxWidth: 50, background: 'color-mix(in srgb, var(--text-secondary) 6%, transparent)', borderBottom: '1px solid var(--border-color)', verticalAlign: 'bottom', height: 80, padding: 0, position: 'relative' }}>
+                      <div style={{ position: 'absolute', bottom: 6, left: '50%', transformOrigin: 'bottom left', transform: 'rotate(-20deg)', whiteSpace: 'nowrap', fontSize: 10, fontWeight: 700, fontStyle: 'italic', color: 'var(--text-secondary)' }}>% of Total</div>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -472,6 +475,15 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
                       }}>
                         {showRowTotals[i]}
                       </td>
+                      <td style={{
+                        width: 50, minWidth: 50, maxWidth: 50, height: 32,
+                        borderBottom: '1px solid var(--border-color)',
+                        background: 'color-mix(in srgb, var(--text-secondary) 6%, transparent)',
+                        textAlign: 'center', fontStyle: 'italic', fontWeight: 600, fontSize: 10,
+                        color: 'var(--text-secondary)'
+                      }}>
+                        {pctOfTotal(showRowTotals[i], showGrandTotal) || '–'}
+                      </td>
                     </tr>
                     )
                   })}
@@ -502,6 +514,15 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
                       opacity: showGrandTotal === 0 ? 0.4 : 1
                     }}>
                       {showGrandTotal}
+                    </td>
+                    <td style={{
+                      width: 50, minWidth: 50, maxWidth: 50, height: 32,
+                      borderTop: '2px solid var(--border-color)',
+                      background: 'color-mix(in srgb, var(--text-secondary) 6%, transparent)',
+                      textAlign: 'center', fontStyle: 'italic', fontWeight: 600, fontSize: 10,
+                      color: 'var(--text-secondary)'
+                    }}>
+                      {pctOfTotal(showGrandTotal, showGrandTotal) || '–'}
                     </td>
                   </tr>
                 </tbody>

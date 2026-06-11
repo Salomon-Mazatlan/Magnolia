@@ -28,6 +28,14 @@ export function truncate(s: string, maxLen: number): string {
   return s.length > maxLen ? s.slice(0, maxLen - 1) + '\u2026' : s
 }
 
+/** Format `value` as a percentage of `total` to one decimal place, e.g.
+ *  "72.7%". Returns '' when the denominator is zero so callers can fall
+ *  back to a muted placeholder (no codings to take a percentage of). */
+export function pctOfTotal(value: number, total: number): string {
+  if (!total) return ''
+  return ((value / total) * 100).toFixed(1) + '%'
+}
+
 /** Get all selections for a source that have a given code */
 export function selectionsWithCode(
   selections: PlainTextSelection[],
