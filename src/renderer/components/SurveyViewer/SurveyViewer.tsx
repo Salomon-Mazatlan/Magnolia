@@ -694,13 +694,17 @@ function OptionListCell({
                 />
               )}
             </span>
-            <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+            {/* Fixed-width label column (full-size views only) so the
+                percentages sit in a consistent column near the options
+                instead of being pushed to the far right by a greedy
+                flex. Compact (Overview table) keeps its flexible label. */}
+            <span style={{ flex: compact ? '1' : '0 1 200px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
               <span style={{ minWidth: 0 }}>{d.displayOption ?? d.option}</span>
               {isChosen && (
                 <Icon icon={faCheck} style={{ fontSize: 12, color: 'var(--accent)', flexShrink: 0 }} />
               )}
             </span>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', minWidth: 40, textAlign: 'right' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', minWidth: 40, textAlign: compact ? 'right' : 'left' }}>
               {formatPct(d.pct)}
             </span>
           </li>
