@@ -20,6 +20,7 @@ import { useQuoteStore } from '../../stores/quote-store'
 import { useMemoStore } from '../../stores/memo-store'
 import { useDocumentStore } from '../../stores/document-store'
 import { TOOL_REGISTRY } from '../../utils/tool-registry'
+import { renderAnalysisItemHtml, REPORT_TABLE_CSS } from './report-analysis'
 import type { AnalysisToolType, Quote } from '../../models/types'
 
 /** Per-tool display options chosen for an analysis item, mirroring the
@@ -142,7 +143,7 @@ const EXPORT_CSS = `
   /* Wide analysis tables that overflow the page get rotated + scaled in
      a later phase; this wrapper is the hook for that. */
   .report-wide { overflow: hidden; }
-`
+` + REPORT_TABLE_CSS
 
 /** Build the report body (TOC + items). Each item gets an anchor the TOC
  *  links to. */
@@ -175,7 +176,7 @@ function renderItem(item: ReportItem): string {
     case 'memo':
       return renderMemo(item.refGuid, anchor)
     case 'analysis':
-      return renderAnalysisPlaceholder(item, anchor)
+      return renderAnalysisItemHtml(item, anchor)
   }
 }
 
@@ -210,20 +211,6 @@ function renderQueryPlaceholder(guid: string, anchor: string): string {
     `<div class="report-block" id="${anchor}">` +
     `<div class="report-item-head">Query</div>` +
     `<div class="empty">${escHtml(name)} — results generated on export (coming soon)</div>` +
-    `</div>`
-  )
-}
-
-function renderAnalysisPlaceholder(
-  item: Extract<ReportItem, { kind: 'analysis' }>,
-  anchor: string
-): string {
-  const a = useProjectStore.getState().savedAnalyses?.find((s) => s.guid === item.refGuid)
-  const name = a?.name ?? '(deleted analysis)'
-  return (
-    `<div class="report-block" id="${anchor}">` +
-    `<div class="report-item-head">${escHtml(reportItemTypeLabel(item))}</div>` +
-    `<div class="empty">${escHtml(name)} — table generated on export (coming soon)</div>` +
     `</div>`
   )
 }
