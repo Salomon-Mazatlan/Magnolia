@@ -342,7 +342,7 @@ html:not([data-theme]) .app-toolbar-btn svg {
 :root[data-theme="magnolia"] {
   --bg-primary: #F8FAFB;
   --bg-secondary: #EAEFF6;
-  --bg-tertiary: #C8D0DA;
+  --bg-tertiary: #D2DAE4;
   --bg-panel: #FFFFFF;
   --border-color: #A0AEC0;
   --text-primary: #1A2633;
