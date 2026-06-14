@@ -1257,7 +1257,7 @@ function ApplyDocumentTagsDialog({
   onOpenManage,
   onClose
 }: {
-  /** Heading noun, e.g. "Document", "Respondent", "Question". */
+  /** Full dialog heading, e.g. "Edit Tags". */
   title: string
   tags: import('../../models/types').QDASet[]
   categories: TagCategory[]
@@ -1307,7 +1307,7 @@ function ApplyDocumentTagsDialog({
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 420, maxWidth: 500 }}>
-        <h2>Apply {title} Tags</h2>
+        <h2>{title}</h2>
         <div style={{ maxHeight: '50vh', overflowY: 'auto', marginBottom: 8 }}>
           {/* General (uncategorised) */}
           {uncategorised.length > 0 && (
@@ -2700,7 +2700,7 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
               closeContextMenu()
             }}
           >
-            Apply Tags...
+            Edit Tags...
           </div>
           {folders.length > 0 && (
             <>
@@ -2781,7 +2781,7 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
               closeContextMenu()
             }}
           >
-            Apply Tags...
+            Edit Tags...
           </div>
         </div>
       )}
@@ -2904,13 +2904,7 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
           respondent/question, binding the matching tag-store actions. */}
       {showTagDialog && (
         <ApplyDocumentTagsDialog
-          title={
-            showTagDialog.kind === 'respondent'
-              ? 'Respondent'
-              : showTagDialog.kind === 'question'
-                ? 'Question'
-                : 'Document'
-          }
+          title="Edit Tags"
           tags={tags}
           categories={categories}
           isAssigned={(tag) => {
