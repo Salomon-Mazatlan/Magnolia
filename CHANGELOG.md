@@ -2,10 +2,17 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
-## [1.4.1]
+## [1.4.2]
 
 ### Added
 - **Scope Code Co-Occurrences to specific survey questions.** Like the other analysis tools, Code Co-Occurrences now has a Questions box (shown when a survey is in scope) so you can limit the co-occurrence grid to the answers of one or more questions.
+
+### Fixed
+- **Queries and Code Co-Occurrences on surveys now report the right results.** Codings in different survey answers were wrongly treated as overlapping (because each answer's offsets are measured from the start of that answer), which massively inflated co-occurrence counts and query matches, and made query results show the survey's header row instead of the coded answer. Survey codings are now only compared within the same answer cell, and query snippets show the actual coded text.
+
+## [1.4.1]
+
+### Added
 - **Add documents to a report.** You can now drag documents from the Documents panel straight onto a report, alongside saved queries, analyses, quotes, and memos. Each document starts on its own page and is included according to its type: text and transcripts appear as their text, an image is embedded scaled to fit the page, a video shows its first frame plus any transcript, a PDF is included as its original pages (scaled to fit), and a survey reproduces the same summary you get from "Export PDF" on the Survey Overview.
 
 ### Changed
@@ -15,7 +22,6 @@ All notable changes to Magnolia are documented here. The format follows [Keep a 
 - **Coding a survey answer now lands on exactly the text you selected.** Applying a code to an answer that already had a code could shift the highlight a few characters in (and a code's name in the margin could itself be selected). The margins — code names, brackets, and memo/quote icons — are no longer selectable, so only the answer text can be coded.
 - **Selecting a survey answer and releasing the mouse outside the viewer now works.** The selection is kept, and the code applies to that selection rather than to whatever was selected before.
 - **Survey question and respondent headers are only clickable on the text itself.** Clicking elsewhere on the header's row no longer jumps to that question or respondent.
-- **Queries and Code Co-Occurrences on surveys now report the right results.** Codings in different survey answers were wrongly treated as overlapping (because each answer's offsets are measured from the start of that answer), which massively inflated co-occurrence counts and query matches, and made query results show the survey's header row instead of the coded answer. Survey codings are now only compared within the same answer cell, and query snippets show the actual coded text.
 
 ## [1.4.0]
 
