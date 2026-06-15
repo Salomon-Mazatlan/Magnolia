@@ -87,9 +87,25 @@ interface Props {
  *  codepoint offsets into THIS cleaned text. */
 const clean = cleanCellText
 
+/** True when `node` sits inside one of CodedTextView's decorative coding
+ *  overlays (bracket shapes, code labels, memo/quote icons). Those layers
+ *  carry real text — a coding's code name — so a text walk that counts
+ *  them shifts every offset by the label's length. That was the cause of
+ *  a survey coding landing N characters into an answer, where N is the
+ *  length of a code already applied to the same cell. */
+function isInCodingOverlay(root: HTMLElement, node: Node): boolean {
+  let el: HTMLElement | null = node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement
+  while (el && el !== root) {
+    if (el.dataset?.codingOverlay !== undefined) return true
+    el = el.parentElement
+  }
+  return false
+}
+
 /** Walk a DOM subtree to compute the character offset of (node, offset)
- *  relative to the subtree's `textContent`. Used to convert a native
- *  Selection range endpoint into a cell-relative offset. */
+ *  relative to the subtree's text — counting only the answer's content
+ *  text, never the coding overlays (see isInCodingOverlay). Used to
+ *  convert a native Selection range endpoint into a cell-relative offset. */
 function offsetWithin(root: HTMLElement, node: Node, offset: number): number | null {
   if (!root.contains(node)) return null
   let total = 0
@@ -97,7 +113,7 @@ function offsetWithin(root: HTMLElement, node: Node, offset: number): number | n
   let cur: Node | null = walker.nextNode()
   while (cur) {
     if (cur === node) return total + offset
-    total += (cur.nodeValue || '').length
+    if (!isInCodingOverlay(root, cur)) total += (cur.nodeValue || '').length
     cur = walker.nextNode()
   }
   if (node.nodeType === Node.ELEMENT_NODE && root.contains(node)) {
@@ -106,12 +122,26 @@ function offsetWithin(root: HTMLElement, node: Node, offset: number): number | n
     let n: Node | null = tw.nextNode()
     while (n) {
       if ((node as HTMLElement).contains(n)) break
-      sum += (n.nodeValue || '').length
+      if (!isInCodingOverlay(root, n)) sum += (n.nodeValue || '').length
       n = tw.nextNode()
     }
     return sum
   }
   return null
+}
+
+/** The cell's answer text as the user sees it, excluding the coding
+ *  overlays' text — the counterpart to offsetWithin, so a slice by the
+ *  offsets it returns recovers the right substring. */
+function cellContentText(root: HTMLElement): string {
+  let out = ''
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let cur: Node | null = walker.nextNode()
+  while (cur) {
+    if (!isInCodingOverlay(root, cur)) out += cur.nodeValue || ''
+    cur = walker.nextNode()
+  }
+  return out
 }
 
 /** Cleaned cell text for an open-ended answer cell. Mirrors what the
@@ -2077,17 +2107,20 @@ export function SurveyViewer({ source }: Props) {
   }, [pending, source.guid, setGlobalPending])
 
   // CodedTextView reports a single-cell selection — adopt as pending.
+  // Writes the global pending store synchronously (not only via the
+  // mirror effect) so a code applied right after the selection always
+  // targets THIS selection, never the previous one.
   const handleCellTextSelected = useCallback(
     (cellId: Cell, startCp: number, endCp: number, selectedText: string) => {
       if (endCp <= startCp) {
         setPending(null)
         return
       }
-      setPending({
-        cells: [{ ...cellId, start: startCp, end: endCp, selectedText }]
-      })
+      const cells = [{ ...cellId, start: startCp, end: endCp, selectedText }]
+      setPending({ cells })
+      setGlobalPending({ kind: 'survey-cell', sourceGuid: source.guid, cells })
     },
-    []
+    [source.guid, setGlobalPending]
   )
 
   // Remember which cell a drag began in and hard-lock the selection to it.
@@ -2107,13 +2140,22 @@ export function SurveyViewer({ source }: Props) {
     }
     const cell = (e.target as HTMLElement).closest?.('[data-survey-cell]') as HTMLElement | null
     dragStartCellRef.current = cell
+    // A fresh drag supersedes any earlier selection. Clear the pending
+    // (local + global) the instant it starts so that if this gesture's
+    // mouse-up resolves to nothing, a code can't fall back onto the
+    // PREVIOUS selection — the current selected text is the only target.
     if (cell) {
+      setPending(null)
+      const cur = usePendingSelectionStore.getState().selection
+      if (cur && cur.kind === 'survey-cell' && cur.sourceGuid === source.guid) {
+        setGlobalPending(null)
+      }
       cell.classList.add('survey-drag-source')
       containerRef.current?.classList.add('survey-drag-lock')
     } else {
       containerRef.current?.classList.remove('survey-drag-lock')
     }
-  }, [])
+  }, [source.guid, setGlobalPending])
 
   // JS backstop to the CSS hard-lock: if any selection still escapes the start
   // cell, pull the moving end (focus) back to the cell's near edge, keeping the
@@ -2158,8 +2200,7 @@ export function SurveyViewer({ source }: Props) {
   // is limited to one cell at a time, so when a drag spans cells we keep
   // only the cell where the selection began and clamp the on-screen
   // selection to it.
-  const handleContainerMouseUp = useCallback((e: React.MouseEvent) => {
-    if (e.button !== 0) return
+  const resolveCellSelection = useCallback((releaseTarget: Node | null) => {
     const sel = window.getSelection()
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return
     const range = sel.getRangeAt(0)
@@ -2177,7 +2218,7 @@ export function SurveyViewer({ source }: Props) {
     const selCell = cellEls.find(
       (el) => el.contains(range.startContainer) && el.contains(range.endContainer)
     )
-    if (selCell && selCell.contains(e.target as Node)) {
+    if (selCell && releaseTarget && selCell.contains(releaseTarget)) {
       return
     }
 
@@ -2201,7 +2242,7 @@ export function SurveyViewer({ source }: Props) {
 
       const [respondentId, questionId] = (el.getAttribute('data-survey-cell') || '').split(':')
       if (!respondentId || !questionId) continue
-      const cellText = el.textContent || ''
+      const cellText = cellContentText(el)
       let start: number
       let end: number
       if (el.contains(range.startContainer)) {
@@ -2231,7 +2272,12 @@ export function SurveyViewer({ source }: Props) {
     // single-response case — e.g. a response selected past its trailing line
     // break, which CodedTextView can't resolve — and is kept as-is.)
     if (matched.length >= 1) {
-      setPending({ cells: [matched[0]] })
+      const cells = [matched[0]]
+      setPending({ cells })
+      // Write the global store synchronously too, so a code applied
+      // immediately after this selection (including drags released
+      // outside the viewer) targets THIS text, not the previous pending.
+      setGlobalPending({ kind: 'survey-cell', sourceGuid: source.guid, cells })
       // Collapse the visible selection to the start cell so the on-screen
       // highlight matches what will actually be coded (one cell).
       if (matched.length > 1) {
@@ -2245,7 +2291,32 @@ export function SurveyViewer({ source }: Props) {
         }
       }
     }
-  }, [])
+  }, [source.guid, setGlobalPending])
+
+  const handleContainerMouseUp = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return
+      resolveCellSelection(e.target as Node)
+    },
+    [resolveCellSelection]
+  )
+
+  // Releasing the mouse OUTSIDE the viewer (a common way to finish a drag
+  // that selects to the very end of a long answer) fires neither the
+  // per-cell CodedTextView mouseup nor the container's onMouseUp, so the
+  // selection was silently dropped. Catch those releases on the document
+  // and resolve them here; in-container releases are already handled by
+  // the element-scoped handlers, so we skip them to avoid double work.
+  useEffect(() => {
+    const onDocMouseUp = (e: MouseEvent): void => {
+      if (e.button !== 0) return
+      const container = containerRef.current
+      if (!container || container.contains(e.target as Node)) return
+      resolveCellSelection(e.target as Node)
+    }
+    document.addEventListener('mouseup', onDocMouseUp)
+    return () => document.removeEventListener('mouseup', onDocMouseUp)
+  }, [resolveCellSelection])
 
   // ── Code application ───────────────────────────────────────────
   const applyCodeToPending = useCallback(

@@ -1178,11 +1178,18 @@ export function CodedTextView({
       }}
     >
       {/* Bracket overlay — positioned by DOM measurement, independent of line wrapping */}
-      <div ref={bracketOverlayRef} style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 1 }} />
+      <div ref={bracketOverlayRef} data-coding-overlay="1" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', userSelect: 'none', WebkitUserSelect: 'none', zIndex: 1 }} />
       {/* Label overlay — React-rendered so mouseenter/click handlers
           persist across overlay rebuilds. Labels live in their own layer
-          so the imperative bracket-shapes layer can be freely cleared. */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 1 }}>
+          so the imperative bracket-shapes layer can be freely cleared.
+          data-coding-overlay marks it (and the bracket / icon layers) as
+          decoration: these carry real text (a coding's code name), so any
+          consumer that converts a DOM selection into a text offset must
+          skip them, or the label text inflates the offset. user-select:none
+          stops the text drag from ever grabbing the label in the first
+          place (the visible cause: selecting an answer also highlighted
+          its code name). */}
+      <div data-coding-overlay="1" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', userSelect: 'none', WebkitUserSelect: 'none', zIndex: 1 }}>
         {bracketLabels.map((lb) => {
           const range = { startCp: lb.selStartCp, endCp: lb.selEndCp }
           return (
@@ -1226,7 +1233,7 @@ export function CodedTextView({
       {/* Icon overlay spans the full container so each icon's `leftX`
           (set by the layout pass above in container-absolute coords)
           places it directly. */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', zIndex: 2 }}>
+      <div data-coding-overlay="1" style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, pointerEvents: 'none', userSelect: 'none', WebkitUserSelect: 'none', zIndex: 2 }}>
         <MemoQuoteIcons
           groups={iconGroups}
           findMemo={(guid) => useMemoStore.getState().findMemo(guid)}
