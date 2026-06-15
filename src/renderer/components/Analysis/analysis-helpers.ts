@@ -46,8 +46,23 @@ export function selectionsWithCode(
   )
 }
 
-/** Check if two selections overlap */
+/** Check if two selections overlap.
+ *
+ *  Survey-cell selections store CELL-RELATIVE offsets, so two selections
+ *  only share a coordinate space when they're in the SAME cell. Without
+ *  this guard every cell's selections — all starting near offset 0 —
+ *  falsely overlap every other cell's, which inflated co-occurrence counts
+ *  to roughly (instances × answer length). */
 export function selectionsOverlap(a: PlainTextSelection, b: PlainTextSelection): boolean {
+  if (a.surveyCell || b.surveyCell) {
+    if (!a.surveyCell || !b.surveyCell) return false
+    if (
+      a.surveyCell.respondentId !== b.surveyCell.respondentId ||
+      a.surveyCell.questionId !== b.surveyCell.questionId
+    ) {
+      return false
+    }
+  }
   return a.startPosition < b.endPosition && b.startPosition < a.endPosition
 }
 

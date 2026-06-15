@@ -30,6 +30,21 @@ function textForSelection(
   return documentContent
 }
 
+/** Two selections can only be compared spatially (overlap / inside /
+ *  before / followedBy) when they live in the same coordinate space.
+ *  Survey-cell selections store CELL-RELATIVE offsets, so a selection in
+ *  one cell must never be compared with one in another cell (or with a
+ *  non-cell selection) — otherwise every cell's near-zero offsets falsely
+ *  overlap every other cell's, exploding result counts. */
+function sameSpatialSpace(a: PlainTextSelection, b: PlainTextSelection): boolean {
+  const ac = a.surveyCell
+  const bc = b.surveyCell
+  if (ac || bc) {
+    return !!ac && !!bc && ac.respondentId === bc.respondentId && ac.questionId === bc.questionId
+  }
+  return true
+}
+
 function surveyCellText(source: TextSource, respondentId: string, questionId: string): string {
   const survey = (source.formatData as SurveyFormatData | undefined)?.survey
   if (!survey) return ''
@@ -522,6 +537,7 @@ function selectionMatchesCondition(
         for (const container of allSelections) {
           if (container === sel) continue // a selection cannot be "inside" itself
           if (!selectionMatchesCondition(container, cond.condition2, content, allSelections)) continue
+          if (!sameSpatialSpace(sel, container)) continue
           if (sel.startPosition >= container.startPosition && sel.endPosition <= container.endPosition) return true
         }
       } else if (condition.type === 'outside') {
@@ -529,6 +545,7 @@ function selectionMatchesCondition(
         let hasOverlap = false
         for (const other of allSelections) {
           if (!selectionMatchesCondition(other, cond.condition2, content, allSelections)) continue
+          if (!sameSpatialSpace(sel, other)) continue
           if (Math.max(sel.startPosition, other.startPosition) < Math.min(sel.endPosition, other.endPosition)) {
             hasOverlap = true; break
           }
@@ -538,6 +555,7 @@ function selectionMatchesCondition(
         if (!selectionMatchesCondition(sel, cond.condition1, content, allSelections)) continue
         for (const other of allSelections) {
           if (!selectionMatchesCondition(other, cond.condition2, content, allSelections)) continue
+          if (!sameSpatialSpace(sel, other)) continue
           if (Math.max(sel.startPosition, other.startPosition) < Math.min(sel.endPosition, other.endPosition)) return true
         }
       }
@@ -548,11 +566,13 @@ function selectionMatchesCondition(
         let overlapsAny = false
         for (const other of allSelections) {
           if (!selectionMatchesCondition(other, cond.condition2, content, allSelections)) continue
+          if (!sameSpatialSpace(sel, other)) continue
           if (Math.max(sel.startPosition, other.startPosition) < Math.min(sel.endPosition, other.endPosition)) { overlapsAny = true; break }
         }
         if (overlapsAny) continue
         for (const other of allSelections) {
           if (!selectionMatchesCondition(other, cond.condition2, content, allSelections)) continue
+          if (!sameSpatialSpace(sel, other)) continue
           if (sel.endPosition <= other.startPosition) return true
         }
       }
@@ -562,11 +582,13 @@ function selectionMatchesCondition(
         let overlapsAny = false
         for (const other of allSelections) {
           if (!selectionMatchesCondition(other, cond.condition2, content, allSelections)) continue
+          if (!sameSpatialSpace(sel, other)) continue
           if (Math.max(sel.startPosition, other.startPosition) < Math.min(sel.endPosition, other.endPosition)) { overlapsAny = true; break }
         }
         if (overlapsAny) continue
         for (const other of allSelections) {
           if (!selectionMatchesCondition(other, cond.condition2, content, allSelections)) continue
+          if (!sameSpatialSpace(sel, other)) continue
           if (sel.startPosition >= other.endPosition) return true
         }
       }
@@ -617,6 +639,7 @@ function findOverlapIntersections(
 
   for (const other of allSelections) {
     if (!selectionMatchesCondition(other, condition.condition2, content, allSelections)) continue
+    if (!sameSpatialSpace(selection, other)) continue
     // Compute intersection
     const intStart = Math.max(selection.startPosition, other.startPosition)
     const intEnd = Math.min(selection.endPosition, other.endPosition)
@@ -627,8 +650,13 @@ function findOverlapIntersections(
     if (seenRanges.has(rangeKey)) continue
     seenRanges.add(rangeKey)
 
-    const matchedText = codepointSlice(content, intStart, intEnd)
-    const { before, after } = getContext(content, intStart, intEnd)
+    // Slice the text the selection actually points into (the cleaned cell
+    // text for survey cells), not the raw document content — otherwise a
+    // survey intersection shows whatever bytes sit at those offsets in the
+    // CSV (typically the header row).
+    const sliceSource = textForSelection(source, selection, content)
+    const matchedText = codepointSlice(sliceSource, intStart, intEnd)
+    const { before, after } = getContext(sliceSource, intStart, intEnd)
     const allCodes = new Set([
       ...selection.codings.map((c) => c.codeGuid),
       ...other.codings.map((c) => c.codeGuid)
@@ -666,6 +694,7 @@ function findInsideSelections(
   for (const other of allSelections) {
     if (other === selection) continue // a selection cannot be "inside" itself
     if (!selectionMatchesCondition(other, condition.condition2, content, allSelections)) continue
+    if (!sameSpatialSpace(selection, other)) continue
     // Check if selection is fully inside other
     if (selection.startPosition >= other.startPosition && selection.endPosition <= other.endPosition) {
       return [buildResult(source, selection, content, new Set(selection.codings.map((c) => c.codeGuid)), codeMap)]
@@ -689,6 +718,7 @@ function findOutsideSelections(
 
   for (const other of allSelections) {
     if (!selectionMatchesCondition(other, condition.condition2, content, allSelections)) continue
+    if (!sameSpatialSpace(selection, other)) continue
     // Check if there's any overlap
     const intStart = Math.max(selection.startPosition, other.startPosition)
     const intEnd = Math.min(selection.endPosition, other.endPosition)
@@ -713,6 +743,7 @@ function findBeforeSelections(
   // First check: Condition 1 must not overlap with ANY Condition 2 selection
   for (const other of allSelections) {
     if (!selectionMatchesCondition(other, condition.condition2, content, allSelections)) continue
+    if (!sameSpatialSpace(selection, other)) continue
     const overlapStart = Math.max(selection.startPosition, other.startPosition)
     const overlapEnd = Math.min(selection.endPosition, other.endPosition)
     if (overlapStart < overlapEnd) return [] // overlaps — not "before"
@@ -721,6 +752,7 @@ function findBeforeSelections(
   // Second check: there must exist a Condition 2 selection that starts after Condition 1 ends
   for (const other of allSelections) {
     if (!selectionMatchesCondition(other, condition.condition2, content, allSelections)) continue
+    if (!sameSpatialSpace(selection, other)) continue
     if (selection.endPosition <= other.startPosition) {
       return [buildResult(source, selection, content, new Set(selection.codings.map((c) => c.codeGuid)), codeMap)]
     }
@@ -745,6 +777,7 @@ function findFollowedBySelections(
   // First check: Condition 1 must not overlap with ANY Condition 2 selection
   for (const other of allSelections) {
     if (!selectionMatchesCondition(other, condition.condition2, content, allSelections)) continue
+    if (!sameSpatialSpace(selection, other)) continue
     const overlapStart = Math.max(selection.startPosition, other.startPosition)
     const overlapEnd = Math.min(selection.endPosition, other.endPosition)
     if (overlapStart < overlapEnd) return [] // overlaps — not "after"
@@ -753,6 +786,7 @@ function findFollowedBySelections(
   // Second check: there must exist a Condition 2 selection that ends before Condition 1 starts
   for (const other of allSelections) {
     if (!selectionMatchesCondition(other, condition.condition2, content, allSelections)) continue
+    if (!sameSpatialSpace(selection, other)) continue
     if (selection.startPosition >= other.endPosition) {
       return [buildResult(source, selection, content, new Set(selection.codings.map((c) => c.codeGuid)), codeMap)]
     }
