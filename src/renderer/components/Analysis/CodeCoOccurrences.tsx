@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react'
-import type { AnalysisInitData } from '../../models/types'
+import type { AnalysisInitData, SurveyCellScopeArgs } from '../../models/types'
 import { Icon, faSquaresIntersect, faChevronDown, faChevronRight } from '../Icon'
 import { toolColors } from '../../utils/tool-colors'
 import {
@@ -8,6 +8,7 @@ import {
   type DocumentFilterState
 } from '../DocumentSelector/DocumentSelector'
 import { truncate, countCoOccurrences, toCsv, pctOfTotal, resolveFilteredSources, applySurveyCellScope, binarizeGrid } from './analysis-helpers'
+import { QuestionScopeBox, hasSurveyInScope, type QuestionScopeRef } from './survey-grouping'
 import { generateGuid } from '../../utils/guid'
 import { useLiveAnalysisData } from './use-live-analysis-data'
 import { EditableTitleSuffix } from '../EditableTitleSuffix'
@@ -17,7 +18,7 @@ import { useRegisterToolSave } from '../../hooks/use-register-tool-save'
 
 interface Props {
   data: AnalysisInitData
-  savedConfig?: { rowCodeGuids: string[]; colCodeGuids: string[]; docFilter: DocumentFilterState; guid: string; name: string }
+  savedConfig?: { rowCodeGuids: string[]; colCodeGuids: string[]; docFilter: DocumentFilterState; questionScope?: QuestionScopeRef[]; guid: string; name: string }
   inTab?: {
     onClose: () => void
     onSaved: (savedGuid: string, name: string) => void
@@ -96,8 +97,12 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
   // the zustand stores; non-overridden fields (sources, sourceContents,
   // sourceSelections) still fall through to the snapshot. See
   // use-live-analysis-data.ts for the rationale.
+  const [questionScope, setQuestionScope] = useState<QuestionScopeRef[]>(savedConfig?.questionScope ?? [])
   const live = useLiveAnalysisData()
-  const data = useMemo(() => applySurveyCellScope({ ...propData, ...live }, docFilter), [propData, live, docFilter])
+  const data = useMemo(() => {
+    const base = applySurveyCellScope({ ...propData, ...live }, docFilter)
+    return questionScope.length > 0 ? applySurveyCellScope(base, { questionScope }) : base
+  }, [propData, live, docFilter, questionScope])
   const [visualMode, setVisualMode] = useState(false)
   const [binaryMode, setBinaryMode] = useState(false)
   const [docSectionOpen, setDocSectionOpen] = useState(false)
@@ -108,13 +113,14 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
 
   // Dirty tracking (see useToolDirtyState).
   const currentConfig = useMemo(
-    () => ({ rowCodeGuids, colCodeGuids, docFilter }),
-    [rowCodeGuids, colCodeGuids, docFilter]
+    () => ({ rowCodeGuids, colCodeGuids, docFilter, questionScope }),
+    [rowCodeGuids, colCodeGuids, docFilter, questionScope]
   )
   const initialBaseline = useMemo(() => ({
     rowCodeGuids: savedConfig?.rowCodeGuids ?? [],
     colCodeGuids: savedConfig?.colCodeGuids ?? [],
-    docFilter: savedConfig?.docFilter ?? emptyDocumentFilter()
+    docFilter: savedConfig?.docFilter ?? emptyDocumentFilter(),
+    questionScope: savedConfig?.questionScope ?? []
   }), [])
   const { dirty, baseline, setBaseline } = useToolDirtyState(currentConfig, initialBaseline, inTab)
 
@@ -122,12 +128,20 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
     setRowCodeGuids(baseline.rowCodeGuids)
     setColCodeGuids(baseline.colCodeGuids)
     setDocFilter(baseline.docFilter)
+    setQuestionScope(baseline.questionScope ?? [])
   }, [baseline])
 
   const filteredSourceGuids = useMemo(
     () => resolveFilteredSources(data, docFilter.sourceGuids, docFilter.tagGuids, docFilter.tagExcludeGuids, docFilter.typeInclude, docFilter.typeExclude),
     [data, docFilter]
   )
+
+  // Survey-cell scope carried into a generated drill-down query so it
+  // re-runs against the same subset the table reflects.
+  const surveyScope = useCallback((): SurveyCellScopeArgs | undefined => {
+    if (questionScope.length === 0) return undefined
+    return { questionScope: questionScope.map((q) => ({ sourceGuid: q.sourceGuid, id: q.id })) }
+  }, [questionScope])
 
   const codeMap = useMemo(() => {
     const m = new Map<string, { name: string; color?: string; parentGuid?: string }>()
@@ -196,25 +210,25 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
     if (rowCodeGuids[rowIdx] === colCodeGuids[colIdx]) return
     const val = matrix[rowIdx][colIdx]
     if (val === 0) return
-    window.api.sendAnalysisAction('run-cooccurrence-query', rowCodeGuids[rowIdx], colCodeGuids[colIdx], filteredSourceGuids)
-  }, [matrix, rowCodeGuids, colCodeGuids, filteredSourceGuids])
+    window.api.sendAnalysisAction('run-cooccurrence-query', rowCodeGuids[rowIdx], colCodeGuids[colIdx], filteredSourceGuids, surveyScope())
+  }, [matrix, rowCodeGuids, colCodeGuids, filteredSourceGuids, surveyScope])
 
   const handleRowTotalClick = useCallback((rowIdx: number) => {
     if (rowTotals[rowIdx] === 0) return
     // Show all occurrences of this row's code across filtered docs
-    window.api.sendAnalysisAction('run-code-in-doc-query', rowCodeGuids[rowIdx], filteredSourceGuids, filteredSourceGuids)
-  }, [rowTotals, rowCodeGuids, filteredSourceGuids])
+    window.api.sendAnalysisAction('run-code-in-doc-query', rowCodeGuids[rowIdx], filteredSourceGuids, filteredSourceGuids, surveyScope())
+  }, [rowTotals, rowCodeGuids, filteredSourceGuids, surveyScope])
 
   const handleColTotalClick = useCallback((colIdx: number) => {
     if (colTotals[colIdx] === 0) return
-    window.api.sendAnalysisAction('run-code-in-doc-query', colCodeGuids[colIdx], filteredSourceGuids, filteredSourceGuids)
-  }, [colTotals, colCodeGuids, filteredSourceGuids])
+    window.api.sendAnalysisAction('run-code-in-doc-query', colCodeGuids[colIdx], filteredSourceGuids, filteredSourceGuids, surveyScope())
+  }, [colTotals, colCodeGuids, filteredSourceGuids, surveyScope])
 
   const handleGrandTotalClick = useCallback(() => {
     if (grandTotal === 0) return
     const allGuids = Array.from(new Set([...rowCodeGuids, ...colCodeGuids]))
-    window.api.sendAnalysisAction('run-codes-in-doc-query', allGuids, filteredSourceGuids)
-  }, [grandTotal, rowCodeGuids, colCodeGuids, filteredSourceGuids])
+    window.api.sendAnalysisAction('run-codes-in-doc-query', allGuids, filteredSourceGuids, surveyScope())
+  }, [grandTotal, rowCodeGuids, colCodeGuids, filteredSourceGuids, surveyScope])
 
   const handleExportCsv = useCallback(() => {
     const colNames = colCodeGuids.map((g) => codeMap.get(g)?.name || 'Code')
@@ -240,12 +254,12 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
       guid: analysisGuid,
       toolType: 'code-cooccurrences',
       name,
-      config: { rowCodeGuids, colCodeGuids, docFilter }
+      config: { rowCodeGuids, colCodeGuids, docFilter, questionScope }
     })
-    setBaseline({ rowCodeGuids, colCodeGuids, docFilter })
+    setBaseline({ rowCodeGuids, colCodeGuids, docFilter, questionScope })
     if (inTab) inTab.onSaved(analysisGuid, name)
     else setTimeout(() => window.close(), 200)
-  }, [analysisGuid, rowCodeGuids, colCodeGuids, docFilter, inTab, setBaseline])
+  }, [analysisGuid, rowCodeGuids, colCodeGuids, docFilter, questionScope, inTab, setBaseline])
 
   useRegisterToolSave(inTab?.tabId, () => {
     if (isExisting) {
@@ -349,6 +363,11 @@ export function CodeCoOccurrences({ data: propData, savedConfig, inTab }: Props)
             </div>
           )}
         </div>
+
+        {/* Questions scope — only meaningful when a survey is analysed. */}
+        {hasSurveyInScope(filteredSourceGuids, data) && (
+          <QuestionScopeBox value={questionScope} onChange={setQuestionScope} data={data} />
+        )}
 
         {/* Results Grid */}
         <div

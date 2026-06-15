@@ -5,6 +5,7 @@ All notable changes to Magnolia are documented here. The format follows [Keep a 
 ## [1.4.1]
 
 ### Added
+- **Scope Code Co-Occurrences to specific survey questions.** Like the other analysis tools, Code Co-Occurrences now has a Questions box (shown when a survey is in scope) so you can limit the co-occurrence grid to the answers of one or more questions.
 - **Add documents to a report.** You can now drag documents from the Documents panel straight onto a report, alongside saved queries, analyses, quotes, and memos. Each document starts on its own page and is included according to its type: text and transcripts appear as their text, an image is embedded scaled to fit the page, a video shows its first frame plus any transcript, a PDF is included as its original pages (scaled to fit), and a survey reproduces the same summary you get from "Export PDF" on the Survey Overview.
 
 ### Changed

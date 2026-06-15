@@ -1394,9 +1394,11 @@ function App() {
         }
       } else if (action === 'run-cooccurrence-query') {
         // Build an overlap query for two codes, including document filter
-        const [codeGuidA, codeGuidB, filteredGuids] = args as [string, string, string[] | undefined]
+        // and any survey-cell (question) scope the tool was narrowed to.
+        const [codeGuidA, codeGuidB, filteredGuids, scope] = args as [string, string, string[] | undefined, SurveyCellScopeArgs | undefined]
+        const baseFilter: Query['documentFilter'] = filteredGuids && filteredGuids.length > 0 ? { sourceGuids: filteredGuids } : {}
         const query: Query = {
-          documentFilter: filteredGuids && filteredGuids.length > 0 ? { sourceGuids: filteredGuids } : {},
+          documentFilter: applySurveyScopeToFilter(baseFilter, scope),
           codeCondition: {
             type: 'overlap',
             condition1: { type: 'code', codeGuid: codeGuidA },
