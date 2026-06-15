@@ -13,6 +13,7 @@ All notable changes to Magnolia are documented here. The format follows [Keep a 
 ### Fixed
 - **Coding a survey answer now lands on exactly the text you selected.** Applying a code to an answer that already had a code could shift the highlight a few characters in (and a code's name in the margin could itself be selected). The margins — code names, brackets, and memo/quote icons — are no longer selectable, so only the answer text can be coded.
 - **Selecting a survey answer and releasing the mouse outside the viewer now works.** The selection is kept, and the code applies to that selection rather than to whatever was selected before.
+- **Survey question and respondent headers are only clickable on the text itself.** Clicking elsewhere on the header's row no longer jumps to that question or respondent.
 
 ## [1.4.0]
 

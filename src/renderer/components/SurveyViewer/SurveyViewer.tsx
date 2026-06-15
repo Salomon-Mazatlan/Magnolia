@@ -617,31 +617,33 @@ function NavHeading({
   const onLeave = (e: React.MouseEvent<HTMLElement>) => {
     e.currentTarget.style.color = 'var(--text-secondary)'
   }
+  // Only the text itself navigates — not the whole row. The click /
+  // hover / pointer cursor live on an inline span hugging the label, so
+  // the empty space beside (and the number column of) the heading isn't
+  // a link target. The h2 keeps the layout but is otherwise inert.
+  const linkProps = {
+    onClick,
+    onMouseEnter: onEnter,
+    onMouseLeave: onLeave,
+    style: { cursor: 'pointer' as const }
+  }
   // Numbered headings use a 2-column flex layout so wrapped lines
   // line up under the text instead of under the number — i.e. a
   // hanging indent. Variable number widths (1 vs 28 vs 128) are
   // handled naturally because the number column shrinks to fit.
   if (number != null) {
     return (
-      <h2
-        onClick={onClick}
-        style={{ ...sectionHeadingStyle, display: 'flex', alignItems: 'baseline', gap: 8 }}
-        onMouseEnter={onEnter}
-        onMouseLeave={onLeave}
-      >
+      <h2 style={{ ...sectionHeadingStyle, cursor: 'default', display: 'flex', alignItems: 'baseline', gap: 8 }}>
         <span style={{ flexShrink: 0 }}>{number}.</span>
-        <span style={{ flex: 1, minWidth: 0 }}>{label}</span>
+        <span style={{ flex: 1, minWidth: 0 }}>
+          <span {...linkProps}>{label}</span>
+        </span>
       </h2>
     )
   }
   return (
-    <h2
-      onClick={onClick}
-      style={sectionHeadingStyle}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-    >
-      {label}
+    <h2 style={{ ...sectionHeadingStyle, cursor: 'default' }}>
+      <span {...linkProps}>{label}</span>
     </h2>
   )
 }
