@@ -2,6 +2,14 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.1]
+
+### Added
+- **Add documents to a report.** You can now drag documents from the Documents panel straight onto a report, alongside saved queries, analyses, quotes, and memos. Each document starts on its own page and is included according to its type: text and transcripts appear as their text, an image is embedded scaled to fit the page, a video shows its first frame plus any transcript, a PDF is included as its original pages (scaled to fit), and a survey reproduces the same summary you get from "Export PDF" on the Survey Overview.
+
+### Changed
+- **The Documents panel no longer dims while a report is open**, now that documents can be added to a report.
+
 ## [1.4.0]
 
 ### Added
