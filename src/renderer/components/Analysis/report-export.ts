@@ -2,9 +2,9 @@
  * Reports tool — data model + PDF assembly.
  *
  * A report is an ordered list of items (sections, free text, saved
- * queries, saved analyses, quotes, memos) plus a title. Everything is
- * regenerated from the live stores at export time so the PDF never
- * carries stale data. The document is built with the shared
+ * queries, saved analyses, quotes, memos, documents) plus a title.
+ * Everything is regenerated from the live stores at export time so the
+ * PDF never carries stale data. The document is built with the shared
  * buildPdfDocument / exportPdfWithHeader template so it matches every
  * other Magnolia export (brand header, page numbers, typography).
  *
@@ -24,7 +24,9 @@ import { TOOL_REGISTRY } from '../../utils/tool-registry'
 import { renderAnalysisItemHtml, REPORT_TABLE_CSS } from './report-analysis'
 import { renderQueryItemHtml, REPORT_QUERY_CSS } from './report-query'
 import { surveyCellCitation } from './report-survey-cite'
-import type { AnalysisToolType, Quote } from '../../models/types'
+import { renderPdfPagesToImages } from '../../utils/pdf-thumbnail'
+import { buildSurveySummaryBody, SURVEY_SUMMARY_CSS } from '../SurveyViewer/SurveyViewer'
+import type { AnalysisToolType, Quote, SurveyFormatData } from '../../models/types'
 
 /** Per-tool display options chosen for an analysis item, mirroring the
  *  toggles the analysis tool itself exposes. Applied when the table is
@@ -49,6 +51,7 @@ export type ReportItem =
   | { id: string; kind: 'query'; refGuid: string }
   | { id: string; kind: 'quote'; refGuid: string }
   | { id: string; kind: 'memo'; refGuid: string }
+  | { id: string; kind: 'document'; refGuid: string }
   | {
       id: string
       kind: 'analysis'
@@ -96,6 +99,10 @@ export function resolveItemLabel(item: ReportItem): string {
       const m = useMemoStore.getState().findMemo(item.refGuid)
       return m?.title ?? '(deleted memo)'
     }
+    case 'document': {
+      const src = useDocumentStore.getState().sources.find((s) => s.guid === item.refGuid)
+      return src?.name ?? '(deleted document)'
+    }
   }
 }
 
@@ -109,6 +116,11 @@ export function resolveItemSnippet(item: ReportItem): string | null {
   if (item.kind === 'memo') {
     const m = useMemoStore.getState().findMemo(item.refGuid)
     return m ? m.content || '' : null
+  }
+  if (item.kind === 'document') {
+    const src = useDocumentStore.getState().sources.find((s) => s.guid === item.refGuid)
+    if (!src) return null
+    return useDocumentStore.getState().sourceContents[item.refGuid] || ''
   }
   return null
 }
@@ -126,6 +138,8 @@ export function reportItemTypeLabel(item: ReportItem): string {
       return 'Quote'
     case 'memo':
       return 'Memo'
+    case 'document':
+      return 'Document'
     case 'analysis':
       return TOOL_REGISTRY[item.toolType]?.label ?? 'Analysis'
   }
@@ -176,10 +190,29 @@ const EXPORT_CSS = `
   .report-quote { border-left: 3px solid #ccc; padding: 2px 0 2px 12px; margin: 0; color: #333; }
   .report-quote .src { display: block; font-style: normal; font-size: 10px; color: #888; margin-top: 4px; }
   .report-memo .memo-content { font-size: 11px; color: #222; }
+  /* Every document starts on a fresh page, and — unlike the other blocks,
+     which avoid breaking — a document's content (full text, a long
+     transcript, a multi-page PDF) is allowed to flow across pages. */
+  .report-document { break-inside: auto; page-break-inside: auto; page-break-before: always; }
+  .report-document .doc-content { font-size: 11px; color: #222; white-space: pre-wrap; }
+  .report-survey-sub { font-size: 10px; color: #888; margin: 0 0 8px; }
+  /* Embedded media (image source / video first frame). Width/height caps
+     that scale each to fit the page are injected per-export (they depend
+     on the chosen paper size). */
+  .report-media { text-align: center; margin: 4px 0; }
+  .report-media-img { display: block; margin: 0 auto; }
+  /* Each rasterised PDF page sits on its own report page, scaled to fit,
+     so the embedded PDF reads like the original. The first page shares the
+     document heading's page rather than forcing a blank one. */
+  .report-pdf-page { text-align: center; margin: 0; break-inside: avoid; page-break-inside: avoid; page-break-before: always; }
+  .report-pdf-page.first { page-break-before: auto; }
+  .report-pdf-img { display: block; margin: 0 auto; border: 1px solid #ddd; }
+  /* A survey's embedded summary can run long, so let it break across pages. */
+  .survey-summary { break-inside: auto; page-break-inside: auto; }
   /* Wide analysis tables that overflow the page get rotated + scaled in
      a later phase; this wrapper is the hook for that. */
   .report-wide { overflow: hidden; }
-` + REPORT_TABLE_CSS + REPORT_QUERY_CSS
+` + REPORT_TABLE_CSS + REPORT_QUERY_CSS + SURVEY_SUMMARY_CSS
 
 // Paper dimensions (inches, portrait) for the supported export sizes.
 const PAPER_INCHES: Record<string, [number, number]> = {
@@ -233,6 +266,9 @@ function buildExportScript(pageH: number, pageW: number): string {
     var cs = getComputedStyle(el);
     var blockH = el.offsetHeight;
     var h = blockH + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+    // A block that forces a page break before it (e.g. every document)
+    // starts a fresh page in the estimate too.
+    if ((cs.breakBefore === 'page' || cs.breakBefore === 'always') && y > 0) { page++; y = 0; }
     if (cs.breakInside === 'avoid' && blockH <= PAGE_H && y > 0 && y + blockH > PAGE_H) { page++; y = 0; }
     if (el.id && pageOf[el.id] == null) pageOf[el.id] = page;
     var ids = el.querySelectorAll('[id]');
@@ -250,8 +286,9 @@ function buildExportScript(pageH: number, pageW: number): string {
 }
 
 /** Build the report body (TOC + items). Each item gets an anchor the TOC
- *  links to. */
-function buildReportBody(items: ReportItem[]): string {
+ *  links to. `assets` carries the pre-resolved media (images, video frames,
+ *  rasterised PDF pages) keyed by source guid. */
+function buildReportBody(items: ReportItem[], assets: Map<string, DocAsset>): string {
   // Indent each TOC entry by its level: a Section sits at the left, a
   // Subsection one step in, and content items under whichever heading
   // currently applies (one step deeper than that heading). Hierarchical
@@ -279,12 +316,17 @@ function buildReportBody(items: ReportItem[]): string {
     ? `<div class="report-toc"><div class="section-heading">Contents</div><div class="toc-list">${toc}</div></div>`
     : ''
 
-  const body = items.map((it) => renderItem(it)).join('')
+  const body = items.map((it) => renderItem(it, assets)).join('')
   const { h, w } = pageMetrics()
-  return tocHtml + body + buildExportScript(h, w)
+  // Cap embedded media to the page box so an image / PDF page / video frame
+  // scales down to fit (a little headroom leaves room for the document
+  // heading that shares the first page). Injected here because the cap
+  // depends on the user's chosen paper size.
+  const mediaCss = `<style>.report-media-img,.report-pdf-img{max-width:100%;max-height:${Math.max(120, h - 30)}px;}</style>`
+  return mediaCss + tocHtml + body + buildExportScript(h, w)
 }
 
-function renderItem(item: ReportItem): string {
+function renderItem(item: ReportItem, assets: Map<string, DocAsset>): string {
   const anchor = reportAnchorId(item)
   switch (item.kind) {
     case 'section':
@@ -297,6 +339,8 @@ function renderItem(item: ReportItem): string {
       return renderQuote(item.refGuid, anchor)
     case 'memo':
       return renderMemo(item.refGuid, anchor)
+    case 'document':
+      return renderDocument(item.refGuid, anchor, assets)
     case 'analysis':
       return renderAnalysisItemHtml(item, anchor)
   }
@@ -325,14 +369,87 @@ function renderMemo(guid: string, anchor: string): string {
   )
 }
 
+/** Wrap a document's rendered inner HTML in its report block. */
+function wrapDocument(anchor: string, inner: string): string {
+  return `<div class="report-block report-document" id="${anchor}">${inner}</div>`
+}
+
+function renderDocument(guid: string, anchor: string, assets: Map<string, DocAsset>): string {
+  const src = useDocumentStore.getState().sources.find((s) => s.guid === guid)
+  if (!src) {
+    return wrapDocument(anchor, `<div class="report-item-head">Document</div><div class="empty">(deleted document)</div>`)
+  }
+  const head = `<div class="report-item-head">Document — ${escHtml(src.name)}</div>`
+  const asset = assets.get(guid)
+
+  // Survey: embed the exact content the survey overview's "Export PDF"
+  // produces (Contents / Questions / Respondents), under a survey heading.
+  if (src.sourceType === 'survey') {
+    const survey = (src.formatData as SurveyFormatData | undefined)?.survey
+    if (!survey) return wrapDocument(anchor, head + `<div class="empty">(survey data unavailable)</div>`)
+    const r = survey.respondents.length
+    const q = survey.questions.length
+    const sub = `${r} respondent${r === 1 ? '' : 's'} · ${q} question${q === 1 ? '' : 's'}`
+    return wrapDocument(
+      anchor,
+      `<div class="report-item-head">Survey — ${escHtml(src.name)}</div>` +
+        `<div class="report-survey-sub">${sub}</div>` +
+        `<div class="survey-summary">${buildSurveySummaryBody(survey)}</div>`
+    )
+  }
+
+  // Image: the picture itself, scaled to fit the page.
+  if (src.sourceType === 'image') {
+    if (asset?.kind === 'image') {
+      return wrapDocument(anchor, head + `<div class="report-media"><img class="report-media-img" src="${asset.dataUrl}" alt="${escHtml(src.name)}" /></div>`)
+    }
+    return wrapDocument(anchor, head + `<div class="empty">(image unavailable)</div>`)
+  }
+
+  // PDF: the original pages, rasterised and scaled to fit — one per page.
+  if (src.sourceType === 'pdf') {
+    if (asset?.kind === 'pdf' && asset.pages.length > 0) {
+      const pages = asset.pages
+        .map((p, i) => `<div class="report-pdf-page${i === 0 ? ' first' : ''}"><img class="report-pdf-img" src="${p}" alt="${escHtml(src.name)} page ${i + 1}" /></div>`)
+        .join('')
+      return wrapDocument(anchor, head + pages)
+    }
+    return wrapDocument(anchor, head + `<div class="empty">(PDF unavailable)</div>`)
+  }
+
+  // Video: the first frame plus any transcript text.
+  if (src.sourceType === 'video') {
+    const transcript = (useDocumentStore.getState().sourceContents[guid] || '').trim()
+    const frameHtml =
+      asset?.kind === 'video' && asset.frame
+        ? `<div class="report-media"><img class="report-media-img" src="${asset.frame}" alt="${escHtml(src.name)} first frame" /></div>`
+        : ''
+    const transcriptHtml = transcript ? `<div class="doc-content">${escHtml(transcript)}</div>` : ''
+    const body = frameHtml + transcriptHtml || `<div class="empty">(no preview available)</div>`
+    return wrapDocument(anchor, head + body)
+  }
+
+  // Text / markdown / audio transcript / anything else: the text content.
+  const content = useDocumentStore.getState().sourceContents[guid] || ''
+  const body = content.trim()
+    ? `<div class="doc-content">${escHtml(content)}</div>`
+    : `<div class="empty">(no text content)</div>`
+  return wrapDocument(anchor, head + body)
+}
+
 /** Build the full report HTML using the shared export template. */
-export function buildReportHtml(title: string, items: ReportItem[], exportedAt: string): string {
+export function buildReportHtml(
+  title: string,
+  items: ReportItem[],
+  exportedAt: string,
+  assets: Map<string, DocAsset> = new Map()
+): string {
   const reportTitle = title.trim() || 'Report'
   const subtitle = `${items.length} item${items.length === 1 ? '' : 's'} — exported ${exportedAt}`
   return buildPdfDocument({
     title: reportTitle,
     subtitle: escHtml(subtitle),
-    body: buildReportBody(items),
+    body: buildReportBody(items, assets),
     extraCss: EXPORT_CSS
   })
 }
@@ -343,8 +460,120 @@ export async function exportReportPdf(
   title: string,
   items: ReportItem[]
 ): Promise<string | null> {
+  // Resolve media (images, video first frames, rasterised PDF pages) up
+  // front — it's async (file reads + canvas work) and must be baked into
+  // the HTML as data URLs before the string is handed to the main process,
+  // whose isolated print window can't reach the renderer's blob URLs.
+  const assets = await resolveDocAssets(items)
   const exportedAt = new Date().toLocaleString()
-  const html = buildReportHtml(title, items, exportedAt)
+  const html = buildReportHtml(title, items, exportedAt, assets)
   const safeName = (title.trim() || 'Report').replace(/[^\w\d -]/g, '').slice(0, 80) || 'Report'
   return exportPdfWithHeader(html, safeName, 'Export Report as PDF')
+}
+
+// ── Media resolution ───────────────────────────────────────────────
+
+/** Pre-resolved binary media for a document source, baked into the export
+ *  HTML as data URLs. Text-based sources (text/markdown/audio transcript/
+ *  survey) need no entry. */
+type DocAsset =
+  | { kind: 'image'; dataUrl: string }
+  | { kind: 'pdf'; pages: string[] }
+  | { kind: 'video'; frame: string | null }
+
+/** Resolve the media for every document item, deduped by source guid. A
+ *  source that fails to load is simply omitted; renderDocument then shows
+ *  an "(… unavailable)" placeholder rather than failing the whole export. */
+async function resolveDocAssets(items: ReportItem[]): Promise<Map<string, DocAsset>> {
+  const assets = new Map<string, DocAsset>()
+  const store = useDocumentStore.getState()
+  const guids = new Set<string>()
+  for (const it of items) if (it.kind === 'document') guids.add(it.refGuid)
+
+  await Promise.all(
+    Array.from(guids).map(async (guid) => {
+      const src = store.sources.find((s) => s.guid === guid)
+      if (!src) return
+      const fd = (src.formatData ?? {}) as {
+        imageFilePath?: string
+        mimeType?: string
+        pdfFilePath?: string
+        pdfBase64?: string
+        videoFilePath?: string
+      }
+      try {
+        if (src.sourceType === 'image' && fd.imageFilePath) {
+          const buf = await window.api.readImageFile(fd.imageFilePath)
+          assets.set(guid, { kind: 'image', dataUrl: bytesToDataUrl(buf, fd.mimeType || 'image/png') })
+        } else if (src.sourceType === 'pdf' && (fd.pdfFilePath || fd.pdfBase64)) {
+          const pages = await renderPdfPagesToImages({ filePath: fd.pdfFilePath, pdfBase64: fd.pdfBase64, docKey: guid, scale: 2 })
+          assets.set(guid, { kind: 'pdf', pages })
+        } else if (src.sourceType === 'video' && fd.videoFilePath) {
+          const frame = await captureVideoFirstFrame(fd.videoFilePath, fd.mimeType)
+          assets.set(guid, { kind: 'video', frame })
+        }
+      } catch (err) {
+        console.error(`Reports: failed to load media for "${src.name}"`, err)
+      }
+    })
+  )
+  return assets
+}
+
+/** ArrayBuffer → `data:<mime>;base64,…`, chunked so large files don't blow
+ *  the argument limit of String.fromCharCode. */
+function bytesToDataUrl(buf: ArrayBuffer, mime: string): string {
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return `data:${mime};base64,${btoa(binary)}`
+}
+
+/** Load a video off disk and grab its first frame as a PNG data URL.
+ *  Resolves null on any failure (decode error, no codec, timeout) so the
+ *  export still produces a frame-less video entry. */
+function captureVideoFirstFrame(filePath: string, mimeType?: string): Promise<string | null> {
+  return window.api.readVideoFile(filePath).then(
+    (buf) =>
+      new Promise<string | null>((resolve) => {
+        const url = URL.createObjectURL(new Blob([buf], { type: mimeType || 'video/mp4' }))
+        const video = document.createElement('video')
+        let done = false
+        const finish = (result: string | null) => {
+          if (done) return
+          done = true
+          URL.revokeObjectURL(url)
+          resolve(result)
+        }
+        const timer = setTimeout(() => finish(null), 8000)
+        const capture = () => {
+          try {
+            const canvas = document.createElement('canvas')
+            canvas.width = video.videoWidth || 640
+            canvas.height = video.videoHeight || 360
+            const ctx = canvas.getContext('2d')
+            if (!ctx) { clearTimeout(timer); return finish(null) }
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+            clearTimeout(timer)
+            finish(canvas.toDataURL('image/png'))
+          } catch {
+            clearTimeout(timer)
+            finish(null)
+          }
+        }
+        video.muted = true
+        video.preload = 'auto'
+        video.addEventListener('error', () => { clearTimeout(timer); finish(null) }, { once: true })
+        video.addEventListener('seeked', capture, { once: true })
+        // Nudge off zero so a frame is guaranteed decoded before we draw.
+        video.addEventListener('loadeddata', () => {
+          try { video.currentTime = Math.min(0.1, (video.duration || 1) / 2) } catch { capture() }
+        }, { once: true })
+        video.src = url
+      }),
+    () => null
+  )
 }

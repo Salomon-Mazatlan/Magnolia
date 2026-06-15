@@ -1533,10 +1533,13 @@ function pdfNumericBoxPlotHtml(stats: NumericStats | null, valueLabels?: Map<num
   )
 }
 
-function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string {
+/** The survey summary body (Contents / Questions / Respondents tables)
+ *  with no document chrome. Exported so the Reports tool can embed the
+ *  exact same content the standalone "Export PDF" produces. The markup
+ *  relies on SURVEY_SUMMARY_CSS plus buildPdfDocument's shared base CSS. */
+export function buildSurveySummaryBody(survey: SurveyData): string {
   const totalRespondents = survey.respondents.length
   const totalQuestions = survey.questions.length
-  const now = new Date().toLocaleString()
 
   // Inline distribution cell for a closed-question type (donut /
   // option list / box plot). Shared by the Contents overview and the
@@ -1614,12 +1617,7 @@ function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string
     })
     .join('')
 
-  const subtitle =
-    `${totalRespondents} respondent${totalRespondents === 1 ? '' : 's'} · ` +
-    `${totalQuestions} question${totalQuestions === 1 ? '' : 's'} — ` +
-    `exported ${escHtml(now)}`
-
-  const body = `<div class="section-heading">Contents</div>
+  return `<div class="section-heading">Contents</div>
 <table>
   <colgroup>
     <col class="c-num"><col><col class="c-answered"><col class="c-distribution">
@@ -1645,59 +1643,74 @@ function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string
   <thead><tr><th>#</th><th>Respondent</th><th>Completed</th></tr></thead>
   <tbody>${respondentsRows}</tbody>
 </table>`
+}
 
-  // Survey-only CSS: fixed column widths for the Contents and
-  // Respondents tables, plus the option-list / answer-list / numeric
-  // box plot / open-ended-response styling. Everything else (body
-  // typography, h1, table base, .section-heading, .empty, etc.) is
-  // provided by buildPdfDocument's base CSS.
-  const extraCss = `
-  table { table-layout: fixed; }
+/** Survey-summary CSS. Every rule is scoped under `.survey-summary` so the
+ *  block can be embedded inside another export (the Reports tool) without
+ *  its bare `table` / `svg` rules leaking onto that document's other
+ *  content. Standalone survey exports wrap their body in the same class.
+ *  Everything else (body typography, h1, table base, .section-heading,
+ *  .empty, etc.) is provided by buildPdfDocument's base CSS. */
+export const SURVEY_SUMMARY_CSS = `
+  .survey-summary table { table-layout: fixed; }
   /* Percentage widths so the columns scale with the page. The old fixed
      pixel widths (88 + 300 + a 28px tick = 416px) overran narrow pages
      like A5 (~420px printable), starving the unsized Question column to a
      few pixels so every word wrapped onto its own line. c-num stays a
      small fixed tick; the Question / Respondent columns take the slack. */
-  col.c-num { width: 28px; }
-  col.c-answered { width: 22%; }
-  col.c-distribution { width: 38%; }
-  col.c-completed { width: 200px; }
-  td.num { white-space: nowrap; }
-  ul.options { list-style: none; padding: 0; margin: 0; }
-  ul.options li { display: flex; align-items: center; gap: 6px; padding: 1px 0; font-size: 11px; color: #333; }
-  ul.options li .opt-label { flex: 1; }
-  ul.options li .opt-pct { color: #888; font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; font-size: 10px; }
-  ul.options li .opt-swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; display: inline-block; }
-  .dist-single { display: flex; align-items: flex-start; gap: 12px; }
-  .dist-single .dist-legend { flex: 1; min-width: 0; }
+  .survey-summary col.c-num { width: 28px; }
+  .survey-summary col.c-answered { width: 22%; }
+  .survey-summary col.c-distribution { width: 38%; }
+  .survey-summary col.c-completed { width: 200px; }
+  .survey-summary td.num { white-space: nowrap; }
+  .survey-summary ul.options { list-style: none; padding: 0; margin: 0; }
+  .survey-summary ul.options li { display: flex; align-items: center; gap: 6px; padding: 1px 0; font-size: 11px; color: #333; }
+  .survey-summary ul.options li .opt-label { flex: 1; }
+  .survey-summary ul.options li .opt-pct { color: #888; font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; font-size: 10px; }
+  .survey-summary ul.options li .opt-swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; display: inline-block; }
+  .survey-summary .dist-single { display: flex; align-items: flex-start; gap: 12px; }
+  .survey-summary .dist-single .dist-legend { flex: 1; min-width: 0; }
   /* Contents "Show answers" link → jumps to the question's answers in
      the detailed Questions section. Print blue, no underline to match
      the on-screen link. */
-  a.show-answers { color: #1155cc; text-decoration: none; }
+  .survey-summary a.show-answers { color: #1155cc; text-decoration: none; }
   /* The detailed Questions section starts on a fresh page so Contents
      reads as front matter. */
-  .section-break { page-break-before: always; }
+  .survey-summary .section-break { page-break-before: always; }
   /* Open-ended (detailed section): header row joins seamlessly to its
      full-width answers row (no divider between them), and the answers
      row may break across pages so long lists aren't forced onto a
      fresh page by the table's default break-inside:avoid. */
-  tr.oe-head td { border-bottom: none; }
-  tr.oe-answers { break-inside: auto; page-break-inside: auto; }
-  ul.answers { list-style: none; padding: 0; margin: 0; }
-  ul.answers li { padding: 3px 0; font-size: 10.5px; line-height: 1.45; color: #222; }
-  ul.answers li .who { font-weight: 600; color: #444; margin-right: 2px; }
-  .resp-pct { display: flex; align-items: center; gap: 8px; }
-  .resp-bar { width: 120px; height: 6px; background: #eee; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
-  .resp-bar-fill { height: 100%; background: #888; }
-  .resp-num { font-size: 10px; color: #888; white-space: nowrap; }
-  .stats-line { font-size: 10px; color: #888; margin-top: 4px; }
+  .survey-summary tr.oe-head td { border-bottom: none; }
+  .survey-summary tr.oe-answers { break-inside: auto; page-break-inside: auto; }
+  .survey-summary ul.answers { list-style: none; padding: 0; margin: 0; }
+  .survey-summary ul.answers li { padding: 3px 0; font-size: 10.5px; line-height: 1.45; color: #222; }
+  .survey-summary ul.answers li .who { font-weight: 600; color: #444; margin-right: 2px; }
+  .survey-summary .resp-pct { display: flex; align-items: center; gap: 8px; }
+  .survey-summary .resp-bar { width: 120px; height: 6px; background: #eee; border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+  .survey-summary .resp-bar-fill { height: 100%; background: #888; }
+  .survey-summary .resp-num { font-size: 10px; color: #888; white-space: nowrap; }
+  .survey-summary .stats-line { font-size: 10px; color: #888; margin-top: 4px; }
   /* Cap the distribution graphics at their intrinsic width but let them
      shrink to fit a narrower column on small pages (viewBox keeps the
      aspect ratio when they scale). */
-  svg { display: block; max-width: 100%; height: auto; }
+  .survey-summary svg { display: block; max-width: 100%; height: auto; }
 `
 
-  return buildPdfDocument({ title: displayName, subtitle, body, extraCss })
+function buildSurveySummaryHtml(survey: SurveyData, displayName: string): string {
+  const totalRespondents = survey.respondents.length
+  const totalQuestions = survey.questions.length
+  const now = new Date().toLocaleString()
+  const subtitle =
+    `${totalRespondents} respondent${totalRespondents === 1 ? '' : 's'} · ` +
+    `${totalQuestions} question${totalQuestions === 1 ? '' : 's'} — ` +
+    `exported ${escHtml(now)}`
+  return buildPdfDocument({
+    title: displayName,
+    subtitle,
+    body: `<div class="survey-summary">${buildSurveySummaryBody(survey)}</div>`,
+    extraCss: SURVEY_SUMMARY_CSS
+  })
 }
 
 function SummaryView({

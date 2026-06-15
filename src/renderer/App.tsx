@@ -2256,7 +2256,7 @@ function App() {
                     if (panels.length > 0) panels.push(<PanelResizeHandle key="rh-d" style={rh} />)
                     panels.push(
                       <Panel key="documents" defaultSize={35} minSize={15}>
-                        <div style={{ height: '100%', opacity: reportsToolActive ? 0.62 : 1, transition: 'opacity 0.15s' }} title={reportsToolActive ? 'Documents can’t be added to a report' : undefined} onMouseDown={() => setActivePanel('documents')}>
+                        <div style={{ height: '100%' }} onMouseDown={() => setActivePanel('documents')}>
                           <DocumentBrowser
                             onImport={handleImportDocument}
                             onSurveyImport={queueSurveyImport}

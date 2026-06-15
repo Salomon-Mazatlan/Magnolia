@@ -140,6 +140,35 @@ export async function renderPdfRegionThumbnail(opts: ThumbnailOptions): Promise<
   }
 }
 
+/**
+ * Render every page of a PDF to a PNG data URL, in page order. Used by the
+ * Reports tool to embed a source PDF unchanged (each page is rasterised at
+ * `scale`, then the report scales the image to fit the page). Reuses the
+ * same cached PDFDocumentProxy as the region thumbnailer.
+ */
+export async function renderPdfPagesToImages(
+  opts: { filePath?: string; pdfBase64?: string; docKey?: string; scale?: number }
+): Promise<string[]> {
+  const scale = opts.scale ?? 2
+  const doc = await loadPdfDoc(opts as ThumbnailOptions)
+  const out: string[] = []
+  for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
+    const page = await doc.getPage(pageNum)
+    const viewport = page.getViewport({ scale })
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.ceil(viewport.width)
+    canvas.height = Math.ceil(viewport.height)
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Failed to create canvas 2D context')
+    // White backing so transparent PDFs don't render black in the PNG.
+    ctx.fillStyle = '#fff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    await page.render({ canvasContext: ctx, viewport }).promise
+    out.push(canvas.toDataURL('image/png'))
+  }
+  return out
+}
+
 /** Clear all caches — call when a project is closed or a PDF is unloaded. */
 export function clearPdfThumbnailCaches(): void {
   docCache.clear()

@@ -22,7 +22,8 @@ import {
   faBars,
   faMagnifyingGlass,
   faQuoteLeft,
-  faStickyNote
+  faStickyNote,
+  faFileAlt
 } from '../Icon'
 import { TOOL_REGISTRY } from '../../utils/tool-registry'
 import { MarkdownEditor } from '../MarkdownEditor'
@@ -36,6 +37,7 @@ import { useQueryStore } from '../../stores/query-store'
 import { useProjectStore } from '../../stores/project-store'
 import { useQuoteStore } from '../../stores/quote-store'
 import { useMemoStore } from '../../stores/memo-store'
+import { useDocumentStore } from '../../stores/document-store'
 import {
   exportReportPdf,
   reportItemTypeLabel,
@@ -83,6 +85,8 @@ function itemIcon(item: ReportItem) {
       return faQuoteLeft
     case 'memo':
       return faStickyNote
+    case 'document':
+      return faFileAlt
     case 'analysis':
       return TOOL_REGISTRY[item.toolType]?.icon ?? faNotebookTabs
   }
@@ -99,6 +103,17 @@ function parseDrop(e: React.DragEvent): ReportItem[] {
         ? { id: generateGuid(), kind: 'text', content: '' }
         : { id: generateGuid(), kind: 'section', title: '', level: 1 }
     ]
+  }
+  const docsRaw = e.dataTransfer.getData('application/x-magnolia-docs')
+  if (docsRaw) {
+    try {
+      const guids = JSON.parse(docsRaw) as string[]
+      if (Array.isArray(guids)) {
+        return guids
+          .filter((g) => typeof g === 'string' && g)
+          .map((g) => ({ id: generateGuid(), kind: 'document', refGuid: g }))
+      }
+    } catch { /* ignore */ }
   }
   const queryRaw = e.dataTransfer.getData('application/x-magnolia-query')
   if (queryRaw) {
@@ -132,6 +147,7 @@ function isAcceptedDrag(e: React.DragEvent): boolean {
   return (
     t.includes(BLOCK_MIME) ||
     t.includes(REORDER_MIME) ||
+    t.includes('application/x-magnolia-docs') ||
     t.includes('application/x-magnolia-query') ||
     t.includes('application/json')
   )
@@ -145,9 +161,12 @@ function isReorderDrag(e: React.DragEvent): boolean {
 
 /** Reordering an existing row is a 'move'; everything else is a 'copy'.
  *  The dropEffect MUST match the drag's effectAllowed or the browser
- *  rejects the drop (which is why reorder drops silently did nothing). */
+ *  rejects the drop (which is why reorder drops silently did nothing).
+ *  Documents dragged from the Document Browser set effectAllowed='move',
+ *  so they need a 'move' dropEffect too — a 'copy' would be rejected. */
 function dropEffectFor(e: React.DragEvent): 'move' | 'copy' {
-  return isReorderDrag(e) ? 'move' : 'copy'
+  if (isReorderDrag(e) || e.dataTransfer.types.includes('application/x-magnolia-docs')) return 'move'
+  return 'copy'
 }
 
 export function Reports({ savedConfig, inTab }: Props) {
@@ -182,8 +201,9 @@ export function Reports({ savedConfig, inTab }: Props) {
   const savedAnalyses = useProjectStore((s) => s.savedAnalyses)
   const quotes = useQuoteStore((s) => s.quotes)
   const memos = useMemoStore((s) => s.memos)
+  const sources = useDocumentStore((s) => s.sources)
   // Subscribe so labels recompute when the referenced entities change.
-  void savedQueries; void savedAnalyses; void quotes; void memos
+  void savedQueries; void savedAnalyses; void quotes; void memos; void sources
 
   const currentConfig = useMemo(() => ({ items }), [items])
   const initialBaseline = useMemo(() => ({ items: savedConfig?.items ?? [] }), [])
@@ -405,7 +425,7 @@ export function Reports({ savedConfig, inTab }: Props) {
       >
         {items.length === 0 ? (
           <div style={{ padding: 30, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)', border: '2px dashed var(--border-color)', borderRadius: 'var(--radius-md)' }}>
-            Drag saved queries, analyses, quotes, and memos onto the canvas to build your report
+            Drag documents, saved queries, analyses, quotes, and memos onto the canvas to build your report
           </div>
         ) : (
           <div>
@@ -515,8 +535,8 @@ function ReportRow({
         </span>
       </div>
 
-      {/* Quote / memo: a preview of the content. */}
-      {(item.kind === 'quote' || item.kind === 'memo') && (() => {
+      {/* Quote / memo / document: a preview of the content. */}
+      {(item.kind === 'quote' || item.kind === 'memo' || item.kind === 'document') && (() => {
         const snippet = resolveItemSnippet(item)
         if (!snippet) return null
         return (
