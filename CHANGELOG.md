@@ -2,6 +2,20 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.3]
+
+### Added
+- **Add survey questions, respondents, and answers to a report.** Alongside documents, saved queries, analyses, quotes, and memos, you can now drag individual survey items from the Documents panel onto a report. A question is shown the way it appears in the Survey Overview (its distribution as a donut, option list, or box plot); a respondent is shown as their answers to every question, with their own choice highlighted; and a single answer shows just that question and the respondent's response.
+
+### Changed
+- **Report body headings now carry the table-of-contents numbers.** The contents' hierarchical numbering (1, 1.1, 1.1.1) is now repeated on the matching heading in the document, so the two line up.
+- **Survey questions and answers in a report flow inline** with the items around them instead of each starting on a fresh page. A whole respondent still begins on its own page.
+
+### Fixed
+- **Reports now auto-save.** Changes to a saved report are written back automatically, like everywhere else in Magnolia, rather than only when you press Save.
+- **Free-text blocks no longer appear in a report's table of contents**, since they're body prose rather than navigable headings.
+- **Total columns line up in exported report tables.** The Total and % of Total cells in an analysis table are now vertically centred to match the rest of the row.
+
 ## [1.4.2]
 
 ### Added
