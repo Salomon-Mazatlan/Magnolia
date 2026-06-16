@@ -1440,17 +1440,20 @@ function questionAnsweredCount(q: SurveyQuestion, respondents: SurveyRespondent[
  *  is set, each row leads with a colour chip matching the donut's
  *  `segmentColor(index)` — mirroring the on-screen single-choice
  *  layout where the list is the donut's legend. */
-function pdfOptionListHtml(options: OptionTally[], withSwatches = false): string {
+function pdfOptionListHtml(options: OptionTally[], withSwatches = false, chosen?: Set<string>): string {
   if (options.length === 0) return '<div class="empty">(no responses)</div>'
   return (
     '<ul class="options">' +
     options
       .map((d, i) => {
         const label = d.displayOption ?? d.option
+        const isChosen = chosen?.has(clean(d.option)) ?? false
         const swatch = withSwatches
           ? `<span class="opt-swatch" style="background:${segmentColor(i)}"></span>`
           : ''
-        return `<li>${swatch}<span class="opt-label">${escHtml(label)}</span><span class="opt-pct">${formatPct(d.pct)}</span></li>`
+        // Mirror OptionListCell: the respondent's pick is bold with a tick.
+        const tick = isChosen ? '<span class="opt-chosen">✓</span>' : ''
+        return `<li${isChosen ? ' class="chosen"' : ''}>${swatch}<span class="opt-label">${escHtml(label)}${tick}</span><span class="opt-pct">${formatPct(d.pct)}</span></li>`
       })
       .join('') +
     '</ul>'
@@ -1514,7 +1517,11 @@ function pdfOpenEndedAnswersHtml(survey: SurveyData, q: SurveyQuestion): string 
  *  fixed grayscale colors (CSS variables aren't available in the
  *  hidden print window the main process uses to render). Same axis +
  *  named-endpoint label rendering as the on-screen version. */
-function pdfNumericBoxPlotHtml(stats: NumericStats | null, valueLabels?: Map<number, string>): string {
+function pdfNumericBoxPlotHtml(
+  stats: NumericStats | null,
+  valueLabels?: Map<number, string>,
+  highlightValue?: number
+): string {
   if (!stats) return '<div class="empty">(no numeric responses)</div>'
   const W = 280
   const PAD_LEFT = 28
@@ -1558,6 +1565,10 @@ function pdfNumericBoxPlotHtml(stats: NumericStats | null, valueLabels?: Map<num
     `<line x1="${x(stats.max)}" x2="${x(stats.max)}" y1="${midY - whiskerHalf}" y2="${midY + whiskerHalf}" stroke="#888" stroke-width="1"/>` +
     `<rect x="${x(stats.q1)}" y="${BOX_TOP}" width="${x(stats.q3) - x(stats.q1)}" height="${BOX_BOTTOM - BOX_TOP}" fill="#eee" stroke="#555" stroke-width="1"/>` +
     `<line x1="${x(stats.median)}" x2="${x(stats.median)}" y1="${BOX_TOP}" y2="${BOX_BOTTOM}" stroke="#555" stroke-width="2"/>` +
+    // The respondent's own value, mirroring NumericBoxPlot's marker.
+    (highlightValue != null
+      ? `<circle cx="${x(highlightValue)}" cy="${midY}" r="5" fill="#222" stroke="#fff" stroke-width="2"/>`
+      : '') +
     `<line x1="${x(axisMin)}" x2="${x(axisMax)}" y1="${AXIS_Y}" y2="${AXIS_Y}" stroke="#888" stroke-width="1"/>` +
     tickMarks +
     `</svg>` +
@@ -1647,6 +1658,73 @@ export function buildSurveyQuestionBody(survey: SurveyData, questionId: string):
 </table>`
 }
 
+/** One respondent's answer to one question, mirroring the on-screen
+ *  RespondentAnswerCell: open-ended shows the text; closed types show
+ *  the overall distribution with this respondent's pick highlighted
+ *  (bold + tick in the option list, a marker on the box plot). */
+function pdfRespondentAnswerHtml(survey: SurveyData, q: SurveyQuestion, respondent: SurveyRespondent): string {
+  const ans = respondent.answers[q.id]
+  if (q.type === 'open-ended') {
+    const text = clean(buildOpenEndedText(ans))
+    return text ? `<div class="sv-ans-text">${escHtml(text)}</div>` : '<div class="empty">(no answer)</div>'
+  }
+  if (q.type === 'single-choice') {
+    const dist = computeSingleChoiceDistribution(survey, q)
+    const chosen = new Set<string>()
+    if (typeof ans === 'string') { const c = clean(ans); if (c) chosen.add(c) }
+    return (
+      `<div class="dist-single">${pdfDonutHtml(dist)}` +
+      `<div class="dist-legend">${pdfOptionListHtml(dist, true, chosen)}</div></div>`
+    )
+  }
+  if (q.type === 'multi-select') {
+    const dist = computeMultiSelectDistribution(survey, q)
+    const chosen = new Set<string>()
+    if (Array.isArray(ans)) for (const v of ans) chosen.add(clean(v))
+    return pdfOptionListHtml(dist, false, chosen)
+  }
+  if (q.type === 'numeric') {
+    const v = typeof ans === 'string' ? extractRatingValue(ans) : null
+    return pdfNumericBoxPlotHtml(computeNumericStats(survey, q), computeValueLabels(survey, q), v ?? undefined)
+  }
+  return ''
+}
+
+/** One question + its answer block, the unit shared by the respondent
+ *  and single-cell embeds. `i` is the question's 0-based survey index,
+ *  driving the "#" prefix. */
+function pdfRespondentQuestionBlock(survey: SurveyData, q: SurveyQuestion, i: number, respondent: SurveyRespondent): string {
+  return (
+    `<div class="sv-q">` +
+    `<div class="sv-q-head"><span class="sv-q-num">${i + 1}</span> ${escHtml(clean(q.text))}</div>` +
+    `<div class="sv-q-ans">${pdfRespondentAnswerHtml(survey, q, respondent)}</div>` +
+    `</div>`
+  )
+}
+
+/** A single respondent rendered as their answers to every question, the
+ *  way the on-screen Respondent view presents them. Exported so the
+ *  Reports tool can embed a respondent dragged in from the Document
+ *  Browser. Placeholder when the respondent id is gone. Wrap in a
+ *  `.survey-summary` container (the scoped CSS the markup relies on). */
+export function buildSurveyRespondentBody(survey: SurveyData, respondentId: string): string {
+  const respondent = survey.respondents.find((r) => r.id === respondentId)
+  if (!respondent) return '<div class="empty">(respondent unavailable)</div>'
+  if (survey.questions.length === 0) return '<div class="empty">(no questions)</div>'
+  return survey.questions.map((q, i) => pdfRespondentQuestionBlock(survey, q, i, respondent)).join('')
+}
+
+/** A single respondent's answer to a single question (one survey cell),
+ *  rendered the same way that cell appears in the Respondent view.
+ *  Exported for the Reports tool. Placeholder when the respondent or
+ *  question id is gone. Wrap in a `.survey-summary` container. */
+export function buildSurveyCellBody(survey: SurveyData, respondentId: string, questionId: string): string {
+  const respondent = survey.respondents.find((r) => r.id === respondentId)
+  const i = survey.questions.findIndex((q) => q.id === questionId)
+  if (!respondent || i < 0) return '<div class="empty">(answer unavailable)</div>'
+  return pdfRespondentQuestionBlock(survey, survey.questions[i], i, respondent)
+}
+
 /** The survey summary body (Contents / Questions / Respondents tables)
  *  with no document chrome. Exported so the Reports tool can embed the
  *  exact same content the standalone "Export PDF" produces. The markup
@@ -1728,6 +1806,15 @@ export const SURVEY_SUMMARY_CSS = `
   .survey-summary ul.options li .opt-label { flex: 1; }
   .survey-summary ul.options li .opt-pct { color: #888; font-variant-numeric: tabular-nums; min-width: 32px; text-align: right; font-size: 10px; }
   .survey-summary ul.options li .opt-swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; display: inline-block; }
+  /* Respondent / single-cell embeds: the chosen option is bold with a tick. */
+  .survey-summary ul.options li.chosen { font-weight: 700; color: #111; }
+  .survey-summary ul.options li .opt-chosen { color: #007AFF; margin-left: 4px; }
+  /* A respondent's per-question answer blocks. */
+  .survey-summary .sv-q { margin: 0 0 14px; break-inside: avoid; page-break-inside: avoid; }
+  .survey-summary .sv-q-head { font-size: 11.5px; font-weight: 600; color: #222; margin: 0 0 4px; }
+  .survey-summary .sv-q-num { color: #888; font-weight: 600; margin-right: 4px; font-variant-numeric: tabular-nums; }
+  .survey-summary .sv-q-ans { padding-left: 4px; }
+  .survey-summary .sv-ans-text { font-size: 11px; color: #222; white-space: pre-wrap; }
   .survey-summary .dist-single { display: flex; align-items: flex-start; gap: 12px; }
   .survey-summary .dist-single .dist-legend { flex: 1; min-width: 0; }
   /* Contents "Show answers" link → jumps to the question's answers in

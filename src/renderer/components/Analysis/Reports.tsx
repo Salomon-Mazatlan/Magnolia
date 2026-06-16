@@ -24,7 +24,9 @@ import {
   faQuoteLeft,
   faStickyNote,
   faFileAlt,
-  SURVEY_QUESTION_ICON
+  faMessageSquare,
+  SURVEY_QUESTION_ICON,
+  SURVEY_RESPONDENT_ICON
 } from '../Icon'
 import { TOOL_REGISTRY } from '../../utils/tool-registry'
 import { MarkdownEditor } from '../MarkdownEditor'
@@ -90,6 +92,10 @@ function itemIcon(item: ReportItem) {
       return faFileAlt
     case 'survey-question':
       return SURVEY_QUESTION_ICON
+    case 'survey-respondent':
+      return SURVEY_RESPONDENT_ICON
+    case 'survey-cell':
+      return faMessageSquare
     case 'analysis':
       return TOOL_REGISTRY[item.toolType]?.icon ?? faNotebookTabs
   }
@@ -129,7 +135,7 @@ function parseDrop(e: React.DragEvent): ReportItem[] {
   const jsonRaw = e.dataTransfer.getData('application/json')
   if (jsonRaw) {
     try {
-      const p = JSON.parse(jsonRaw) as { kind?: string; entityGuid?: string; toolType?: AnalysisToolType; surveyGuid?: string }
+      const p = JSON.parse(jsonRaw) as { kind?: string; entityGuid?: string; toolType?: AnalysisToolType; surveyGuid?: string; questionId?: string }
       if (p.kind === 'analysis' && p.entityGuid && p.toolType) {
         return [{ id: generateGuid(), kind: 'analysis', refGuid: p.entityGuid, toolType: p.toolType, options: {} }]
       }
@@ -143,6 +149,15 @@ function parseDrop(e: React.DragEvent): ReportItem[] {
       // the question's stable id, surveyGuid its parent survey.
       if (p.kind === 'survey-question' && p.entityGuid && p.surveyGuid) {
         return [{ id: generateGuid(), kind: 'survey-question', surveyGuid: p.surveyGuid, questionId: p.entityGuid }]
+      }
+      // Survey respondent: entityGuid is the respondent's stable id.
+      if (p.kind === 'survey-respondent' && p.entityGuid && p.surveyGuid) {
+        return [{ id: generateGuid(), kind: 'survey-respondent', surveyGuid: p.surveyGuid, respondentId: p.entityGuid }]
+      }
+      // Survey cell (one respondent's answer to one question): entityGuid
+      // is the respondent id, questionId the question.
+      if (p.kind === 'survey-cell' && p.entityGuid && p.surveyGuid && p.questionId) {
+        return [{ id: generateGuid(), kind: 'survey-cell', surveyGuid: p.surveyGuid, respondentId: p.entityGuid, questionId: p.questionId }]
       }
     } catch { /* ignore */ }
   }

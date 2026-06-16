@@ -25,7 +25,13 @@ import { renderAnalysisItemHtml, REPORT_TABLE_CSS } from './report-analysis'
 import { renderQueryItemHtml, REPORT_QUERY_CSS } from './report-query'
 import { surveyCellCitation } from './report-survey-cite'
 import { renderPdfPagesToImages } from '../../utils/pdf-thumbnail'
-import { buildSurveySummaryBody, buildSurveyQuestionBody, SURVEY_SUMMARY_CSS } from '../SurveyViewer/SurveyViewer'
+import {
+  buildSurveySummaryBody,
+  buildSurveyQuestionBody,
+  buildSurveyRespondentBody,
+  buildSurveyCellBody,
+  SURVEY_SUMMARY_CSS
+} from '../SurveyViewer/SurveyViewer'
 import type { AnalysisToolType, Quote, SurveyFormatData } from '../../models/types'
 
 /** Per-tool display options chosen for an analysis item, mirroring the
@@ -53,6 +59,8 @@ export type ReportItem =
   | { id: string; kind: 'memo'; refGuid: string }
   | { id: string; kind: 'document'; refGuid: string }
   | { id: string; kind: 'survey-question'; surveyGuid: string; questionId: string }
+  | { id: string; kind: 'survey-respondent'; surveyGuid: string; respondentId: string }
+  | { id: string; kind: 'survey-cell'; surveyGuid: string; respondentId: string; questionId: string }
   | {
       id: string
       kind: 'analysis'
@@ -108,15 +116,34 @@ export function resolveItemLabel(item: ReportItem): string {
       const q = findSurveyQuestion(item.surveyGuid, item.questionId)
       return q?.text ?? '(deleted question)'
     }
+    case 'survey-respondent': {
+      const r = findSurveyRespondent(item.surveyGuid, item.respondentId)
+      return r?.displayName ?? '(deleted respondent)'
+    }
+    case 'survey-cell': {
+      const r = findSurveyRespondent(item.surveyGuid, item.respondentId)
+      const q = findSurveyQuestion(item.surveyGuid, item.questionId)
+      if (!r || !q) return '(deleted answer)'
+      return `${r.displayName} — ${q.text}`
+    }
   }
 }
 
-/** Resolve a survey question from the live document store by its survey
- *  guid + stable question id. Null when the survey or question is gone. */
-function findSurveyQuestion(surveyGuid: string, questionId: string) {
+/** Resolve a survey's parsed data from the live document store, or null. */
+function findSurvey(surveyGuid: string) {
   const src = useDocumentStore.getState().sources.find((s) => s.guid === surveyGuid)
-  const survey = (src?.formatData as SurveyFormatData | undefined)?.survey
-  return survey?.questions.find((q) => q.id === questionId) ?? null
+  return (src?.formatData as SurveyFormatData | undefined)?.survey ?? null
+}
+
+/** Resolve a survey question by its survey guid + stable question id.
+ *  Null when the survey or question is gone. */
+function findSurveyQuestion(surveyGuid: string, questionId: string) {
+  return findSurvey(surveyGuid)?.questions.find((q) => q.id === questionId) ?? null
+}
+
+/** Resolve a survey respondent by its survey guid + stable id. */
+function findSurveyRespondent(surveyGuid: string, respondentId: string) {
+  return findSurvey(surveyGuid)?.respondents.find((r) => r.id === respondentId) ?? null
 }
 
 /** Content preview for a quote / memo, shown on the on-screen card.
@@ -155,6 +182,10 @@ export function reportItemTypeLabel(item: ReportItem): string {
       return 'Document'
     case 'survey-question':
       return 'Survey Question'
+    case 'survey-respondent':
+      return 'Respondent'
+    case 'survey-cell':
+      return 'Answer'
     case 'analysis':
       return TOOL_REGISTRY[item.toolType]?.label ?? 'Analysis'
   }
@@ -211,6 +242,10 @@ const EXPORT_CSS = `
      which avoid breaking — a document's content (full text, a long
      transcript, a multi-page PDF) is allowed to flow across pages. */
   .report-document { break-inside: auto; page-break-inside: auto; page-break-before: always; }
+  /* Survey questions / single cells embedded in a report flow inline with
+     the surrounding items (no forced page break), but may still break
+     across pages so a long open-ended question isn't trapped on one. */
+  .report-survey-inline { break-inside: auto; page-break-inside: auto; }
   .report-document .doc-content { font-size: 11px; color: #222; white-space: pre-wrap; }
   .report-survey-sub { font-size: 10px; color: #888; margin: 0 0 8px; }
   /* Embedded media (image source / video first frame). Width/height caps
@@ -388,6 +423,10 @@ function renderItem(item: ReportItem, assets: Map<string, DocAsset>, num: string
       return renderDocument(item.refGuid, anchor, assets, prefix)
     case 'survey-question':
       return renderSurveyQuestion(item.surveyGuid, item.questionId, anchor, prefix)
+    case 'survey-respondent':
+      return renderSurveyRespondent(item.surveyGuid, item.respondentId, anchor, prefix)
+    case 'survey-cell':
+      return renderSurveyCell(item.surveyGuid, item.respondentId, item.questionId, anchor, prefix)
     case 'analysis':
       return renderAnalysisItemHtml(item, anchor, prefix)
   }
@@ -401,13 +440,51 @@ function renderSurveyQuestion(surveyGuid: string, questionId: string, anchor: st
   const src = useDocumentStore.getState().sources.find((s) => s.guid === surveyGuid)
   const survey = (src?.formatData as SurveyFormatData | undefined)?.survey
   if (!survey) {
-    return `<div class="report-block report-document" id="${anchor}"><div class="report-item-head">${prefix}Survey Question</div><div class="empty">(survey unavailable)</div></div>`
+    return `<div class="report-block report-survey-inline" id="${anchor}"><div class="report-item-head">${prefix}Survey Question</div><div class="empty">(survey unavailable)</div></div>`
   }
   const head = `<div class="report-item-head">${prefix}Survey Question — ${escHtml(src?.name ?? '')}</div>`
   return (
-    `<div class="report-block report-document" id="${anchor}">` +
+    `<div class="report-block report-survey-inline" id="${anchor}">` +
     head +
     `<div class="survey-summary">${buildSurveyQuestionBody(survey, questionId)}</div>` +
+    `</div>`
+  )
+}
+
+/** A single respondent, presented as their answers to every question —
+ *  the way the on-screen Respondent view shows them. */
+function renderSurveyRespondent(surveyGuid: string, respondentId: string, anchor: string, prefix = ''): string {
+  const src = useDocumentStore.getState().sources.find((s) => s.guid === surveyGuid)
+  const survey = (src?.formatData as SurveyFormatData | undefined)?.survey
+  const respondent = survey?.respondents.find((r) => r.id === respondentId)
+  if (!survey || !respondent) {
+    return `<div class="report-block report-document" id="${anchor}"><div class="report-item-head">${prefix}Respondent</div><div class="empty">(respondent unavailable)</div></div>`
+  }
+  const head = `<div class="report-item-head">${prefix}Respondent — ${escHtml(respondent.displayName)}</div>`
+  return (
+    `<div class="report-block report-document" id="${anchor}">` +
+    head +
+    `<div class="report-survey-sub">${escHtml(src?.name ?? '')}</div>` +
+    `<div class="survey-summary">${buildSurveyRespondentBody(survey, respondentId)}</div>` +
+    `</div>`
+  )
+}
+
+/** A single survey cell — one respondent's answer to one question,
+ *  rendered the same way that cell appears in the Respondent view. */
+function renderSurveyCell(surveyGuid: string, respondentId: string, questionId: string, anchor: string, prefix = ''): string {
+  const src = useDocumentStore.getState().sources.find((s) => s.guid === surveyGuid)
+  const survey = (src?.formatData as SurveyFormatData | undefined)?.survey
+  const respondent = survey?.respondents.find((r) => r.id === respondentId)
+  if (!survey || !respondent) {
+    return `<div class="report-block report-survey-inline" id="${anchor}"><div class="report-item-head">${prefix}Answer</div><div class="empty">(answer unavailable)</div></div>`
+  }
+  const head = `<div class="report-item-head">${prefix}Answer — ${escHtml(respondent.displayName)}</div>`
+  return (
+    `<div class="report-block report-survey-inline" id="${anchor}">` +
+    head +
+    `<div class="report-survey-sub">${escHtml(src?.name ?? '')}</div>` +
+    `<div class="survey-summary">${buildSurveyCellBody(survey, respondentId, questionId)}</div>` +
     `</div>`
   )
 }
