@@ -1565,69 +1565,97 @@ function pdfNumericBoxPlotHtml(stats: NumericStats | null, valueLabels?: Map<num
   )
 }
 
+/** Inline distribution cell for a closed-question type (donut / option
+ *  list / box plot). Shared by the Contents overview, the detailed
+ *  Questions section, and the Reports tool's single-question embed so
+ *  every surface renders distributions identically. Open-ended
+ *  questions are handled separately. */
+function closedQuestionDistHtml(survey: SurveyData, q: SurveyQuestion): string {
+  if (q.type === 'numeric') {
+    return pdfNumericBoxPlotHtml(computeNumericStats(survey, q), computeValueLabels(survey, q))
+  }
+  if (q.type === 'single-choice') {
+    // Donut on the left, the option list (with matching colour swatches)
+    // as its legend on the right — mirrors SummaryView.
+    const optDist = computeSingleChoiceDistribution(survey, q)
+    return (
+      `<div class="dist-single">${pdfDonutHtml(optDist)}` +
+      `<div class="dist-legend">${pdfOptionListHtml(optDist, true)}</div></div>`
+    )
+  }
+  if (q.type === 'multi-select') {
+    return pdfOptionListHtml(computeMultiSelectDistribution(survey, q))
+  }
+  return ''
+}
+
+/** Renders one question's table row(s) for a survey-summary table. Both
+ *  the Contents overview and the detailed Questions section share the
+ *  #/Question/Answered cells and the closed-question distributions; they
+ *  differ only for open-ended questions:
+ *    - 'contents' shows a "Show answers" hyperlink jumping to the
+ *      detailed section (anchor #oe-ans-<i>), mirroring the on-screen
+ *      Survey Overview where the answers aren't inlined.
+ *    - 'detail' inlines the answers in a full-width row spanning
+ *      Question→Distribution (the hyperlink's destination), anchored
+ *      on the question's header row.
+ *  `i` is the question's 0-based index in survey.questions, driving the
+ *  "#" cell and the open-ended anchor. */
+function renderSurveyQuestionRow(
+  survey: SurveyData,
+  q: SurveyQuestion,
+  i: number,
+  mode: 'contents' | 'detail'
+): string {
+  const totalRespondents = survey.respondents.length
+  const answered = questionAnsweredCount(q, survey.respondents)
+  const pct = totalRespondents === 0 ? 0 : Math.round((answered / totalRespondents) * 100)
+  const headCells =
+    `<td class="num">${i + 1}</td>` +
+    `<td>${escHtml(clean(q.text))}</td>` +
+    `<td class="num">${answered} / ${totalRespondents} (${pct}%)</td>`
+
+  if (q.type === 'open-ended') {
+    if (mode === 'contents') {
+      return `<tr>${headCells}<td><a class="show-answers" href="#oe-ans-${i}">Show answers →</a></td></tr>`
+    }
+    return (
+      `<tr class="oe-head" id="oe-ans-${i}">${headCells}<td></td></tr>` +
+      `<tr class="oe-answers"><td></td><td colspan="3">${pdfOpenEndedAnswersHtml(survey, q)}</td></tr>`
+    )
+  }
+  return `<tr>${headCells}<td>${closedQuestionDistHtml(survey, q)}</td></tr>`
+}
+
+/** A single question rendered exactly as it appears in the Survey
+ *  Overview's Questions section (#/Question/Answered/Distribution, with
+ *  open-ended answers inlined). Exported so the Reports tool can embed an
+ *  individual question dragged in from the Document Browser. Returns a
+ *  placeholder when the question id is no longer present in the survey.
+ *  The markup relies on SURVEY_SUMMARY_CSS plus buildPdfDocument's base
+ *  CSS, and must be wrapped in a `.survey-summary` container by the
+ *  caller (as buildSurveySummaryBody's consumers do). */
+export function buildSurveyQuestionBody(survey: SurveyData, questionId: string): string {
+  const i = survey.questions.findIndex((q) => q.id === questionId)
+  if (i < 0) return '<div class="empty">(question unavailable)</div>'
+  return `<table>
+  <colgroup>
+    <col class="c-num"><col><col class="c-answered"><col class="c-distribution">
+  </colgroup>
+  <thead><tr><th>#</th><th>Question</th><th>Answered</th><th>Distribution</th></tr></thead>
+  <tbody>${renderSurveyQuestionRow(survey, survey.questions[i], i, 'detail')}</tbody>
+</table>`
+}
+
 /** The survey summary body (Contents / Questions / Respondents tables)
  *  with no document chrome. Exported so the Reports tool can embed the
  *  exact same content the standalone "Export PDF" produces. The markup
  *  relies on SURVEY_SUMMARY_CSS plus buildPdfDocument's shared base CSS. */
 export function buildSurveySummaryBody(survey: SurveyData): string {
-  const totalRespondents = survey.respondents.length
   const totalQuestions = survey.questions.length
 
-  // Inline distribution cell for a closed-question type (donut /
-  // option list / box plot). Shared by the Contents overview and the
-  // detailed Questions section so both render distributions
-  // identically. Open-ended questions are handled separately.
-  const closedDistHtml = (q: SurveyQuestion): string => {
-    if (q.type === 'numeric') {
-      return pdfNumericBoxPlotHtml(computeNumericStats(survey, q), computeValueLabels(survey, q))
-    }
-    if (q.type === 'single-choice') {
-      // Donut on the left, the option list (with matching colour
-      // swatches) as its legend on the right — mirrors SummaryView.
-      const optDist = computeSingleChoiceDistribution(survey, q)
-      return (
-        `<div class="dist-single">${pdfDonutHtml(optDist)}` +
-        `<div class="dist-legend">${pdfOptionListHtml(optDist, true)}</div></div>`
-      )
-    }
-    if (q.type === 'multi-select') {
-      return pdfOptionListHtml(computeMultiSelectDistribution(survey, q))
-    }
-    return ''
-  }
-
-  // Renders one question's table row(s). Both the Contents overview
-  // and the detailed Questions section share the #/Question/Answered
-  // cells and the closed-question distributions; they differ only for
-  // open-ended questions:
-  //   - 'contents' shows a "Show answers" hyperlink jumping to the
-  //     detailed section (anchor #oe-ans-<i>), mirroring the on-screen
-  //     Survey Overview where the answers aren't inlined.
-  //   - 'detail' inlines the answers in a full-width row spanning
-  //     Question→Distribution (the hyperlink's destination), anchored
-  //     on the question's header row.
-  const renderQuestionRow = (q: SurveyQuestion, i: number, mode: 'contents' | 'detail'): string => {
-    const answered = questionAnsweredCount(q, survey.respondents)
-    const pct = totalRespondents === 0 ? 0 : Math.round((answered / totalRespondents) * 100)
-    const headCells =
-      `<td class="num">${i + 1}</td>` +
-      `<td>${escHtml(clean(q.text))}</td>` +
-      `<td class="num">${answered} / ${totalRespondents} (${pct}%)</td>`
-
-    if (q.type === 'open-ended') {
-      if (mode === 'contents') {
-        return `<tr>${headCells}<td><a class="show-answers" href="#oe-ans-${i}">Show answers →</a></td></tr>`
-      }
-      return (
-        `<tr class="oe-head" id="oe-ans-${i}">${headCells}<td></td></tr>` +
-        `<tr class="oe-answers"><td></td><td colspan="3">${pdfOpenEndedAnswersHtml(survey, q)}</td></tr>`
-      )
-    }
-    return `<tr>${headCells}<td>${closedDistHtml(q)}</td></tr>`
-  }
-
-  const contentsRows = survey.questions.map((q, i) => renderQuestionRow(q, i, 'contents')).join('')
-  const questionsRows = survey.questions.map((q, i) => renderQuestionRow(q, i, 'detail')).join('')
+  const contentsRows = survey.questions.map((q, i) => renderSurveyQuestionRow(survey, q, i, 'contents')).join('')
+  const questionsRows = survey.questions.map((q, i) => renderSurveyQuestionRow(survey, q, i, 'detail')).join('')
 
   const respondentsRows = survey.respondents
     .map((r, i) => {

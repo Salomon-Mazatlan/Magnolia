@@ -636,14 +636,15 @@ function relationshipMapHtml(config: any): string {
 
 export function renderAnalysisItemHtml(
   item: Extract<ReportItem, { kind: 'analysis' }>,
-  anchor: string
+  anchor: string,
+  prefix = ''
 ): string {
   const sa = useProjectStore.getState().savedAnalyses?.find((a) => a.guid === item.refGuid)
   const toolLabel = TOOL_REGISTRY[item.toolType]?.label ?? 'Analysis'
   if (!sa) {
-    return `<div class="report-block" id="${anchor}"><div class="report-item-head">${escHtml(toolLabel)}</div><div class="empty">(deleted analysis)</div></div>`
+    return `<div class="report-block" id="${anchor}"><div class="report-item-head">${prefix}${escHtml(toolLabel)}</div><div class="empty">(deleted analysis)</div></div>`
   }
-  const head = `<div class="report-item-head">${escHtml(toolLabel)} — ${escHtml(sa.name)}</div>`
+  const head = `<div class="report-item-head">${prefix}${escHtml(toolLabel)} — ${escHtml(sa.name)}</div>`
   let inner: string
   try {
     switch (sa.toolType) {

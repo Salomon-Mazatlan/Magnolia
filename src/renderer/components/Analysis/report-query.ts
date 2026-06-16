@@ -27,10 +27,10 @@ export const REPORT_QUERY_CSS = `
 
 /** Render a saved-query item: re-run it and render the matches, or a
  *  short placeholder if the query was deleted / is empty. */
-export function renderQueryItemHtml(refGuid: string, anchor: string): string {
+export function renderQueryItemHtml(refGuid: string, anchor: string, prefix = ''): string {
   const sq = useQueryStore.getState().savedQueries.find((q) => q.guid === refGuid)
   if (!sq?.query) {
-    return `<div class="report-block" id="${anchor}"><div class="report-item-head">Query</div><div class="empty">(deleted query)</div></div>`
+    return `<div class="report-block" id="${anchor}"><div class="report-item-head">${prefix}Query</div><div class="empty">(deleted query)</div></div>`
   }
 
   const base = buildAnalysisInitData('reports')
@@ -53,13 +53,13 @@ export function renderQueryItemHtml(refGuid: string, anchor: string): string {
   try {
     results = executeQuery(sq.query, execSources as any, base.sourceContents, execCodes as any, execTags as any, base.sourceFolder, execFolders)
   } catch {
-    return `<div class="report-block" id="${anchor}"><div class="report-item-head">Query — ${escHtml(sq.name)}</div><div class="empty">Could not run this query.</div></div>`
+    return `<div class="report-block" id="${anchor}"><div class="report-item-head">${prefix}Query — ${escHtml(sq.name)}</div><div class="empty">Could not run this query.</div></div>`
   }
 
   const groups = groupByDocument(results)
   const meta = `${results.length} match${results.length === 1 ? '' : 'es'} in ${groups.length} document${groups.length === 1 ? '' : 's'}`
 
-  let body = `<div class="report-block report-query" id="${anchor}"><div class="report-item-head">Query — ${escHtml(sq.name)}</div>`
+  let body = `<div class="report-block report-query" id="${anchor}"><div class="report-item-head">${prefix}Query — ${escHtml(sq.name)}</div>`
   body += `<div class="report-query-meta">${meta}</div>`
   if (results.length === 0) {
     body += '<div class="empty">(no matches)</div>'

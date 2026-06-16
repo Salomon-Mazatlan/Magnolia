@@ -23,7 +23,8 @@ import {
   faMagnifyingGlass,
   faQuoteLeft,
   faStickyNote,
-  faFileAlt
+  faFileAlt,
+  SURVEY_QUESTION_ICON
 } from '../Icon'
 import { TOOL_REGISTRY } from '../../utils/tool-registry'
 import { MarkdownEditor } from '../MarkdownEditor'
@@ -87,6 +88,8 @@ function itemIcon(item: ReportItem) {
       return faStickyNote
     case 'document':
       return faFileAlt
+    case 'survey-question':
+      return SURVEY_QUESTION_ICON
     case 'analysis':
       return TOOL_REGISTRY[item.toolType]?.icon ?? faNotebookTabs
   }
@@ -126,7 +129,7 @@ function parseDrop(e: React.DragEvent): ReportItem[] {
   const jsonRaw = e.dataTransfer.getData('application/json')
   if (jsonRaw) {
     try {
-      const p = JSON.parse(jsonRaw) as { kind?: string; entityGuid?: string; toolType?: AnalysisToolType }
+      const p = JSON.parse(jsonRaw) as { kind?: string; entityGuid?: string; toolType?: AnalysisToolType; surveyGuid?: string }
       if (p.kind === 'analysis' && p.entityGuid && p.toolType) {
         return [{ id: generateGuid(), kind: 'analysis', refGuid: p.entityGuid, toolType: p.toolType, options: {} }]
       }
@@ -135,6 +138,11 @@ function parseDrop(e: React.DragEvent): ReportItem[] {
       }
       if (p.kind === 'memo' && p.entityGuid) {
         return [{ id: generateGuid(), kind: 'memo', refGuid: p.entityGuid }]
+      }
+      // Survey question dragged from the Document Browser: entityGuid is
+      // the question's stable id, surveyGuid its parent survey.
+      if (p.kind === 'survey-question' && p.entityGuid && p.surveyGuid) {
+        return [{ id: generateGuid(), kind: 'survey-question', surveyGuid: p.surveyGuid, questionId: p.entityGuid }]
       }
     } catch { /* ignore */ }
   }

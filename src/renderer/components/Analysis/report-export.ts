@@ -25,7 +25,7 @@ import { renderAnalysisItemHtml, REPORT_TABLE_CSS } from './report-analysis'
 import { renderQueryItemHtml, REPORT_QUERY_CSS } from './report-query'
 import { surveyCellCitation } from './report-survey-cite'
 import { renderPdfPagesToImages } from '../../utils/pdf-thumbnail'
-import { buildSurveySummaryBody, SURVEY_SUMMARY_CSS } from '../SurveyViewer/SurveyViewer'
+import { buildSurveySummaryBody, buildSurveyQuestionBody, SURVEY_SUMMARY_CSS } from '../SurveyViewer/SurveyViewer'
 import type { AnalysisToolType, Quote, SurveyFormatData } from '../../models/types'
 
 /** Per-tool display options chosen for an analysis item, mirroring the
@@ -52,6 +52,7 @@ export type ReportItem =
   | { id: string; kind: 'quote'; refGuid: string }
   | { id: string; kind: 'memo'; refGuid: string }
   | { id: string; kind: 'document'; refGuid: string }
+  | { id: string; kind: 'survey-question'; surveyGuid: string; questionId: string }
   | {
       id: string
       kind: 'analysis'
@@ -103,7 +104,19 @@ export function resolveItemLabel(item: ReportItem): string {
       const src = useDocumentStore.getState().sources.find((s) => s.guid === item.refGuid)
       return src?.name ?? '(deleted document)'
     }
+    case 'survey-question': {
+      const q = findSurveyQuestion(item.surveyGuid, item.questionId)
+      return q?.text ?? '(deleted question)'
+    }
   }
+}
+
+/** Resolve a survey question from the live document store by its survey
+ *  guid + stable question id. Null when the survey or question is gone. */
+function findSurveyQuestion(surveyGuid: string, questionId: string) {
+  const src = useDocumentStore.getState().sources.find((s) => s.guid === surveyGuid)
+  const survey = (src?.formatData as SurveyFormatData | undefined)?.survey
+  return survey?.questions.find((q) => q.id === questionId) ?? null
 }
 
 /** Content preview for a quote / memo, shown on the on-screen card.
@@ -140,6 +153,8 @@ export function reportItemTypeLabel(item: ReportItem): string {
       return 'Memo'
     case 'document':
       return 'Document'
+    case 'survey-question':
+      return 'Survey Question'
     case 'analysis':
       return TOOL_REGISTRY[item.toolType]?.label ?? 'Analysis'
   }
@@ -184,6 +199,8 @@ const EXPORT_CSS = `
      level nested under Section (h1) and Subsection (h2): dark, semibold,
      sentence case — not the old grey all-caps. */
   .report-item-head { font-size: 12px; font-weight: 600; color: #333; margin: 0 0 7px 0; }
+  /* The Contents number echoed on each body heading so the two agree. */
+  .report-item-num { color: #888; font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 3px; }
   .report-text { font-size: 11px; color: #222; }
   .report-text p { margin: 0 0 6px 0; }
   .report-text u { text-decoration: underline; }
@@ -285,41 +302,65 @@ function buildExportScript(pageH: number, pageW: number): string {
 </script>`
 }
 
+/** Hierarchical number (1, 1.1, 1.1.1) and indent depth for every item
+ *  that earns a Contents entry, keyed by item id. Sections set the
+ *  current depth; content items sit one level under the heading in
+ *  effect. Free-text blocks are body prose — skipped here so they
+ *  neither appear in the Contents nor consume a number. Shared by the
+ *  TOC and the body headings so the two never drift. */
+function computeItemNumbers(items: ReportItem[]): Map<string, { num: string; depth: number }> {
+  const out = new Map<string, { num: string; depth: number }>()
+  let headingDepth = -1
+  const counters = [0, 0, 0]
+  for (const it of items) {
+    if (it.kind === 'text') continue
+    let depth: number
+    if (it.kind === 'section') {
+      depth = it.level === 2 ? 1 : 0
+      headingDepth = depth
+    } else {
+      depth = Math.max(0, headingDepth + 1)
+    }
+    depth = Math.min(depth, 2)
+    counters[depth]++
+    for (let k = depth + 1; k < counters.length; k++) counters[k] = 0
+    out.set(it.id, { num: counters.slice(0, depth + 1).join('.'), depth })
+  }
+  return out
+}
+
+/** Leading number badge for an item's heading, matching its Contents
+ *  entry. Empty for items with no number (free text). */
+function numBadge(num: string): string {
+  return num ? `<span class="report-item-num">${num}</span> ` : ''
+}
+
 /** Build the report body (TOC + items). Each item gets an anchor the TOC
  *  links to. `assets` carries the pre-resolved media (images, video frames,
  *  rasterised PDF pages) keyed by source guid. */
 function buildReportBody(items: ReportItem[], assets: Map<string, DocAsset>): string {
-  // Indent each TOC entry by its level: a Section sits at the left, a
-  // Subsection one step in, and content items under whichever heading
-  // currently applies (one step deeper than that heading). Hierarchical
-  // numbering (1, 1.1, 1.1.1) tracks the same depth.
-  let headingDepth = -1
-  const counters = [0, 0, 0]
+  // Shared hierarchical numbers so the Contents entries and the body
+  // headings always agree. Indent each TOC entry by its level: a Section
+  // sits at the left, a Subsection one step in, and content items under
+  // whichever heading currently applies (one step deeper than that
+  // heading). Numbering (1, 1.1, 1.1.1) tracks the same depth.
+  const numbers = computeItemNumbers(items)
   const toc = items
     // Free-text blocks are body prose, not navigable headings — keep them out
     // of the Contents (and out of the hierarchical numbering).
     .filter((it) => it.kind !== 'text')
     .map((it) => {
       const id = reportAnchorId(it)
-      let depth: number
-      if (it.kind === 'section') {
-        depth = it.level === 2 ? 1 : 0
-        headingDepth = depth
-      } else {
-        depth = Math.max(0, headingDepth + 1)
-      }
-      depth = Math.min(depth, 2)
-      counters[depth]++
-      for (let k = depth + 1; k < counters.length; k++) counters[k] = 0
-      const num = counters.slice(0, depth + 1).join('.')
-      return `<a class="toc-entry toc-l${depth}" href="#${id}"><span class="toc-num">${num}</span><span class="toc-label">${escHtml(resolveItemLabel(it))}</span><span class="toc-dots"></span><span class="toc-page" data-toc="${id}"></span></a>`
+      const info = numbers.get(it.id)
+      const depth = info?.depth ?? 0
+      return `<a class="toc-entry toc-l${depth}" href="#${id}"><span class="toc-num">${info?.num ?? ''}</span><span class="toc-label">${escHtml(resolveItemLabel(it))}</span><span class="toc-dots"></span><span class="toc-page" data-toc="${id}"></span></a>`
     })
     .join('')
   const tocHtml = items.length
     ? `<div class="report-toc"><div class="section-heading">Contents</div><div class="toc-list">${toc}</div></div>`
     : ''
 
-  const body = items.map((it) => renderItem(it, assets)).join('')
+  const body = items.map((it) => renderItem(it, assets, numbers.get(it.id)?.num ?? '')).join('')
   const { h, w } = pageMetrics()
   // Cap embedded media to the page box so an image / PDF page / video frame
   // scales down to fit (a little headroom leaves room for the document
@@ -329,44 +370,66 @@ function buildReportBody(items: ReportItem[], assets: Map<string, DocAsset>): st
   return mediaCss + tocHtml + body + buildExportScript(h, w)
 }
 
-function renderItem(item: ReportItem, assets: Map<string, DocAsset>): string {
+function renderItem(item: ReportItem, assets: Map<string, DocAsset>, num: string): string {
   const anchor = reportAnchorId(item)
+  const prefix = numBadge(num)
   switch (item.kind) {
     case 'section':
-      return `<h2 class="report-section report-h${item.level ?? 1}" id="${anchor}">${escHtml(item.title || 'Section')}</h2>`
+      return `<h2 class="report-section report-h${item.level ?? 1}" id="${anchor}">${prefix}${escHtml(item.title || 'Section')}</h2>`
     case 'text':
       return `<div class="report-block report-text" id="${anchor}">${markdownToHtml(item.content)}</div>`
     case 'query':
-      return renderQueryItemHtml(item.refGuid, anchor)
+      return renderQueryItemHtml(item.refGuid, anchor, prefix)
     case 'quote':
-      return renderQuote(item.refGuid, anchor)
+      return renderQuote(item.refGuid, anchor, prefix)
     case 'memo':
-      return renderMemo(item.refGuid, anchor)
+      return renderMemo(item.refGuid, anchor, prefix)
     case 'document':
-      return renderDocument(item.refGuid, anchor, assets)
+      return renderDocument(item.refGuid, anchor, assets, prefix)
+    case 'survey-question':
+      return renderSurveyQuestion(item.surveyGuid, item.questionId, anchor, prefix)
     case 'analysis':
-      return renderAnalysisItemHtml(item, anchor)
+      return renderAnalysisItemHtml(item, anchor, prefix)
   }
 }
 
-function renderQuote(guid: string, anchor: string): string {
+/** A single survey question, presented exactly as in the Survey
+ *  Overview page (the Questions-section row, open-ended answers
+ *  inlined). Wrapped in `.survey-summary` so the scoped survey CSS
+ *  applies, matching how survey documents embed their summary. */
+function renderSurveyQuestion(surveyGuid: string, questionId: string, anchor: string, prefix = ''): string {
+  const src = useDocumentStore.getState().sources.find((s) => s.guid === surveyGuid)
+  const survey = (src?.formatData as SurveyFormatData | undefined)?.survey
+  if (!survey) {
+    return `<div class="report-block report-document" id="${anchor}"><div class="report-item-head">${prefix}Survey Question</div><div class="empty">(survey unavailable)</div></div>`
+  }
+  const head = `<div class="report-item-head">${prefix}Survey Question — ${escHtml(src?.name ?? '')}</div>`
+  return (
+    `<div class="report-block report-document" id="${anchor}">` +
+    head +
+    `<div class="survey-summary">${buildSurveyQuestionBody(survey, questionId)}</div>` +
+    `</div>`
+  )
+}
+
+function renderQuote(guid: string, anchor: string, prefix = ''): string {
   const q = useQuoteStore.getState().quotes.find((s) => s.guid === guid)
   if (!q) return `<div class="report-block" id="${anchor}"><div class="empty">(deleted quote)</div></div>`
   const text = freshQuoteText(q)
   return (
     `<div class="report-block report-quote-block" id="${anchor}">` +
     `<blockquote class="report-quote">${escHtml(text)}` +
-    `<span class="src">— ${escHtml(q.sourceName)}${surveyCitation(q)}</span>` +
+    `<span class="src">${prefix}— ${escHtml(q.sourceName)}${surveyCitation(q)}</span>` +
     `</blockquote></div>`
   )
 }
 
-function renderMemo(guid: string, anchor: string): string {
+function renderMemo(guid: string, anchor: string, prefix = ''): string {
   const m = useMemoStore.getState().findMemo(guid)
   if (!m) return `<div class="report-block" id="${anchor}"><div class="empty">(deleted memo)</div></div>`
   return (
     `<div class="report-block report-memo" id="${anchor}">` +
-    `<div class="report-item-head">Memo</div>` +
+    `<div class="report-item-head">${prefix}Memo</div>` +
     `<div class="memo-content">${markdownToHtml(m.content || '')}</div>` +
     `</div>`
   )
@@ -377,12 +440,12 @@ function wrapDocument(anchor: string, inner: string): string {
   return `<div class="report-block report-document" id="${anchor}">${inner}</div>`
 }
 
-function renderDocument(guid: string, anchor: string, assets: Map<string, DocAsset>): string {
+function renderDocument(guid: string, anchor: string, assets: Map<string, DocAsset>, prefix = ''): string {
   const src = useDocumentStore.getState().sources.find((s) => s.guid === guid)
   if (!src) {
-    return wrapDocument(anchor, `<div class="report-item-head">Document</div><div class="empty">(deleted document)</div>`)
+    return wrapDocument(anchor, `<div class="report-item-head">${prefix}Document</div><div class="empty">(deleted document)</div>`)
   }
-  const head = `<div class="report-item-head">Document — ${escHtml(src.name)}</div>`
+  const head = `<div class="report-item-head">${prefix}Document — ${escHtml(src.name)}</div>`
   const asset = assets.get(guid)
 
   // Survey: embed the exact content the survey overview's "Export PDF"
@@ -395,7 +458,7 @@ function renderDocument(guid: string, anchor: string, assets: Map<string, DocAss
     const sub = `${r} respondent${r === 1 ? '' : 's'} · ${q} question${q === 1 ? '' : 's'}`
     return wrapDocument(
       anchor,
-      `<div class="report-item-head">Survey — ${escHtml(src.name)}</div>` +
+      `<div class="report-item-head">${prefix}Survey — ${escHtml(src.name)}</div>` +
         `<div class="report-survey-sub">${sub}</div>` +
         `<div class="survey-summary">${buildSurveySummaryBody(survey)}</div>`
     )
