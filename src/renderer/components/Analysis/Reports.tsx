@@ -285,10 +285,11 @@ export function Reports({ savedConfig, inTab }: Props) {
     )
   }, [])
 
-  const handleSave = useCallback((name: string) => {
-    setAnalysisName(name)
-    nameRef.current = name
-    savedRef.current = true
+  // Persist the report to the project's saved-analyses list (an upsert by
+  // guid). Shared by the explicit Save button and the debounced auto-save
+  // below; setBaseline resets the dirty flag (and clears the tab's
+  // unsaved-changes marker via the dirty-state hook's onDirtyChange).
+  const persistSaved = useCallback((name: string) => {
     window.api.sendAnalysisAction('save-analysis', {
       guid: analysisGuid,
       toolType: 'reports',
@@ -296,9 +297,16 @@ export function Reports({ savedConfig, inTab }: Props) {
       config: { items }
     })
     setBaseline({ items })
+  }, [analysisGuid, items, setBaseline])
+
+  const handleSave = useCallback((name: string) => {
+    setAnalysisName(name)
+    nameRef.current = name
+    savedRef.current = true
+    persistSaved(name)
     if (inTab) inTab.onSaved(analysisGuid, name)
     else setTimeout(() => window.close(), 200)
-  }, [analysisGuid, items, inTab, setBaseline])
+  }, [analysisGuid, inTab, persistSaved])
 
   // Commit an inline title edit: always track the new name; persist the
   // rename only once the report has been saved (before that the name is
@@ -374,6 +382,20 @@ export function Reports({ savedConfig, inTab }: Props) {
     if (!tabId) return
     useAnalysisTabsStore.getState().setConfig(tabId, { title: analysisName, items })
   }, [analysisName, items, inTab?.tabId])
+
+  // Auto-save: once a report exists in the saved-analyses list, persist
+  // edits back to it on a short debounce so changes stick without an
+  // explicit Save — matching the rest of the app. A saved report reopens
+  // from that list (not the per-tab config), so this is what keeps an
+  // edited report from reverting on reopen. A brand-new report still
+  // needs its first manual Save (which names it); until then the per-tab
+  // config above guards the in-progress work. Title-only edits are
+  // persisted separately by commitTitle, so they're not tracked here.
+  useEffect(() => {
+    if (!dirty || !savedRef.current) return
+    const t = setTimeout(() => persistSaved(nameRef.current.trim() || analysisName.trim() || 'Untitled Report'), 800)
+    return () => clearTimeout(t)
+  }, [dirty, analysisName, persistSaved])
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
