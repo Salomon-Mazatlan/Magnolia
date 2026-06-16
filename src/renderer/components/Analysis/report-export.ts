@@ -296,6 +296,9 @@ function buildReportBody(items: ReportItem[], assets: Map<string, DocAsset>): st
   let headingDepth = -1
   const counters = [0, 0, 0]
   const toc = items
+    // Free-text blocks are body prose, not navigable headings — keep them out
+    // of the Contents (and out of the hierarchical numbering).
+    .filter((it) => it.kind !== 'text')
     .map((it) => {
       const id = reportAnchorId(it)
       let depth: number

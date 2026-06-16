@@ -63,8 +63,8 @@ export const REPORT_TABLE_CSS = `
   table.report-grid td.cell.sub { background: #eef1f6; font-weight: 700; }
   table.report-grid td.cell.band { background: #f6f8fb; }
   table.report-grid td.cell.zero { color: #c8cdd4; }
-  table.report-grid td.totalcell { min-width: 32px; height: 26px; padding: 0 6px; text-align: center; font-weight: 700; border-left: 2px solid #c4ccd6; color: #222; }
-  table.report-grid td.pctcell { min-width: 42px; height: 26px; padding: 0 6px; text-align: center; font-style: italic; font-size: 9px; color: #6a7b90; background: #f7f9fb; }
+  table.report-grid td.totalcell { min-width: 32px; height: 26px; padding: 0 6px; text-align: center; vertical-align: middle; font-weight: 700; border-left: 2px solid #c4ccd6; color: #222; }
+  table.report-grid td.pctcell { min-width: 42px; height: 26px; padding: 0 6px; text-align: center; vertical-align: middle; font-style: italic; font-size: 9px; color: #6a7b90; background: #f7f9fb; }
   table.report-grid tr.total td { border-top: 2px solid #aab4c0; font-weight: 700; background: #eef1f5; }
   .cw { height: 26px; display: flex; align-items: center; justify-content: center; }
   .report-map { margin: 6px 0 10px; text-align: center; }
