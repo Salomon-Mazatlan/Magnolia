@@ -1,0 +1,15 @@
+{
+  "name": "magnolia-manual",
+  "version": "1.0.0",
+  "description": "Online manual for Magnolia QDA software",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.3"
+  }
+}

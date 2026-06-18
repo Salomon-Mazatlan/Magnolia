@@ -1,0 +1,78 @@
+/* ============================================================
+   Magnolia manual theme — matches caledavis.eu
+   Palette + fonts mirror the main site's styles.css:
+     --magnolia #b01e3c · dark #8a1730 · bright #c8294a
+     --bg #f4f2ee · ink #111111 · muted #5c5c5c
+     Inter (sans) · JetBrains Mono (mono)
+   Fonts live in public/fonts and are served at /Magnolia/fonts/.
+   ============================================================ */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/Magnolia/fonts/inter-variable.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/Magnolia/fonts/jetbrains-mono-variable.woff2") format("woff2");
+}
+
+:root {
+  /* Fonts */
+  --vp-font-family-base: "Inter", "Helvetica Neue", Helvetica, Arial, system-ui,
+    -apple-system, sans-serif;
+  --vp-font-family-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo,
+    Consolas, monospace;
+
+  /* Brand accent — Magnolia red */
+  --vp-c-brand-1: #b01e3c; /* links, active items, headings accent */
+  --vp-c-brand-2: #c8294a; /* hover */
+  --vp-c-brand-3: #8a1730; /* solid button background */
+  --vp-c-brand-soft: rgba(176, 30, 60, 0.14);
+
+  /* Page surfaces — warm cream like the main site */
+  --vp-c-bg: #f4f2ee;
+  --vp-c-bg-alt: #ece9e2; /* sidebar / nav / code blocks */
+  --vp-c-bg-soft: #eeebe4;
+  --vp-c-bg-elv: #ffffff; /* elevated cards, search box */
+
+  /* Text */
+  --vp-c-text-1: #111111;
+  --vp-c-text-2: #5c5c5c;
+
+  /* Home hero — Magnolia red name */
+  --vp-home-hero-name-color: #b01e3c;
+
+  /* Solid brand buttons (download / get started) */
+  --vp-button-brand-bg: #b01e3c;
+  --vp-button-brand-hover-bg: #c8294a;
+  --vp-button-brand-active-bg: #8a1730;
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-border: transparent;
+}
+
+/* Dark mode — brighter red for contrast (mirrors --m-red-bright) */
+.dark {
+  --vp-c-brand-1: #f0506b;
+  --vp-c-brand-2: #f0506b;
+  --vp-c-brand-3: #b01e3c;
+  --vp-c-brand-soft: rgba(240, 80, 107, 0.16);
+
+  --vp-c-bg: #0b0b0d;
+  --vp-c-bg-alt: #101013;
+  --vp-c-bg-soft: #161619;
+  --vp-c-bg-elv: #161619;
+
+  --vp-c-text-1: #ededf0;
+  --vp-c-text-2: #9a9aa6;
+
+  --vp-home-hero-name-color: #f0506b;
+  --vp-button-brand-bg: #b01e3c;
+  --vp-button-brand-hover-bg: #c8294a;
+}
