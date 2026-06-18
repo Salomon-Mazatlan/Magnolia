@@ -291,6 +291,10 @@ function App() {
   // Memos — not documents or codes. Dim those two panels while it's the
   // active tab so the unavailable drag sources read as unavailable.
   const reportsToolActive = parseAnalysisTabId(documentStore.viewedDocumentGuid)?.toolType === 'reports'
+  // The Query Builder doesn't accept quotes or analyses as drag sources.
+  // Dim those panels while it's the active tab so the unavailable drag
+  // sources read as unavailable (same treatment as Reports above).
+  const queryBuilderActive = isQueryBuilderTab(documentStore.viewedDocumentGuid)
   const logbookStore = useLogbookStore()
   const memoStore = useMemoStore()
 
@@ -2384,7 +2388,9 @@ function App() {
                     if (panels.length > 0) panels.push(<PanelResizeHandle key="rh-qt" style={rh} />)
                     panels.push(
                       <Panel key="quotes" defaultSize={33} minSize={15}>
-                        <QuotesPane onClose={() => closePanel('quotes')} />
+                        <div style={{ height: '100%', opacity: queryBuilderActive ? 0.62 : 1, transition: 'opacity 0.15s' }} title={queryBuilderActive ? 'Quotes can’t be added to a query' : undefined}>
+                          <QuotesPane onClose={() => closePanel('quotes')} />
+                        </div>
                       </Panel>
                     )
                   }
@@ -2392,12 +2398,14 @@ function App() {
                     if (panels.length > 0) panels.push(<PanelResizeHandle key="rh-a" style={rh} />)
                     panels.push(
                       <Panel key="analyses" defaultSize={34} minSize={15}>
-                        <SavedAnalyses
-                          onOpen={openSavedAnalysis}
-                          onClose={() => closePanel('analyses')}
-                          findMemoGuidForAnalysis={findMemoGuidForAnalysis}
-                          onOpenAnalysisMemo={openOrCreateAnalysisMemo}
-                        />
+                        <div style={{ height: '100%', opacity: queryBuilderActive ? 0.62 : 1, transition: 'opacity 0.15s' }} title={queryBuilderActive ? 'Analyses can’t be added to a query' : undefined}>
+                          <SavedAnalyses
+                            onOpen={openSavedAnalysis}
+                            onClose={() => closePanel('analyses')}
+                            findMemoGuidForAnalysis={findMemoGuidForAnalysis}
+                            onOpenAnalysisMemo={openOrCreateAnalysisMemo}
+                          />
+                        </div>
                       </Panel>
                     )
                   }
