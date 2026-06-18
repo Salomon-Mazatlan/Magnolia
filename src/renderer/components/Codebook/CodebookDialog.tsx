@@ -99,7 +99,10 @@ function EditCodeDialog({
 
   return (
     <div className="modal-overlay" onClick={onClose} style={{ position: 'fixed' }}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 420 }}>
+      {/* Fixed width so the modal doesn't grow as the user types a
+          description — the auto-width TipTap editor would otherwise size
+          the modal to its longest line. A definite width makes it wrap. */}
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 420 }}>
         <h2 style={{ margin: '0 0 12px' }}>Edit Code</h2>
 
         {/* Name + color pip */}

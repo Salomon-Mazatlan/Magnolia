@@ -615,7 +615,10 @@ export function CodeEditDialog({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 400 }}>
+      {/* Fixed width so the modal doesn't grow as the user types a
+          description — the auto-width TipTap editor would otherwise size
+          the modal to its longest line. A definite width makes it wrap. */}
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 400 }}>
         <h2>{isEdit ? 'Edit Code' : 'New Code'}</h2>
 
         {/* Name + color pip */}
