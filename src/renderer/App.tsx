@@ -11,7 +11,11 @@ import {
   faMagnifyingGlass,
   faBook,
   faNotebookPen,
-  faTags
+  faTags,
+  faSquareArrowRightEnter,
+  faCircleQuestion,
+  faScale,
+  faGear
 } from './components/Icon'
 import { LicenceDialog } from './components/Licence/LicenceDialog'
 import { UpdateDialog, type UpdateAvailableInfo } from './components/Update/UpdateDialog'
@@ -2005,26 +2009,13 @@ function App() {
         }}
       >
         {/* Left cell: Magnolia wordmark, themed to match the rest of
-            the toolbar's icon hue. Click opens the Preferences window
-            — the wordmark doubles as a discreet entry point to
-            Settings. The outer button gives the same hover rectangle
-            the other toolbar buttons use; the inner masked div paints
-            the actual glyph (using magnolia.svg, the short toolbar-
-            tuned variant of the wordmark; the welcome screen and PDF
-            exports use the longer magnoliaqda.svg form instead). The
-            mask can't share a single element with a hover background
-            — `background` is what fills the masked region, so changing
-            it on hover would recolour the glyph. */}
-        <button
-          type="button"
-          onClick={() => {
-            // When the wordmark is nudging about an update, take the user
-            // straight to the Updates section instead of the default category.
-            if (updateBadgeAvailable) requestPreferencesCategory('updates')
-            useDocumentStore.getState().openToolTab(PREFERENCES_TAB_ID)
-          }}
-          title={updateBadgeAvailable ? 'A new version is available — open Settings → Updates' : 'Settings'}
-          aria-label={updateBadgeAvailable ? 'Open Settings — update available' : 'Open Settings'}
+            the toolbar's icon hue. Purely decorative — Settings now has
+            its own toolbar button (see the centre cell). The masked div
+            paints the actual glyph (using magnolia.svg, the short
+            toolbar-tuned variant of the wordmark; the welcome screen and
+            PDF exports use the longer magnoliaqda.svg form instead). */}
+        <div
+          aria-label="Magnolia"
           style={{
             justifySelf: 'start',
             // Right margin guarantees breathing room between the
@@ -2032,18 +2023,9 @@ function App() {
             // windows where the 1fr columns shrink.
             marginRight: 32,
             padding: '4px 6px',
-            border: 'none',
-            background: 'transparent',
-            borderRadius: 'var(--radius-sm)',
-            cursor: 'pointer',
-            transition: 'background 0.12s',
             display: 'flex',
-            alignItems: 'center',
-            // Anchor for the update-available badge dot.
-            position: 'relative'
+            alignItems: 'center'
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-tertiary)' }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
         >
           <div
             aria-hidden
@@ -2065,30 +2047,12 @@ function App() {
               pointerEvents: 'none'
             }}
           />
-          {updateBadgeAvailable && (
-            // Small accent dot in the top-right corner of the wordmark — a
-            // discreet, non-modal nudge that a newer version is available.
-            // Clicking the wordmark already opens Settings (→ Updates).
-            <span
-              aria-hidden
-              style={{
-                position: 'absolute',
-                top: 2,
-                right: 2,
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                background: 'var(--accent)',
-                boxShadow: '0 0 0 2px var(--bg-secondary)',
-                pointerEvents: 'none'
-              }}
-            />
-          )}
-        </button>
+        </div>
 
         {/* Center cell: icons */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           {[
+            { icon: faSquareArrowRightEnter, label: 'Import', action: () => handleImportDocument() },
             { icon: faBook, label: 'Codebook', action: () => openCodebook() },
             { icon: faNotebookPen, label: 'Logbook', action: () => openLogbook() },
             { icon: faTags, label: 'Tags', action: () => setShowManageDocTags(true) }
@@ -2170,6 +2134,83 @@ function App() {
               "Analysis ▾" button that opens a tile-grid popover.
               See AnalysisPopover for the popover UI. */}
           <AnalysisPopover onSelect={(toolType) => openAnalysis(toolType)} />
+
+          {/* Separator */}
+          <div style={{ width: 1, height: 34, background: 'var(--border-color)', margin: '0 8px' }} />
+
+          {/* Studio: show/hide the workspace panels. The cross-platform
+              home for the native View menu's panel toggles — on
+              Windows/Linux the frameless window hides the menu bar, so
+              without this a closed panel could never be reopened. */}
+          <StudioPopover
+            panels={[
+              { id: 'documents', label: 'Documents', visible: panelVisibility.documents },
+              { id: 'codes', label: 'Codes', visible: panelVisibility.codes },
+              { id: 'queries', label: 'Queries', visible: !queryResultsClosed },
+              { id: 'memos', label: 'Memos', visible: panelVisibility.memos },
+              { id: 'quotes', label: 'Quotes', visible: panelVisibility.quotes },
+              { id: 'analyses', label: 'Analyses', visible: panelVisibility.analyses },
+            ]}
+            onToggle={(id) => {
+              if (id === 'queries') setQueryResultsClosed((prev) => !prev)
+              else togglePanel(id as PanelId)
+            }}
+          />
+          {/* Settings: opens the Preferences tab — the entry point the
+              Magnolia wordmark used to provide. Carries the update-available
+              nudge dot (jumps straight to Settings → Updates when set). */}
+          <button
+            className="app-toolbar-btn"
+            title={updateBadgeAvailable ? 'A new version is available — open Settings → Updates' : 'Settings'}
+            aria-label={updateBadgeAvailable ? 'Open Settings — update available' : 'Open Settings'}
+            onClick={() => {
+              if (updateBadgeAvailable) requestPreferencesCategory('updates')
+              useDocumentStore.getState().openToolTab(PREFERENCES_TAB_ID)
+            }}
+            style={{
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 3,
+              padding: '4px 12px',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              background: 'transparent',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              lineHeight: 1,
+              transition: 'background 0.12s, color 0.12s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--bg-tertiary)'
+              e.currentTarget.style.color = 'var(--text-primary)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--text-secondary)'
+            }}
+          >
+            <Icon icon={faGear} style={{ fontSize: 20 }} />
+            <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>Settings</span>
+            {updateBadgeAvailable && (
+              // Update-available nudge dot, anchored to the Settings button.
+              <span
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  top: 2,
+                  right: 2,
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  background: 'var(--accent)',
+                  boxShadow: '0 0 0 2px var(--bg-secondary)',
+                  pointerEvents: 'none'
+                }}
+              />
+            )}
+          </button>
         </div>
 
         {/* Right cell: Licence button. Opens a dialog explaining that
@@ -2179,25 +2220,6 @@ function App() {
             justifySelf: 'end' so it hugs the right edge — visually
             balances the wordmark in the left cell. */}
         <div style={{ justifySelf: 'end', display: 'flex', alignItems: 'center', gap: 6, height: '100%' }}>
-        {/* Studio: show/hide the workspace panels. The cross-platform
-            home for the native View menu's panel toggles — on
-            Windows/Linux the frameless window hides the menu bar, so
-            without this a closed panel could never be reopened. Sits in
-            the right cell beside the Licence button. */}
-        <StudioPopover
-          panels={[
-            { id: 'documents', label: 'Documents', visible: panelVisibility.documents },
-            { id: 'codes', label: 'Codes', visible: panelVisibility.codes },
-            { id: 'queries', label: 'Queries', visible: !queryResultsClosed },
-            { id: 'memos', label: 'Memos', visible: panelVisibility.memos },
-            { id: 'quotes', label: 'Quotes', visible: panelVisibility.quotes },
-            { id: 'analyses', label: 'Analyses', visible: panelVisibility.analyses },
-          ]}
-          onToggle={(id) => {
-            if (id === 'queries') setQueryResultsClosed((prev) => !prev)
-            else togglePanel(id as PanelId)
-          }}
-        />
         <button
           className="app-toolbar-btn"
           title="Licence & attributions"
@@ -2227,7 +2249,43 @@ function App() {
             e.currentTarget.style.color = 'var(--text-secondary)'
           }}
         >
-          <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>European Union Public Licence</span>
+          <Icon icon={faScale} style={{ fontSize: 20 }} />
+          <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>EUPL</span>
+        </button>
+        {/* Help: opens Magnolia's online manual (GitHub Pages) in the
+            default browser. The main window's window-open handler routes
+            window.open through shell.openExternal. */}
+        <button
+          className="app-toolbar-btn"
+          title="Open the Magnolia user manual"
+          aria-label="Open the Magnolia user manual"
+          onClick={() => window.open('https://caledavis.github.io/Magnolia/', '_blank')}
+          style={{
+            justifySelf: 'end',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 3,
+            padding: '4px 12px',
+            border: 'none',
+            borderRadius: 'var(--radius-sm)',
+            background: 'transparent',
+            color: 'var(--text-secondary)',
+            cursor: 'pointer',
+            lineHeight: 1,
+            transition: 'background 0.12s, color 0.12s'
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--bg-tertiary)'
+            e.currentTarget.style.color = 'var(--text-primary)'
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent'
+            e.currentTarget.style.color = 'var(--text-secondary)'
+          }}
+        >
+          <Icon icon={faCircleQuestion} style={{ fontSize: 20 }} />
+          <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>Manual</span>
         </button>
           <WindowControls />
         </div>

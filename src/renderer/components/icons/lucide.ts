@@ -46,6 +46,7 @@ import {
   Link,
   PanelLeft,
   SquarePlus,
+  SquareArrowRightEnter,
   Plus,
   Menu,
   Quote,
@@ -88,6 +89,8 @@ import {
   Check,
   User,
   MessageCircleQuestionMark,
+  CircleQuestionMark,
+  Scale,
   AppWindow,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -128,6 +131,7 @@ export const faDownLeftAndUpRightToCenter = Minimize2
 export const faLink = Link
 export const faTableColumns = PanelLeft
 export const faSquarePlus = SquarePlus
+export const faSquareArrowRightEnter = SquareArrowRightEnter
 export const faPlus = Plus
 export const faBars = Menu
 export const faQuoteLeft = Quote
@@ -171,6 +175,8 @@ export const faClipboardPen = ClipboardPen
 export const faCheck = Check
 export const faUser = User
 export const faQuestion = MessageCircleQuestionMark
+export const faCircleQuestion = CircleQuestionMark
+export const faScale = Scale
 /** Lucide `app-window` — the Studio toolbar button that reopens
  *  closed workspace panels. No Font Awesome forebear, so the alias
  *  reads as the Lucide name. */
