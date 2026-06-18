@@ -2,6 +2,23 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.4.4]
+
+### Added
+- **Import button in the toolbar.** Importing documents now has its own dedicated toolbar button, so it's easy to find — it opens the same file picker as before, handling text, PDFs, Word, images, audio/video, and CSV/XLSX surveys.
+- **Manual button in the toolbar.** A new button opens Magnolia's online user manual in your browser.
+- **Preferences button in the toolbar.** Settings now has its own labelled toolbar button (it previously opened by clicking the Magnolia wordmark). The update-available nudge dot, which used to sit on the wordmark, now appears on this button.
+
+### Changed
+- **Toolbar tidy-up.** The toolbar buttons are regrouped as Import / Codebook / Logbook / Tags · Query / Analyse · Studio / Preferences, and the Magnolia wordmark is now simply the app's mark rather than a button.
+- **The Query Builder dims the Quotes and Analyses panels** while it's open, signalling that those items can't be dragged into a query — the same treatment Reports already gives its unavailable panels.
+
+### Fixed
+- **Code nesting is shown in report tables.** Codes in analysis tables in an exported report (Codes in Documents, Code Frequencies, Code Co-Occurrences) are now indented to reflect their place in the code hierarchy, instead of all appearing on the same level.
+- **Dragging a set of codes into a parent keeps their nesting.** Selecting several codes — including a parent and one of its children — and dragging them onto another code no longer flattens the dragged codes; each subtree keeps its existing structure.
+- **PDF text selection no longer changes the font.** Selecting text in a PDF (including a Word document converted to PDF) could reveal a different fallback font and even empty boxes for some characters, on Intel Macs in particular. The selectable text layer now stays hidden while selected, so you see only the highlight.
+- **The New/Edit Code dialog no longer grows as you type.** Entering a long description kept widening the window; it now stays a fixed width and the description wraps.
+
 ## [1.4.3]
 
 ### Added
