@@ -2161,8 +2161,8 @@ function App() {
               nudge dot (jumps straight to Settings → Updates when set). */}
           <button
             className="app-toolbar-btn"
-            title={updateBadgeAvailable ? 'A new version is available — open Settings → Updates' : 'Settings'}
-            aria-label={updateBadgeAvailable ? 'Open Settings — update available' : 'Open Settings'}
+            title={updateBadgeAvailable ? 'A new version is available — open Preferences → Updates' : 'Preferences'}
+            aria-label={updateBadgeAvailable ? 'Open Preferences — update available' : 'Open Preferences'}
             onClick={() => {
               if (updateBadgeAvailable) requestPreferencesCategory('updates')
               useDocumentStore.getState().openToolTab(PREFERENCES_TAB_ID)
@@ -2192,7 +2192,7 @@ function App() {
             }}
           >
             <Icon icon={faGear} style={{ fontSize: 20 }} />
-            <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>Settings</span>
+            <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>Preferences</span>
             {updateBadgeAvailable && (
               // Update-available nudge dot, anchored to the Settings button.
               <span
