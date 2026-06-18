@@ -1813,12 +1813,26 @@ html:not([data-theme]) .app-toolbar {
   flex-shrink: 0;
 }
 
-/* PDF text layer — hide native per-span selection; we draw our own overlay */
-.pdfTextLayerNoSelect ::selection {
+/* PDF text layer — hide native per-span selection; we draw our own overlay.
+ * The text layer sits invisibly over the canvas (pdf.js renders its spans
+ * with a generic fallback font and `color: transparent`) purely to drive
+ * native selection/copy. Setting only the selection *background* to
+ * transparent isn't enough: Chromium repaints selected text with the default
+ * selection foreground color, which overrides `color: transparent` and makes
+ * the fallback-font glyphs paint on top of the canvas — visible as a font
+ * change on selection, plus tofu (□) wherever the platform's fallback font
+ * lacks a glyph (e.g. the "Th" ligature), which is why it showed on Intel
+ * Macs but not Apple Silicon. Pinning the selection color transparent keeps
+ * the layer invisible while selected. The `.textLayer` qualifier raises
+ * specificity above pdf.js's own `.textLayer ::selection` rule so this wins
+ * regardless of stylesheet load order. */
+.textLayer.pdfTextLayerNoSelect ::selection {
   background: transparent;
+  color: transparent;
 }
-.pdfTextLayerNoSelect ::-moz-selection {
+.textLayer.pdfTextLayerNoSelect ::-moz-selection {
   background: transparent;
+  color: transparent;
 }
 
 /* Pulse animation for renamed saved queries */
