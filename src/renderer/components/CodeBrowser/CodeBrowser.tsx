@@ -234,8 +234,17 @@ function CodeTreeItem({
             : singleGuid ? [singleGuid] : []
           if (draggedGuids.length === 0 || draggedGuids.includes(code.guid)) return
 
+          // When a selection contains both a code and one of its
+          // descendants, move only the top-level codes — each subtree
+          // travels with its root, so the descendant comes along and keeps
+          // its place. Re-parenting the descendant independently would pull
+          // it out of its original parent and flatten the existing nesting.
+          const topLevelDragged = draggedGuids.filter(
+            (g) => !draggedGuids.some((other) => other !== g && isDescendant(allCodes, other, g))
+          )
+
           if (pos === 'child') {
-            for (const g of draggedGuids) {
+            for (const g of topLevelDragged) {
               if (g !== code.guid && !isDescendant(allCodes, g, code.guid)) {
                 onMoveCode(g, code.guid)
               }
@@ -243,7 +252,7 @@ function CodeTreeItem({
             setExpanded(true)
           } else {
             // Insert in order: for 'before', process first-to-last; for 'after', process last-to-first
-            const ordered = pos === 'before' ? draggedGuids : [...draggedGuids].reverse()
+            const ordered = pos === 'before' ? topLevelDragged : [...topLevelDragged].reverse()
             for (const g of ordered) {
               if (g !== code.guid && !isDescendant(allCodes, g, code.guid)) {
                 onMoveCodeNear(g, code.guid, pos)
