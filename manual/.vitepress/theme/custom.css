@@ -76,3 +76,131 @@
   --vp-button-brand-bg: #b01e3c;
   --vp-button-brand-hover-bg: #c8294a;
 }
+
+/* ============================================================
+   Screenshots / images in manual pages
+   ------------------------------------------------------------
+   • A markdown image on its own line (![alt](./images/x.png))
+     is automatically centred and given a subtle frame.
+   • A <figure> with a <figcaption> is centred, framed, and the
+     caption is styled — use it when you want a caption.
+   ============================================================ */
+
+/* Cap how tall a screenshot can get; width scales to keep aspect ratio.
+   Tweak this single value to make all manual images larger/smaller. */
+:root {
+  --mag-figure-max-h: 350px;
+}
+
+/* Standalone markdown image → centred block with a light frame */
+.vp-doc p > img:only-child {
+  display: block;
+  margin: 1.75rem auto;
+  max-height: var(--mag-figure-max-h);
+  width: auto;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+}
+
+/* Image with a caption */
+.vp-doc figure {
+  margin: 1.75rem auto;
+  text-align: center;
+}
+.vp-doc figure img {
+  display: inline-block;
+  max-height: var(--mag-figure-max-h);
+  width: auto;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+}
+.vp-doc figcaption {
+  margin-top: 0.6rem;
+  font-size: 0.875rem;
+  color: var(--vp-c-text-2);
+}
+
+/* ============================================================
+   Numbered "steps" for ordered lists (like the VS Code docs)
+   ------------------------------------------------------------
+   Every ordered list (`1.` `2.` `3.` in markdown) renders as
+   circular number badges in Magnolia red, joined by a vertical
+   line down the left. Use a normal ordered list for any
+   step-by-step instructions and you get this automatically.
+   (Bulleted lists with `-` are left as ordinary bullets.)
+   ============================================================ */
+
+.vp-doc ol {
+  list-style: none;
+  counter-reset: step;
+  padding-left: 0;
+  margin: 1.25rem 0;
+}
+
+.vp-doc ol > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 3rem;
+  padding-bottom: 1.25rem;
+}
+
+.vp-doc ol > li:last-child {
+  padding-bottom: 0;
+}
+
+/* The numbered badge */
+.vp-doc ol > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  background: var(--vp-c-brand-1);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+/* The vertical line connecting one step to the next */
+.vp-doc ol > li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: calc(0.95rem - 1px); /* centre of the 1.9rem badge */
+  top: 2.1rem;
+  bottom: 0;
+  width: 2px;
+  background: var(--vp-c-divider);
+}
+
+/* Don't apply the stepper look to nested lists — keep those plain */
+.vp-doc ol ol,
+.vp-doc ul ol,
+.vp-doc ol ul {
+  counter-reset: none;
+  padding-left: 1.25rem;
+  margin: 0.5rem 0;
+}
+.vp-doc ol ol {
+  list-style: decimal;
+}
+.vp-doc ol ol > li,
+.vp-doc ul ol > li,
+.vp-doc ol ul > li {
+  counter-increment: none;
+  padding-left: 0;
+  padding-bottom: 0.25rem;
+}
+.vp-doc ol ol > li::before,
+.vp-doc ol ol > li::after,
+.vp-doc ul ol > li::before,
+.vp-doc ul ol > li::after,
+.vp-doc ol ul > li::before,
+.vp-doc ol ul > li::after {
+  content: none;
+}

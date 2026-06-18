@@ -2,9 +2,9 @@
 layout: home
 
 hero:
-  name: "Magnolia Manual"
-  text: "Everything you need to know."
-  tagline: The complete guide to Magnolia — free, open-source QDA software.
+  name: "Magnolia"
+  text: "Users' Guide"
+  tagline: Free, open-source QDA software.
   actions:
     - theme: brand
       text: Get started

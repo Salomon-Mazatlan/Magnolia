@@ -1,12 +1,14 @@
 # Introduction
 
-Welcome to the Magnolia manual. Magnolia is free, open-source QDA (qualitative
-data analysis) software for social science research — powerful coding, graphical
-queries, relationship maps, transcription, and a rich analysis suite, all
-running locally on your own machine.
+Welcome to the fun world of qualitative data analysis—shortened to 'QDA'.
 
-This manual walks you through everything Magnolia can do, from installation to
-advanced analysis.
+Often, QDA software walks hand-in-hand with academic language like "grounded theory". But qualitative data analysis isn't just confined to academia. In fact, more qualitative data analysis is probably done *outside* of academia, but it's just called something different like "research". 
+
+Think, for example, of lawyers or investigators working on cases. What evidence do they have? How does one piece of evidence relate to other pieces of evidence? How much evidence exists about the different tests that they need to prove?
+
+Qualitative data analysis is *everywhere*. QDA software, like Magnolia, aims to make life easier for you—the researcher—by allowing you to quickly perform tasks and work with your data in ways that doing it manually, or with other software, would take much, much longer.
+
+This manual shows you how to work with Magnolia so you can benefit from the power and opportunities that QDA software opens up.
 
 ## How this manual works
 
@@ -21,6 +23,5 @@ If you're new, begin with [Installation](/guide/installation), then read
 [Coding your data](/guide/coding).
 
 ::: tip
-Magnolia stores everything locally and reads/writes the open QDPX standard, so
-you can move projects to and from other tools.
+Magnolia stores everything locally or on your network drive and reads/writes the open QDPX standard, so you can move projects to and from other tools (like Atlas.ti and MAXQDA). The open .qdpx standard is the preferred format for data archiving from several academic data repositories.
 :::

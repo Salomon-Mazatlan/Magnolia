@@ -1,24 +1,27 @@
 # Installation
 
-Magnolia runs on macOS, Windows, and Linux. It's free, with no account and no
-sign-up.
+Magnolia runs on macOS, Windows, and Linux. 
 
 ## Download
 
-Head to the [latest release](https://github.com/caledavis/Magnolia/releases/latest)
-and pick the build for your platform.
+[Download Magnolia from GitHub](https://github.com/caledavis/Magnolia). 
 
 ### macOS
 
-- **Apple Silicon (M1 and newer):** `Magnolia-mac-arm64.dmg`
-- **Intel Macs:** `Magnolia-mac-x64.dmg`
-
-Open the `.dmg` and drag Magnolia into your Applications folder.
+- Open the `.dmg` and drag Magnolia into your Applications folder.
 
 ### Windows
 
 - **With admin rights:** run the `Magnolia-win-x64.exe` installer.
-- **Without admin rights:** use the portable build, `Magnolia-win-portable-x64.exe`.
+- **Without admin rights:** use the portable build, `Magnolia-win-portable-x64.exe`. Pop it on a flash drive or something so you can run it from there.
+
+::: tip
+Windows users may be warned when downloading Magnolia that the app is not downloaded very often. If you experience this, simply open up the Downloads list in Edge, right-click the failed download, and click `Keep`.
+:::
+
+::: tip
+Windows users on work computers may find it impossible to run Magnolia if your organisation is using "App Control for Business". If you encounter this error when opening Magnolia, the only way around it is to get your IT department to approve Magnolia for use.
+:::
 
 ### Linux
 
