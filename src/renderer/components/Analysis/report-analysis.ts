@@ -113,7 +113,8 @@ function renderGridTableHtml(
   columns: AnalysisColumn[],
   headerGroups: { label: string | null; span: number }[],
   grid: number[][],
-  opts: { binary: boolean; visual: boolean; totalsOnly: boolean }
+  opts: { binary: boolean; visual: boolean; totalsOnly: boolean },
+  rowDepths?: number[]
 ): string {
   const { binary, visual, totalsOnly } = opts
   const rowTotals = grid.map((row) => row.reduce((s, v, j) => (columns[j].isSubtotal ? s : s + v), 0))
@@ -177,7 +178,7 @@ function renderGridTableHtml(
           return cell + pctCell
         })
         .join('')
-      return `<tr><td class="rowname">${escHtml(name)}</td>${cells}<td class="totalcell">${rowTotals[i]}</td><td class="pctcell">${pctOf(rowTotals[i], grandTotal) || '–'}</td></tr>`
+      return `<tr><td class="rowname">${codeIndent(rowDepths?.[i])}${escHtml(name)}</td>${cells}<td class="totalcell">${rowTotals[i]}</td><td class="pctcell">${pctOf(rowTotals[i], grandTotal) || '–'}</td></tr>`
     })
     .join('')
 
@@ -220,6 +221,33 @@ function scopedData(toolType: AnalysisInitData['toolType'], config: any): { data
   return { data, docFilter }
 }
 
+// ── Code hierarchy indentation ─────────────────────────────────────
+// Codes are stored as a tree but the analysis tables list them as flat
+// rows. Mirror the on-screen tables: indent each code by the number of
+// its ancestors that are also rows in the same table, so a child sitting
+// under a parent that isn't included stays at depth 0.
+
+function codeRowDepths(
+  codeGuids: string[],
+  codeMap: Map<string, { parentGuid?: string }>
+): number[] {
+  const present = new Set(codeGuids)
+  return codeGuids.map((cg) => {
+    let depth = 0
+    let parentGuid = codeMap.get(cg)?.parentGuid
+    while (parentGuid) {
+      if (present.has(parentGuid)) depth++
+      parentGuid = codeMap.get(parentGuid)?.parentGuid
+    }
+    return depth
+  })
+}
+
+/** A spacer span that indents a code row label by its nesting depth. */
+function codeIndent(depth?: number): string {
+  return depth ? `<span style="display:inline-block;width:${depth * 14}px"></span>` : ''
+}
+
 // ── Codes in Documents ─────────────────────────────────────────────
 
 function codesInDocumentsHtml(config: any, options: AnalysisItemOptions): string {
@@ -239,7 +267,8 @@ function codesInDocumentsHtml(config: any, options: AnalysisItemOptions): string
   )
   if (options.binary) grid = binarizeGrid(grid)
   const names = codeGuids.map((cg) => codeMap.get(cg)?.name ?? 'Code')
-  return renderGridTableHtml('Code', names, columns, headerGroups, grid, { binary: !!options.binary, visual: !!options.visual, totalsOnly: !!options.totalsOnly })
+  const depths = codeRowDepths(codeGuids, codeMap)
+  return renderGridTableHtml('Code', names, columns, headerGroups, grid, { binary: !!options.binary, visual: !!options.visual, totalsOnly: !!options.totalsOnly }, depths)
 }
 
 // ── Results in Documents ───────────────────────────────────────────
@@ -315,6 +344,7 @@ function codeFrequenciesHtml(config: any, options: AnalysisItemOptions): string 
       return total / col.sourceGuids.length
     })
   )
+  const depths = codeRowDepths(codeGuids, codeMap)
   const thead = `<tr><th class="rowhead">Code</th>${columns.map((c) => `<th>${escHtml(c.label)}</th>`).join('')}</tr>`
   const body = codeGuids
     .map((cg, i) => {
@@ -324,7 +354,7 @@ function codeFrequenciesHtml(config: any, options: AnalysisItemOptions): string 
           return `<td class="${v === 0 ? 'zero' : ''}">${v.toFixed(1)}%</td>`
         })
         .join('')
-      return `<tr><td class="rowhead">${escHtml(codeMap.get(cg)?.name ?? 'Code')}</td>${cells}</tr>`
+      return `<tr><td class="rowhead">${codeIndent(depths[i])}${escHtml(codeMap.get(cg)?.name ?? 'Code')}</td>${cells}</tr>`
     })
     .join('')
   return wrapTable(`<thead>${thead}</thead><tbody>${body}</tbody>`, columns.length)
@@ -353,6 +383,7 @@ function codeCoOccurrencesHtml(config: any, options: AnalysisItemOptions): strin
   const totalsOnly = !!options.totalsOnly
   const dot = (color?: string) => `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${color || '#888'};flex-shrink:0"></span>`
 
+  const rowDepths = codeRowDepths(rowCodeGuids, codeMap)
   const colHead = totalsOnly
     ? ''
     : colCodeGuids.map((g) => `<th class="col"><div class="vlabel">${escHtml(trunc(codeMap.get(g)?.name ?? 'Code', 26))}</div></th>`).join('')
@@ -371,7 +402,7 @@ function codeCoOccurrencesHtml(config: any, options: AnalysisItemOptions): strin
               return `<td class="cell${v === 0 ? ' zero' : ''}"><div class="cw">${inner}</div></td>`
             })
             .join('')
-      return `<tr><td class="rowname"><span style="display:inline-flex;align-items:center;gap:4px">${dot(codeMap.get(rg)?.color)}${escHtml(name)}</span></td>${cells}<td class="totalcell">${rowTotals[i]}</td><td class="pctcell">${pctOf(rowTotals[i], grandTotal) || '–'}</td></tr>`
+      return `<tr><td class="rowname">${codeIndent(rowDepths[i])}<span style="display:inline-flex;align-items:center;gap:4px">${dot(codeMap.get(rg)?.color)}${escHtml(name)}</span></td>${cells}<td class="totalcell">${rowTotals[i]}</td><td class="pctcell">${pctOf(rowTotals[i], grandTotal) || '–'}</td></tr>`
     })
     .join('')
 
