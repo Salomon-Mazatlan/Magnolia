@@ -2,6 +2,24 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.0]
+
+### Added
+- **Repair a project that's missing its files.** When you open a project whose embedded documents, images, or PDFs aren't actually stored inside it (for example, one saved by an older version), Magnolia now shows a banner listing the affected documents and lets you re-import each one to restore it — keeping its existing codes.
+- **Memos work with other QDA software.** Memos are now saved in the shared REFI-QDA format, so Magnolia's memos appear when a project is opened in Atlas.ti or MAXQDA, and memos made in those tools appear in Magnolia. Inside Magnolia each memo still remembers exactly what it is attached to.
+- **Scope queries to surveys.** The Document Selector's Type filter now has a Survey option, so a query can be limited to survey sources just like Documents, PDFs, and images.
+- **Use text in spatial queries.** The spatial operators (Overlapping, Inside, Outside, Before, Followed by) now accept text terms as inputs — so you can ask, for example, for a word that appears inside a particular phrase or inside a coded passage. Works in documents and surveys.
+
+### Changed
+- **Projects are now fully self-contained.** Every file you import — documents, PDFs, images, audio, and video — is stored inside the `.qdpx` project file itself. Magnolia no longer keeps imported media in temporary files on your computer, so a project opens with all its content intact on any machine, and an imported file is written into the project the moment you add it.
+- **The toolbar shows the open project's name.** The Magnolia wordmark is now the app icon followed by the current project's name; clicking the name opens Project Info.
+- **"Content Memo" is now "Selection Memo"** throughout, to better describe a memo attached to a selection.
+
+### Fixed
+- **Imported files can no longer be silently lost.** Magnolia guarantees an imported file's content is written into the project when you save, and refuses to save in a way that would drop it. Re-opening a project restores its media from the project file rather than depending on temporary copies that the system can clear.
+- **Projects exported from Magnolia now open in Atlas.ti, and image area-codings appear in MAXQDA.** Image coding coordinates are written as whole numbers, as the interchange format requires; previously the file could be rejected or the codings ignored.
+- **Documents and codings from Atlas.ti import correctly.** PDF codes made in Atlas.ti no longer disappear on import, and documents whose stored filename differs from Magnolia's own naming (as Atlas.ti produces) now display and save correctly.
+
 ## [1.4.4]
 
 ### Added
