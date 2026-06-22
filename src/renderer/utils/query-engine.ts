@@ -225,33 +225,44 @@ export function executeQuery(
       continue
     }
 
-    for (const selection of scopedSelections) {
+    // For spatial operators, add synthetic spans for any TEXT operand so a
+    // text term can be compared against coded spans (and other text spans) —
+    // e.g. `"cattle" INSIDE <coded span>`. No-op for non-spatial conditions
+    // and for spatial conditions with only code operands.
+    const isSpatial =
+      condType === 'overlap' || condType === 'inside' || condType === 'outside' ||
+      condType === 'before' || condType === 'followedBy'
+    const evalSelections = isSpatial
+      ? buildSpatialSelections(scopedSelections, codeCondition, source, content, cellScope)
+      : scopedSelections
+
+    for (const selection of evalSelections) {
       const codeGuidsOnSelection = new Set(selection.codings.map((c) => c.codeGuid))
 
       if (condType === 'overlap') {
         const cond = codeCondition as { type: 'overlap'; condition1: CodeCondition; condition2: CodeCondition }
-        const overlapResults = findOverlapIntersections(cond, selection, scopedSelections, source, content, codeMap)
+        const overlapResults = findOverlapIntersections(cond, selection, evalSelections, source, content, codeMap)
         results.push(...overlapResults)
       } else if (condType === 'inside') {
         const cond = codeCondition as { type: 'inside'; condition1: CodeCondition; condition2: CodeCondition }
-        const insideResults = findInsideSelections(cond, selection, scopedSelections, source, content, codeMap)
+        const insideResults = findInsideSelections(cond, selection, evalSelections, source, content, codeMap)
         results.push(...insideResults)
       } else if (condType === 'outside') {
         const cond = codeCondition as { type: 'outside'; condition1: CodeCondition; condition2: CodeCondition }
-        const outsideResults = findOutsideSelections(cond, selection, scopedSelections, source, content, codeMap)
+        const outsideResults = findOutsideSelections(cond, selection, evalSelections, source, content, codeMap)
         results.push(...outsideResults)
       } else if (condType === 'before') {
         const cond = codeCondition as { type: 'before'; condition1: CodeCondition; condition2: CodeCondition }
-        const beforeResults = findBeforeSelections(cond, selection, scopedSelections, source, content, codeMap)
+        const beforeResults = findBeforeSelections(cond, selection, evalSelections, source, content, codeMap)
         results.push(...beforeResults)
       } else if (condType === 'followedBy') {
         const cond = codeCondition as { type: 'followedBy'; condition1: CodeCondition; condition2: CodeCondition }
-        const followedByResults = findFollowedBySelections(cond, selection, scopedSelections, source, content, codeMap)
+        const followedByResults = findFollowedBySelections(cond, selection, evalSelections, source, content, codeMap)
         results.push(...followedByResults)
       } else {
         const selSource = textForSelection(source, selection, content)
         const selText = codepointSlice(selSource, selection.startPosition, selection.endPosition)
-        if (evaluateCondition(codeCondition, codeGuidsOnSelection, selText, selection, scopedSelections, content)) {
+        if (evaluateCondition(codeCondition, codeGuidsOnSelection, selText, selection, evalSelections, content)) {
           results.push(
             buildResult(source, selection, content, codeGuidsOnSelection, codeMap)
           )
@@ -366,6 +377,112 @@ function findTextMatches(
     const { before, after } = getContext(text, cpStart, cpEnd)
     out.push({ start: cpStart, end: cpEnd, matched, before, after })
     pos = idx + (cond.searchText.length || 1)
+  }
+  return out
+}
+
+/** Collect every text condition appearing anywhere in a condition tree
+ *  (including inside logical and spatial operands). */
+function collectTextConditions(
+  cond: CodeCondition
+): { type: 'text'; searchText: string; caseSensitive?: boolean; wholeWord?: boolean }[] {
+  switch (cond.type) {
+    case 'text':
+      return [cond]
+    case 'and':
+    case 'or':
+    case 'xor':
+      return cond.conditions.flatMap(collectTextConditions)
+    case 'not':
+      return collectTextConditions(cond.condition)
+    case 'overlap':
+    case 'inside':
+    case 'outside':
+    case 'before':
+    case 'followedBy':
+      return [...collectTextConditions(cond.condition1), ...collectTextConditions(cond.condition2)]
+    default:
+      return []
+  }
+}
+
+/** A selection plus the text its offsets index into (`_text`). For survey
+ *  cells that's the cell text, not the source's raw CSV. */
+type EvalSelection = PlainTextSelection & { _text?: string }
+
+/** Build the selection set a spatial operator compares over. Coded selections
+ *  supply the code operands; a TEXT operand has no stored span, so we
+ *  synthesise a PlainTextSelection for every occurrence of each text term the
+ *  condition references and add it. This is what lets `"cattle" INSIDE
+ *  "…lowing cattle…"` resolve — and a text term inside/overlapping a *coded*
+ *  span. Works for documents and surveys: for surveys, matches are found in
+ *  each cell's cleaned text (cell-relative offsets + surveyCell so
+ *  sameSpatialSpace keeps comparisons within one cell), and every survey
+ *  selection carries `_text` = its cell text so selectionMatchesCondition
+ *  resolves operand text correctly. Purely additive: code-only spatial
+ *  queries produce no synthetic spans. */
+function buildSpatialSelections(
+  baseSelections: PlainTextSelection[],
+  cond: CodeCondition,
+  source: TextSource,
+  content: string,
+  cellScope: TagCellScope
+): EvalSelection[] {
+  const texts = collectTextConditions(cond)
+  const survey = (source.formatData as SurveyFormatData | undefined)?.survey
+
+  // Attach each base selection's indexable text for surveys (copied so we
+  // never mutate the store's selection objects); plain documents index into
+  // `content` directly, so no `_text` is needed.
+  const out: EvalSelection[] = survey
+    ? baseSelections.map((s) =>
+        s.surveyCell
+          ? { ...s, _text: surveyCellText(source, s.surveyCell.respondentId, s.surveyCell.questionId) }
+          : s
+      )
+    : [...baseSelections]
+
+  if (texts.length === 0) return out
+
+  const spanKey = (
+    cell: { respondentId: string; questionId: string } | undefined,
+    start: number,
+    end: number
+  ): string => `${cell ? `${cell.respondentId}:${cell.questionId}:` : ''}${start}:${end}`
+  const seen = new Set(out.map((s) => spanKey(s.surveyCell, s.startPosition, s.endPosition)))
+  const add = (
+    start: number,
+    end: number,
+    cellText?: string,
+    cell?: { respondentId: string; questionId: string }
+  ): void => {
+    const key = spanKey(cell, start, end)
+    if (seen.has(key)) return // don't duplicate an existing coded span
+    seen.add(key)
+    const sel: EvalSelection = { guid: `text-span-${key}`, startPosition: start, endPosition: end, codings: [] }
+    if (cell) {
+      sel.surveyCell = cell
+      sel._text = cellText
+    }
+    out.push(sel)
+  }
+
+  for (const t of texts) {
+    if (!t.searchText) continue
+    if (survey) {
+      for (const respondent of survey.respondents) {
+        for (const question of survey.questions) {
+          if (cellScope.hasConstraint && !cellScope.cellInScope(source.guid, respondent.id, question.id)) continue
+          const cellText = buildCellText(respondent.answers[question.id])
+          if (!cellText) continue
+          for (const hit of findTextMatches(cellText, t)) {
+            add(hit.start, hit.end, cellText, { respondentId: respondent.id, questionId: question.id })
+          }
+        }
+      }
+    } else {
+      for (const hit of findTextMatches(content, t)) add(hit.start, hit.end)
+    }
   }
   return out
 }
@@ -597,8 +714,14 @@ function selectionMatchesCondition(
   }
 
   const codeGuids = new Set(selection.codings.map((c) => c.codeGuid))
-  const selText = content
-    ? codepointSlice(content, selection.startPosition, selection.endPosition)
+  // A selection's offsets index into the text it was created against. For
+  // survey-cell selections that's the cell text (carried on `_text`), not
+  // the source's raw CSV `content` — so prefer `_text` when present. This is
+  // what makes text operands in spatial queries resolve correctly inside
+  // surveys (mirrors textForSelection, which buildResult also uses).
+  const sliceBase = (selection as { _text?: string })._text ?? content
+  const selText = sliceBase
+    ? codepointSlice(sliceBase, selection.startPosition, selection.endPosition)
     : undefined
   return evaluateCondition(condition, codeGuids, selText, selection, allSelections, content)
 }
