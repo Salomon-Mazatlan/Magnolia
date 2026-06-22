@@ -65,7 +65,8 @@ import { useSurveyViewStore } from './stores/survey-view-store'
 import { useAnalysisTabsStore } from './stores/analysis-tabs-store'
 import { isAnalysisTab, isMapTab, isQueryBuilderTab, makeAnalysisTabId, makeMapTabId, makeQueryBuilderTabId, mapGuidFromTabId, parseAnalysisTabId, PREFERENCES_TAB_ID } from './utils/tab-ids'
 import { requestPreferencesCategory } from './components/Preferences/PreferencesWindow'
-import type { PersistedTab, PersistedTabState } from './models/types'
+import type { PersistedTab, PersistedTabState, MissingBinary } from './models/types'
+import { MissingBinariesBanner } from './components/MissingBinariesBanner'
 // ES import so Vite bundles + hashes the Magnolia wordmark for production.
 import magnoliaUrl from './assets/magnolia.svg'
 import { usePendingSelectionStore } from './stores/pending-selection-store'
@@ -235,6 +236,9 @@ function App() {
   const [showProjectDetails, setShowProjectDetails] = useState(false)
   const [showLicenceDialog, setShowLicenceDialog] = useState(false)
   const [loadProgress, setLoadProgress] = useState<{ stage: string; current: number; total: number } | null>(null)
+  // Documents whose binary content is missing from the just-opened .qdpx —
+  // drives the re-import banner so the user can repair the project.
+  const [missingBinaries, setMissingBinaries] = useState<MissingBinary[]>([])
   const [updateInfo, setUpdateInfo] = useState<UpdateAvailableInfo | null>(null)
 
   useEffect(() => {
@@ -654,6 +658,7 @@ function App() {
     cancelPendingAutoSave()
     setLoadProgress({ stage: 'Opening project…', current: 0, total: 0 })
     try {
+      setMissingBinaries([])
       const data = await window.api.openProjectPath(filePath)
       if (!data) return
       // Drop any in-memory state from the previous project that wouldn't
@@ -722,6 +727,7 @@ function App() {
       // write is what got interrupted and truncated the project. Genuine
       // edits after this re-dirty it normally.
       useProjectStore.getState().markClean()
+      setMissingBinaries((data as any).missingBinaries ?? [])
       if ((data as any).filePath) {
         window.api.trackRecentProject(project.name, (data as any).filePath)
       }
@@ -1577,6 +1583,7 @@ function App() {
       loadInProgressRef.current = true
       cancelPendingAutoSave()
       setLoadProgress({ stage: 'Opening project…', current: 0, total: 0 })
+      setMissingBinaries([])
       try {
         const data = await window.api.openProjectPath(filePath)
         if (!data) return
@@ -1636,6 +1643,7 @@ function App() {
         // a post-load autosave (a needless full-archive rewrite). See the
         // matching note in the file-picker open path above.
         useProjectStore.getState().markClean()
+        setMissingBinaries((data as any).missingBinaries ?? [])
         window.api.trackRecentProject(project.name, filePath)
       } catch (err) {
         console.error('Failed to open recent project:', err)
@@ -2607,6 +2615,12 @@ function App() {
           />
         )
       })()}
+
+      <MissingBinariesBanner
+        missing={missingBinaries}
+        onResolved={(guid) => setMissingBinaries((prev) => prev.filter((m) => m.guid !== guid))}
+        onDismiss={() => setMissingBinaries([])}
+      />
 
       {loadProgress && (
         <div

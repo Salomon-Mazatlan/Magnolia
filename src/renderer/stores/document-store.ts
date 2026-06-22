@@ -40,6 +40,12 @@ interface DocumentState {
 
   setSources: (sources: TextSource[], contents: Record<string, string>) => void
   addSource: (name: string, content: string, sourceType?: SourceType, formatData?: any) => string // returns guid
+  /** Re-attach binary content to an existing source whose bytes were
+   *  missing from the .qdpx. Replaces its formatData (the new
+   *  magnolia-bin:// handle / pdf data) and text content while preserving
+   *  the source's guid, codes, and selections. Marks the project dirty so
+   *  the next save embeds the recovered bytes. */
+  reattachSourceBinary: (guid: string, formatData: any, content: string) => void
   removeSource: (guid: string) => void
   /** @deprecated use selectDocuments / viewDocument instead */
   selectDocument: (guid: string | null) => void
@@ -226,6 +232,20 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     }))
     useProjectStore.getState().markDirty()
     return guid
+  },
+
+  reattachSourceBinary: (guid, formatData, content) => {
+    const now = new Date().toISOString()
+    const userGuid = useProjectStore.getState().creatingUserGUID
+    set((state) => ({
+      sources: state.sources.map((s) =>
+        s.guid === guid
+          ? { ...s, formatData: formatData || undefined, modifyingUser: userGuid, modifiedDateTime: now }
+          : s
+      ),
+      sourceContents: { ...state.sourceContents, [guid]: content }
+    }))
+    useProjectStore.getState().markDirty()
   },
 
   removeSource: (guid) => {

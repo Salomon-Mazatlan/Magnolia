@@ -20,6 +20,7 @@ const api: ElectronAPI = {
   createNewProjectFile: () => ipcRenderer.invoke('create-new-project-file'),
   importTextFile: () => ipcRenderer.invoke('import-text-file'),
   readTextFiles: (filePaths: string[]) => ipcRenderer.invoke('read-text-files', filePaths),
+  reimportDocument: (sourceType: string) => ipcRenderer.invoke('reimport-document', sourceType),
   openLicence: () => ipcRenderer.invoke('open-licence'),
   openAcknowledgements: () => ipcRenderer.invoke('open-acknowledgements'),
   readAudioFile: (filePath: string) => ipcRenderer.invoke('read-audio-file', filePath),

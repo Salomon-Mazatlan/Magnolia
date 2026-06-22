@@ -397,6 +397,32 @@ export function registerIpcHandlers(): void {
     return readDocumentBatch(validPaths)
   })
 
+  // Re-import the file for an existing document whose bytes are missing
+  // from the .qdpx. Single-file picker filtered to the document's type;
+  // returns the same { name, content, extension, formatting } shape as a
+  // normal import so the renderer can re-attach it to the existing source
+  // (preserving its guid + codes). Returns null if the user cancels.
+  ipcMain.handle('reimport-document', async (_event, sourceType: string) => {
+    const extsFor = (t: string): string[] => {
+      if (t === 'pdf') return ['pdf', 'docx', 'rtf', 'odt']
+      if (t === 'image') return [...IMAGE_EXTENSIONS, ...DECODED_IMAGE_EXTENSIONS]
+      if (t === 'audio') return [...AUDIO_EXTENSIONS]
+      if (t === 'video') return [...VIDEO_EXTENSIONS]
+      return SUPPORTED_EXTENSIONS
+    }
+    const result = await dialog.showOpenDialog({
+      title: 'Re-import Document',
+      filters: [{ name: 'Supported Documents', extensions: extsFor(sourceType) }],
+      properties: ['openFile']
+    })
+    if (result.canceled || result.filePaths.length === 0) return null
+    try {
+      return await readDocumentFile(result.filePaths[0])
+    } catch (err: any) {
+      return { name: basename(result.filePaths[0]), error: err?.message || String(err) }
+    }
+  })
+
   // Read an audio file and return as ArrayBuffer for blob URL creation in
   // renderer. Self-heals from the open .qdpx if the temp copy was reaped.
   ipcMain.handle('read-audio-file', async (_event, filePath: string) => {

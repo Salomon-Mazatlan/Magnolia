@@ -472,14 +472,23 @@ export interface UpdateBadgeState {
   currentVersion: string
 }
 
+/** A document whose binary content (PDF/image/audio/video) is declared in
+ *  the project but absent from the .qdpx — surfaced on load so the user can
+ *  re-import the original file. */
+export interface MissingBinary {
+  guid: string
+  name: string
+  sourceType: string
+}
+
 // IPC API exposed to renderer
 export interface ElectronAPI {
   getFileSize: (filePath: string) => Promise<number | null>
   readPdfFile: (filePath: string) => Promise<Uint8Array>
   onProjectLoadProgress: (callback: (p: { stage: string; current: number; total: number }) => void) => () => void
-  openProject: () => Promise<Project & { sourceContents: Record<string, string> } | null>
+  openProject: () => Promise<Project & { sourceContents: Record<string, string>; missingBinaries?: MissingBinary[] } | null>
   pickProjectFile: () => Promise<string | null>
-  openProjectPath: (filePath: string) => Promise<Project & { sourceContents: Record<string, string> } | null>
+  openProjectPath: (filePath: string) => Promise<Project & { sourceContents: Record<string, string>; missingBinaries?: MissingBinary[] } | null>
   saveProject: (data: {
     project: Project
     sourceContents: Record<string, string>
@@ -500,6 +509,16 @@ export interface ElectronAPI {
   createNewProjectFile: () => Promise<{ filePath: string; projectName: string } | null>
   importTextFile: () => Promise<{ name: string; content: string } | null>
   readTextFiles: (filePaths: string[]) => Promise<{ name: string; content: string }[] | null>
+  /** Re-import the file for an existing document of the given type whose
+   *  bytes are missing from the .qdpx. Returns the read file (to be
+   *  re-attached to the existing source), an error, or null if cancelled. */
+  reimportDocument: (
+    sourceType: string
+  ) => Promise<
+    | { name: string; content: string; extension: string; formatting?: any }
+    | { name: string; error: string }
+    | null
+  >
   /** Open the bundled LICENSE (EUPL-1.2) in the OS's default text viewer. */
   openLicence: () => Promise<void>
   /** Open the bundled THIRD-PARTY-LICENSES.txt in the OS's default text viewer. */

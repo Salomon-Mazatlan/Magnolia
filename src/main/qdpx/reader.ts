@@ -755,9 +755,28 @@ export async function readQdpx(
     for (const g of caseDocGuids) delete sourceContents[g]
   }
 
+  // Detect documents whose binary content is missing from the archive.
+  // A pdf/image/audio/video source should have a non-text `sources/<guid>.*`
+  // entry; if none exists, the bytes were never saved (or an older Magnolia
+  // dropped them), so the viewer would be blank. We surface these so the
+  // renderer can prompt the user to re-import — the only way to recover
+  // bytes that simply aren't in the file.
+  const BINARY_TYPES = new Set(['pdf', 'image', 'audio', 'video'])
+  const zipNames = Object.keys(zip.files)
+  const missingBinaries = (project.sources as any[])
+    .filter((s) => {
+      if (!BINARY_TYPES.has(s.sourceType)) return false
+      const prefix = `sources/${s.guid}.`
+      const hasBinary = zipNames.some(
+        (n) => n.startsWith(prefix) && !zip.files[n].dir && !n.toLowerCase().endsWith('.txt')
+      )
+      return !hasBinary
+    })
+    .map((s) => ({ guid: s.guid, name: s.name, sourceType: s.sourceType }))
+
   // Drop the transient REFI fields so they don't leak into renderer state.
   const { _refiVariables, _refiCases, ...cleanProject } = project as any
   void _refiVariables
   void _refiCases
-  return { ...cleanProject, sourceContents }
+  return { ...cleanProject, sourceContents, missingBinaries }
 }
