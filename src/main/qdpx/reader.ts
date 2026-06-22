@@ -96,6 +96,12 @@ interface PdfSelectionQuirks {
 function getPdfSelectionQuirks(origin: string): PdfSelectionQuirks {
   const o = origin.toLowerCase()
   if (o.startsWith('maxqda')) return { pageBase: 1, unitScale: 1, yFlip: true }
+  // Atlas.ti writes <PDFSelection> in PDF-native bottom-left origin with
+  // 0-based page numbers (page="0" is the first page), so flip Y and add 1
+  // to match Magnolia's top-origin, 1-based page model. Only affects
+  // region-only PDF codings — text codings ride the char-offset
+  // <PlainTextSelection> instead.
+  if (o.startsWith('atlas')) return { pageBase: 1, unitScale: 1, yFlip: true }
   // Add more known tools here as they come up.
   return { pageBase: 0, unitScale: 1, yFlip: false }
 }
@@ -289,6 +295,16 @@ export async function readQdpx(
           // Convert raw <PDFSelection> rectangles into either character-
           // offset text selections (preferred — works with hover/search)
           // or region-based box selections (fallback for non-text areas).
+          //
+          // Atlas.ti (and others) export the SAME coding twice: as a
+          // <PDFSelection> page rectangle AND as a char-offset
+          // <PlainTextSelection> inside the <Representation> (same selection
+          // guid). The char-offset form is already in source.selections from
+          // the deserializer and is reliable; the rectangle needs lossy
+          // coordinate conversion. So we keep the existing text selections and
+          // only convert region PDFSelections whose guid isn't already
+          // represented — otherwise we'd clobber a correct text coding with a
+          // mis-placed box (the bug that made Atlas.ti PDF codings vanish).
           const rawSelections: RawPdfSelection[] = (source as any)._rawPdfSelections || []
           if (rawSelections.length > 0) {
             const quirks = getPdfSelectionQuirks(project.origin || '')
@@ -299,9 +315,11 @@ export async function readQdpx(
               arr.push(it)
               itemsByPage.set(it.page, arr)
             }
-            source.selections = rawSelections.map((raw) =>
-              convertPdfSelection(raw, quirks, pageSizes, itemsByPage)
-            )
+            const existingGuids = new Set(source.selections.map((s) => s.guid))
+            const converted = rawSelections
+              .filter((raw) => !existingGuids.has(raw.guid))
+              .map((raw) => convertPdfSelection(raw, quirks, pageSizes, itemsByPage))
+            source.selections = [...source.selections, ...converted]
           }
 
           ;(source as any).formatData = {
