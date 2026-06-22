@@ -676,11 +676,11 @@ export interface Memo {
   modifiedDateTime?: string
   /** For document memos: the source guid(s) they are attached to */
   sourceGuids?: string[]
-  /** For content memos: the source guid and codepoint range */
+  /** For selection memos: the source guid and codepoint range */
   sourceGuid?: string
   startPosition?: number
   endPosition?: number
-  /** For content memos attached to a box selection on a PDF, this is the
+  /** For selection memos attached to a box selection on a PDF, this is the
    *  page-relative rectangle they apply to. startPosition/endPosition are
    *  still present (usually 0) as a fallback. */
   pdfRegion?: PdfRegionSelection
@@ -698,7 +698,7 @@ export interface Memo {
    *  to. `sourceGuid` is also set (to the survey source). One memo
    *  per (survey, respondent). */
   respondentId?: string
-  /** For content memos created inside a survey cell: the cell the
+  /** For selection memos created inside a survey cell: the cell the
    *  memo applies to. startPosition / endPosition are CELL-relative
    *  when this is set, just like for survey-scoped selections. */
   surveyCell?: {

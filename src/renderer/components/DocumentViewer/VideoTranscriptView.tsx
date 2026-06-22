@@ -501,7 +501,7 @@ export function VideoTranscriptView({
   }, [displayRows])
 
   /** Translate a code's time range to a cp range covering every real
-   *  line inside the range. Used when the user picks "Add Content Memo"
+   *  line inside the range. Used when the user picks "Add Selection Memo"
    *  or "Add as Quote" from a bracket label — memos/quotes anchor by
    *  cp (matching the plain-text viewer), so the bracket's coded text
    *  becomes the quote body / memo anchor. */
@@ -1349,7 +1349,7 @@ export function VideoTranscriptView({
           to the line-anchor + time-range data model.
           • Remove Code: drops the coding; if it was the only coding on
             the selection, the selection itself is removed.
-          • Add Content Memo: attaches a memo to the bracket's transcript
+          • Add Selection Memo: attaches a memo to the bracket's transcript
             line range (startPosition / endPosition carry line indexes).
           • Add as Quote: captures the concatenated text of the bracket's
             transcript lines as the quote body. */}
@@ -1401,7 +1401,7 @@ export function VideoTranscriptView({
                 setLabelMenu(null)
               }}
             >
-              Add Content Memo
+              Add Selection Memo
             </div>
             <div className="context-menu-separator" />
             <div
@@ -1426,7 +1426,7 @@ export function VideoTranscriptView({
           the other viewers expose (CodedTextView, PdfDocumentViewer):
             • Apply Code  — hotkeyed codes only, like DocumentViewer's menu
             • Add as Quote  — captures the selected lines' text
-            • Add Content Memo  — anchors to the line range or single line
+            • Add Selection Memo  — anchors to the line range or single line
           Quote/Apply require a line selection; Add Memo always works (it
           falls back to the right-clicked line when nothing is selected). */}
       {transcriptMenu && (() => {
@@ -1537,7 +1537,7 @@ export function VideoTranscriptView({
                   setTranscriptMenu(null)
                 }}
               >
-                Add Content Memo
+                Add Selection Memo
               </div>
             )}
           </div>

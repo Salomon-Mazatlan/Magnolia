@@ -435,7 +435,7 @@ export function PdfDocumentViewer({ source, content }: Props) {
         .filter((s) => s.pdfRegion && regionContains(s.pdfRegion))
         .sort((a, b) => (a.pdfRegion!.width * a.pdfRegion!.height) - (b.pdfRegion!.width * b.pdfRegion!.height))
       // If no explicit selection is pending, treat the smallest hit box as the
-      // implicit target so "Add Content Memo" / "Add as Quote" attach to the
+      // implicit target so "Add Selection Memo" / "Add as Quote" attach to the
       // same region as the existing coding.
       if (!ps && boxCandidates.length > 0) {
         const r = boxCandidates[0].pdfRegion!
@@ -471,7 +471,7 @@ export function PdfDocumentViewer({ source, content }: Props) {
       }
     }
 
-    // Pin the click position on the PDF page so "Add Content Memo" with
+    // Pin the click position on the PDF page so "Add Selection Memo" with
     // no selection creates a point memo at exactly that spot. Skipped when
     // a pending or implicit selection is present — those carry their own
     // anchor.
@@ -935,7 +935,7 @@ export function PdfDocumentViewer({ source, content }: Props) {
               const p = contextMenu.context.pdfPoint
               handleCreateMemo(0, 0, { page: p.page, x: p.x, y: p.y, width: 0, height: 0 })
             }
-          }}>Add Content Memo</div>
+          }}>Add Selection Memo</div>
           {contextMenu.context.overlappingMemos && contextMenu.context.overlappingMemos.length > 0 && (
             <>
               <div className="context-menu-separator" />

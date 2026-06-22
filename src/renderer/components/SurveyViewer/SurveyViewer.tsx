@@ -30,7 +30,7 @@
  *     create one selection + coding per cell, tagged with the
  *     `surveyCell` extension on PlainTextSelection.
  *
- *   - Content memos and quotes created from the survey context menu
+ *   - Selection memos and quotes created from the survey context menu
  *     get the same `surveyCell` extension, so a re-render filters
  *     them to the cell they belong to and CodedTextView paints their
  *     underlines without any extra work.
@@ -438,7 +438,7 @@ function selectionsForCell(
   )
 }
 
-/** Content memos filtered to a cell. */
+/** Selection memos filtered to a cell. */
 function memosForCell(
   memos: Memo[],
   sourceGuid: string,
@@ -2913,7 +2913,7 @@ export function SurveyViewer({ source }: Props) {
             <>
               <div className="context-menu-separator" />
               <div className="context-menu-item" onClick={handleAddContentMemo}>
-                Add Content Memo
+                Add Selection Memo
               </div>
             </>
           )}

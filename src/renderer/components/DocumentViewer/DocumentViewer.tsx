@@ -309,7 +309,7 @@ export function DocumentViewer() {
     [selectedGuid, source, removeCoding, removeSelection]
   )
 
-  // Create a content memo at the current selection or click point
+  // Create a selection memo at the current selection or click point
   const handleCreateContentMemo = useCallback(
     (startCp: number, endCp: number) => {
       if (!selectedGuid) return
@@ -732,7 +732,7 @@ export function DocumentViewer() {
             </>
           )}
 
-          {/* Content memo */}
+          {/* Selection memo */}
           {/* Memos in text contexts must attach to a range — no point
               memos. Only show this item when the user has a live text
               selection. */}
@@ -748,7 +748,7 @@ export function DocumentViewer() {
                   )
                 }}
               >
-                Add Content Memo
+                Add Selection Memo
               </div>
             </>
           )}

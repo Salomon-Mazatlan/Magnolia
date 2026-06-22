@@ -608,7 +608,7 @@ export function TranscriptEditor({
               <div className="context-menu-separator" />
               <div className="context-menu-item" onClick={() => {
                 handleCreateMemo(contextMenu.context.pendingSelection!.startCp, contextMenu.context.pendingSelection!.endCp)
-              }}>Add Content Memo</div>
+              }}>Add Selection Memo</div>
             </>
           )}
           {contextMenu.context.overlappingMemos && contextMenu.context.overlappingMemos.length > 0 && (

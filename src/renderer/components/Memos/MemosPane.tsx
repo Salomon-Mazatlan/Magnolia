@@ -331,7 +331,7 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
   const setSurveyScrollTarget = useSurveyViewStore((s) => s.setScrollTarget)
 
   // Single-click on a memo navigates to its associated document (and scrolls
-  // to the anchor for content memos). Project/analysis memos have no doc.
+  // to the anchor for selection memos). Project/analysis memos have no doc.
   const handleSingleClickMemo = useCallback((memo: Memo) => {
     // Survey-question memo → switch to Question view of that question.
     if (memo.type === 'survey-question' && memo.sourceGuid && memo.questionGuid) {
@@ -395,7 +395,7 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
   )
   const contentMemos = useMemo(
     () => memos.filter((m) =>
-      // Plain content memos (range / point / survey-span).
+      // Plain selection memos (range / point / survey-span).
       (m.type === 'content' || m.type === 'survey-cell') &&
       m.sourceGuid === viewedDocumentGuid
     ),
@@ -679,7 +679,7 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
               )}
               {showContent && (
                 <MemoSection
-                  title="Content Memos"
+                  title="Selection Memos"
                   memos={contentMemos}
                   selectedGuids={selectedGuids}
                   onItemClick={handleItemClick}

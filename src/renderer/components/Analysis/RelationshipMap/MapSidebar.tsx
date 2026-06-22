@@ -404,7 +404,7 @@ export function MapSidebar({ data, visible }: Props) {
   const memos = (data.memos || []).filter((m) => !lower || m.title.toLowerCase().includes(lower))
   const projectMemos = memos.filter((m) => m.type === 'project')
   const analysisMemos = memos.filter((m) => m.type === 'analysis')
-  // Document & content memos grouped by their parent source
+  // Document & selection memos grouped by their parent source
   const docMemos = memos.filter((m) => m.type === 'document' || m.type === 'content')
   const memosBySource = new Map<string, typeof docMemos>()
   for (const m of docMemos) {

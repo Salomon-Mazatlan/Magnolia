@@ -159,7 +159,7 @@ export function MemoQuoteIcons({
           quote sits at the same Y so they stack side-by-side. */}
       {memoGroups.map((g, i) => {
         const firstItem = g.items[0]
-        const titles = g.items.map((it) => it.title || 'Content Memo').join(', ')
+        const titles = g.items.map((it) => it.title || 'Selection Memo').join(', ')
         const isRanged = !!firstItem.isRanged
         return (
           <div

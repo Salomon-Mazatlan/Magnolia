@@ -832,7 +832,7 @@ export function CodedTextView({
       )
       const hasMemo = segMemos.length > 0
 
-      const memoTitles = segMemos.map((m) => m.title || 'Content Memo').join(', ')
+      const memoTitles = segMemos.map((m) => m.title || 'Selection Memo').join(', ')
       const codeTitles = hasHighlight
         ? span.activeCodes.map((ac) => codeMap.get(ac.codeGuid)?.name).filter(Boolean).join(', ')
         : ''
@@ -914,7 +914,7 @@ export function CodedTextView({
     overlay.innerHTML = ''
 
     // Bail only when there's nothing at all to paint. Memos and
-    // quotes are independent of selections — a content memo or quote
+    // quotes are independent of selections — a selection memo or quote
     // can exist on uncoded text — so previously bailing on
     // `selections.length === 0` meant their icons never reached the
     // overlay.
