@@ -5,8 +5,7 @@ import type {
   Code,
   TextSource,
   PlainTextSelection,
-  Coding,
-  Memo
+  Coding
 } from '../../renderer/models/types'
 import {
   surveyToRefi,
@@ -501,57 +500,15 @@ export function serializeProject(project: Project): string {
     }
   }
 
-  // Anchor memos to their target with REFI-QDA <NoteRef> so the link
-  // survives in other tools. Document memos → a NoteRef on the source.
-  // Text content memos (a span on a text source) → a NoteRef-bearing
-  // PlainTextSelection (no Coding) carrying the span. Other memo types
-  // (survey / analysis / query / PDF-region content) stay project-level.
-  if (project.memos && project.memos.length > 0 && p.Sources) {
-    const docMemosBySource = new Map<string, string[]>()
-    const spanMemosBySource = new Map<string, Memo[]>()
-    for (const m of project.memos) {
-      if (m.type === 'document' && m.sourceGuids) {
-        for (const sg of m.sourceGuids) {
-          const a = docMemosBySource.get(sg) ?? []
-          a.push(m.guid)
-          docMemosBySource.set(sg, a)
-        }
-      } else if (m.type === 'content' && m.sourceGuid && !m.surveyCell && !m.pdfRegion) {
-        const a = spanMemosBySource.get(m.sourceGuid) ?? []
-        a.push(m)
-        spanMemosBySource.set(m.sourceGuid, a)
-      }
-    }
-    const addDocRefs = (sx: any): void => {
-      const refs = docMemosBySource.get(sx['@_guid'])
-      if (refs && refs.length > 0) sx.NoteRef = refs.map((g) => ({ '@_targetGUID': g }))
-    }
-    for (const sx of (p.Sources.TextSource ?? []) as any[]) {
-      const spans = spanMemosBySource.get(sx['@_guid'])
-      if (spans && spans.length > 0) {
-        const sels: any[] = Array.isArray(sx.PlainTextSelection)
-          ? sx.PlainTextSelection
-          : sx.PlainTextSelection
-            ? [sx.PlainTextSelection]
-            : []
-        for (const m of spans) {
-          sels.push({
-            '@_guid': representationGuidFor(m.guid),
-            '@_startPosition': String(m.startPosition ?? 0),
-            '@_endPosition': String(m.endPosition ?? 0),
-            '@_name': m.title || 'Memo',
-            NoteRef: { '@_targetGUID': m.guid }
-          })
-        }
-        sx.PlainTextSelection = sels
-      }
-      addDocRefs(sx)
-    }
-    for (const sx of (p.Sources.PDFSource ?? []) as any[]) addDocRefs(sx)
-    for (const sx of (p.Sources.AudioSource ?? []) as any[]) addDocRefs(sx)
-    for (const sx of (p.Sources.PictureSource ?? []) as any[]) addDocRefs(sx)
-    for (const sx of (p.Sources.VideoSource ?? []) as any[]) addDocRefs(sx)
-  }
+  // Memos are emitted as project-level <Note>s below — NOT anchored via
+  // <NoteRef>. Atlas.ti's own REFI export represents every memo as a free
+  // <Note> with no NoteRef (see MemosAtlas.qdpx), and it does not round-trip
+  // anchors: a <NoteRef> on a <Source> made Atlas drop the document memo
+  // entirely, and a NoteRef-bearing selection came back unanchored. So we
+  // match Atlas's format to guarantee memos always appear in both tools.
+  // Full anchoring (which document / selection / survey / analysis a memo
+  // belongs to) is preserved losslessly for Magnolia↔Magnolia via
+  // magnolia-memos.json; it just can't survive a trip through Atlas.
 
   // Notes (memos) — emitted as REFI-QDA project-level <Note>s so memos
   // round-trip with other tools (Atlas.ti / MAXQDA), which is how Atlas
