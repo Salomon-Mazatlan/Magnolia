@@ -795,7 +795,8 @@ function App() {
     const project = collectProject()
     const result = await window.api.saveProjectAs({
       project,
-      sourceContents: documentStore.sourceContents
+      sourceContents: documentStore.sourceContents,
+      currentFilePath: projectStore.filePath ?? undefined
     })
     if (result && typeof result === 'object' && (result as any).guardBlocked) {
       console.warn('[save-project-as guard]', (result as any).message)
@@ -831,11 +832,32 @@ function App() {
     }
   }, [projectStore.isDirty, projectStore.filePath, handleSaveProject])
 
+  // Keep the main process told which .qdpx is open, so it can regenerate
+  // any media temp file the OS reaps mid-session straight from the archive
+  // — the viewers never go blank just because temp was cleaned.
+  useEffect(() => {
+    window.api.setActiveProjectPath(projectStore.filePath ?? null)
+  }, [projectStore.filePath])
+
   // Hold the latest handleSaveProject in a ref so callbacks registered
   // via useEffect (which run once) can still invoke it against the
   // current closure — used for event-driven flushes like memo Save&Close.
   const saveProjectRef = useRef(handleSaveProject)
   useEffect(() => { saveProjectRef.current = handleSaveProject }, [handleSaveProject])
+
+  // Eager-persist after an import: an imported file must become part of the
+  // .qdpx immediately, not 2 seconds later when autosave happens to fire
+  // (by which point its temp working copy could already be reaped). Flush a
+  // save now whenever the project is backed by a file on disk; an unsaved
+  // brand-new project is left alone so importing doesn't pop a Save dialog.
+  // Deferred a tick so the document store's addSource has settled before
+  // collectProject reads it (mirrors the post-load flush pattern elsewhere).
+  const flushImportSave = useCallback((added: boolean) => {
+    if (!added) return
+    if (!useProjectStore.getState().filePath) return
+    cancelPendingAutoSave()
+    setTimeout(() => saveProjectRef.current(), 0)
+  }, [cancelPendingAutoSave])
 
   // Drop files anywhere over the main window → import. The Document
   // Browser keeps its own drop handlers (which call stopPropagation),
@@ -848,6 +870,7 @@ function App() {
     const files = await window.api.readTextFiles(filePaths)
     if (!files) return
     const errors: string[] = []
+    let addedDirect = false
     for (const f of files) {
       if ((f as any).error) {
         errors.push(`${f.name}: ${(f as any).error}`)
@@ -862,17 +885,20 @@ function App() {
       const sourceType = sourceTypeFromExtension(ext)
       const formatting = (f as any).formatting
       documentStore.addSource(f.name, f.content, sourceType !== 'text' ? sourceType : undefined, formatting)
+      addedDirect = true
     }
     if (errors.length > 0) {
       window.alert(`Could not import ${errors.length} file${errors.length > 1 ? 's' : ''}:\n\n${errors.join('\n')}`)
     }
-  }, [documentStore, queueSurveyImport])
+    flushImportSave(addedDirect)
+  }, [documentStore, queueSurveyImport, flushImportSave])
 
   const handleImportDocument = useCallback(async () => {
     const files = await window.api.importTextFile()
     if (!files) return
     const fileArray = Array.isArray(files) ? files : [files]
     const errors: string[] = []
+    let addedDirect = false
     for (const file of fileArray) {
       if ((file as any).error) {
         errors.push(`${file.name}: ${(file as any).error}`)
@@ -891,11 +917,13 @@ function App() {
       const sourceType = sourceTypeFromExtension(ext)
       const formatting = (file as any).formatting
       documentStore.addSource(file.name, file.content, sourceType !== 'text' ? sourceType : undefined, formatting)
+      addedDirect = true
     }
     if (errors.length > 0) {
       window.alert(`Could not import ${errors.length} file${errors.length > 1 ? 's' : ''}:\n\n${errors.join('\n')}`)
     }
-  }, [documentStore, queueSurveyImport])
+    flushImportSave(addedDirect)
+  }, [documentStore, queueSurveyImport, flushImportSave])
 
   const openQueryBuilder = useCallback((editSavedQueryGuid?: string, editCurrentQuery?: boolean) => {
     // Editing a saved query enforces one tab per saved query (and

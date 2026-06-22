@@ -1,12 +1,79 @@
 import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import { readFile, writeFile, stat, unlink } from 'fs/promises'
 import { existsSync, mkdirSync } from 'fs'
-import { basename, join } from 'path'
+import { basename, dirname, join } from 'path'
+import JSZip from 'jszip'
 import { readQdpx } from './qdpx/reader'
 import { writeQdpx, EmptyProjectGuardError, createEmptyProjectFile } from './qdpx/writer'
 import { serializeCodebook } from './qdpx/codebook-serializer'
 import { deserializeCodebook } from './qdpx/codebook-deserializer'
 import type { Project, Code } from '../renderer/models/types'
+
+// Path to the .qdpx currently open in the renderer, set via the
+// 'set-active-project-path' IPC whenever the renderer's project file
+// changes. Used to self-heal media temp files: the reader extracts each
+// PDF / image / audio / video binary to a temp file named `<guid>.<ext>`
+// and the viewers read those on demand. If the OS reaps a temp file
+// mid-session (sleep/wake, aggressive cleaners, age-out), the read would
+// fail and the viewer would go blank. Instead we regenerate the temp file
+// from the source bytes still inside the open .qdpx — the archive is the
+// source of truth, temp is just a disposable cache. (Stage 2 will remove
+// the temp round-trip entirely; this keeps the cache honest in the
+// meantime with no change to any viewer.)
+let activeProjectPath: string | null = null
+
+/** Regenerate a reaped media temp file from the open .qdpx. Reader-created
+ *  temp files are named `<guid>.<ext>`, so the source guid is the temp
+ *  basename; we pull `sources/<guid>.<ext>` out of the archive, rewrite the
+ *  temp file in place (so later reads hit the fast path), and return the
+ *  bytes. Returns null when the bytes can't be recovered — no open project,
+ *  the path isn't guid-keyed (a fresh import temp, which won't have been
+ *  reaped), or the binary genuinely isn't in the archive. */
+async function regenerateMediaTemp(filePath: string): Promise<Buffer | null> {
+  if (!activeProjectPath) return null
+  const file = basename(filePath)
+  const dotAt = file.lastIndexOf('.')
+  const guid = dotAt > 0 ? file.slice(0, dotAt) : file
+  try {
+    const zip = await JSZip.loadAsync(await readFile(activeProjectPath))
+    let entry = zip.file(`sources/${file}`)
+    if (!entry) {
+      // Extension may differ from the temp file's (e.g. an older export) —
+      // match any non-text `sources/<guid>.*` entry.
+      const prefix = `sources/${guid}.`
+      const altName = Object.keys(zip.files).find(
+        (n) => n.startsWith(prefix) && !zip.files[n].dir && !n.toLowerCase().endsWith('.txt')
+      )
+      if (altName) entry = zip.file(altName)
+    }
+    if (!entry) return null
+    const buf = await entry.async('nodebuffer')
+    // Re-cache the temp file so subsequent reads avoid the unzip. Best
+    // effort: if this fails we still return the bytes we recovered.
+    try {
+      mkdirSync(dirname(filePath), { recursive: true })
+      await writeFile(filePath, buf)
+    } catch { /* couldn't re-cache; bytes returned below regardless */ }
+    return buf
+  } catch {
+    return null
+  }
+}
+
+/** Read a media temp file, self-healing from the open .qdpx if the OS has
+ *  reaped it. Throws the original ENOENT only when the bytes are genuinely
+ *  unrecoverable, so callers' existing "file not available" handling is
+ *  preserved. */
+async function readMediaFile(filePath: string): Promise<Buffer> {
+  try {
+    return await readFile(filePath)
+  } catch (e: any) {
+    if (e?.code !== 'ENOENT') throw e
+    const regenerated = await regenerateMediaTemp(filePath)
+    if (regenerated) return regenerated
+    throw e
+  }
+}
 
 /** Paper sizes offered in Preferences, mapped to Electron printToPDF
  *  `pageSize` strings. */
@@ -43,9 +110,16 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('read-pdf-file', async (_event, filePath: string) => {
     // Return raw PDF bytes as a Uint8Array. Electron's structured clone
     // sends this as-is without base64 overhead, which is much faster than
-    // passing a base64 string through contextBridge.
-    const buffer = await readFile(filePath)
+    // passing a base64 string through contextBridge. Self-heals from the
+    // open .qdpx if the temp copy was reaped.
+    const buffer = await readMediaFile(filePath)
     return new Uint8Array(buffer)
+  })
+
+  // Record which .qdpx the renderer currently has open, so the media read
+  // handlers can regenerate reaped temp files from it on demand.
+  ipcMain.handle('set-active-project-path', (_event, filePath: string | null) => {
+    activeProjectPath = filePath || null
   })
 
   ipcMain.handle('open-project', async (event) => {
@@ -127,7 +201,7 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('save-project-as', async (_event, data: { project: Project; sourceContents: Record<string, string> }) => {
+  ipcMain.handle('save-project-as', async (_event, data: { project: Project; sourceContents: Record<string, string>; currentFilePath?: string }) => {
     const result = await dialog.showSaveDialog({
       title: 'Save QDPX Project As',
       defaultPath: `${data.project.name}.qdpx`,
@@ -135,7 +209,12 @@ export function registerIpcHandlers(): void {
     })
     if (result.canceled || !result.filePath) return null
     try {
-      await writeQdpx(result.filePath, data.project, data.sourceContents)
+      // Carry imported binaries forward from the project that's currently
+      // open (a different path than the Save As target), so reaped temp
+      // copies don't get dropped when the project moves to a new file.
+      await writeQdpx(result.filePath, data.project, data.sourceContents, {
+        carryForwardFrom: data.currentFilePath
+      })
     } catch (e) {
       if (e instanceof EmptyProjectGuardError) {
         console.warn('[save-project-as guard]', e.message)
@@ -349,21 +428,24 @@ export function registerIpcHandlers(): void {
     return readDocumentBatch(validPaths)
   })
 
-  // Read an audio file and return as ArrayBuffer for blob URL creation in renderer
+  // Read an audio file and return as ArrayBuffer for blob URL creation in
+  // renderer. Self-heals from the open .qdpx if the temp copy was reaped.
   ipcMain.handle('read-audio-file', async (_event, filePath: string) => {
-    const buffer = await readFile(filePath)
+    const buffer = await readMediaFile(filePath)
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   })
 
-  // Read an image file and return as ArrayBuffer for blob URL creation in renderer
+  // Read an image file and return as ArrayBuffer for blob URL creation in
+  // renderer. Self-heals from the open .qdpx if the temp copy was reaped.
   ipcMain.handle('read-image-file', async (_event, filePath: string) => {
-    const buffer = await readFile(filePath)
+    const buffer = await readMediaFile(filePath)
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   })
 
-  // Read a video file and return as ArrayBuffer for blob URL creation in renderer
+  // Read a video file and return as ArrayBuffer for blob URL creation in
+  // renderer. Self-heals from the open .qdpx if the temp copy was reaped.
   ipcMain.handle('read-video-file', async (_event, filePath: string) => {
-    const buffer = await readFile(filePath)
+    const buffer = await readMediaFile(filePath)
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   })
 

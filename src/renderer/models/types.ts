@@ -488,7 +488,15 @@ export interface ElectronAPI {
   saveProjectAs: (data: {
     project: Project
     sourceContents: Record<string, string>
+    /** Path of the project currently open, so the writer can carry
+     *  imported binaries forward to the new file even if their temp
+     *  working copies have been reaped. */
+    currentFilePath?: string
   }) => Promise<string | null>
+  /** Tell main which .qdpx is currently open, so reaped media temp files
+   *  can be regenerated from it on demand. Pass null when no project is
+   *  open. */
+  setActiveProjectPath: (filePath: string | null) => Promise<void>
   createNewProjectFile: () => Promise<{ filePath: string; projectName: string } | null>
   importTextFile: () => Promise<{ name: string; content: string } | null>
   readTextFiles: (filePaths: string[]) => Promise<{ name: string; content: string }[] | null>

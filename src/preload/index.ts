@@ -4,6 +4,7 @@ import type { ElectronAPI } from '../renderer/models/types'
 const api: ElectronAPI = {
   getFileSize: (filePath: string) => ipcRenderer.invoke('get-file-size', filePath),
   readPdfFile: (filePath: string) => ipcRenderer.invoke('read-pdf-file', filePath),
+  setActiveProjectPath: (filePath: string | null) => ipcRenderer.invoke('set-active-project-path', filePath),
   onProjectLoadProgress: (callback: (p: { stage: string; current: number; total: number }) => void) => {
     const handler = (_event: any, p: { stage: string; current: number; total: number }) => callback(p)
     ipcRenderer.on('project-load-progress', handler)
