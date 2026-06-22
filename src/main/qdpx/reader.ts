@@ -1,14 +1,12 @@
 import JSZip from 'jszip'
-import { readFile, writeFile } from 'fs/promises'
+import { readFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
-import { existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
-import { app } from 'electron'
 import { deserializeProject } from './xml-deserializer'
 import type { RawPdfSelection, RawPictureSelection, RawVideoSelection } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
 import type { Project, PlainTextSelection } from '../../renderer/models/types'
 import { extractPdfTextWithPositions, type PdfTextItem } from '../pdf-extract'
+import { archiveHandle } from '../binary-store'
 
 const IMAGE_MIME_BY_EXT: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -267,11 +265,10 @@ export async function readQdpx(
       if (match) {
         const pdfFile = zip.file(`sources/${match[1]}`)
         if (pdfFile) {
+          // Bytes are read only to extract searchable text + positions; the
+          // viewer fetches the PDF itself through the magnolia-bin:// handle
+          // straight from the .qdpx — no temp file is written.
           const pdfBuf = await pdfFile.async('nodebuffer')
-          const tempDir = join(app.getPath('temp'), 'magnolia-pdfs')
-          if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-          const tempPath = join(tempDir, `${source.guid}.pdf`)
-          await writeFile(tempPath, pdfBuf)
 
           let extractedText = ''
           let pageOffsets: number[] = []
@@ -308,7 +305,7 @@ export async function readQdpx(
           }
 
           ;(source as any).formatData = {
-            pdfFilePath: tempPath,
+            pdfFilePath: archiveHandle(source.guid, 'pdf'),
             pdfPageOffsets: pageOffsets
           }
           sourceContents[source.guid] = extractedText
@@ -323,21 +320,16 @@ export async function readQdpx(
       return
     }
 
-    // Video sources (<VideoSource>): write the video binary to a temp file
-    // and convert any <VideoSelection> time-range codings into Magnolia's
-    // timeRange-based PlainTextSelections.
+    // Video sources (<VideoSource>): the viewer fetches the binary through
+    // the magnolia-bin:// handle straight from the .qdpx (no temp file). We
+    // still convert any <VideoSelection> time-range codings here.
     if ((source as any).sourceType === 'video' && source.plainTextPath) {
       const match = source.plainTextPath.match(/internal:\/\/(.+)/)
       if (match) {
         const internalName = match[1]
         const vidFile = zip.file(`sources/${internalName}`)
         if (vidFile) {
-          const vidBuf = await vidFile.async('nodebuffer')
           const ext = (internalName.split('.').pop() || 'mp4').toLowerCase()
-          const tempDir = join(app.getPath('temp'), 'magnolia-videos')
-          if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-          const tempPath = join(tempDir, `${source.guid}.${ext}`)
-          await writeFile(tempPath, vidBuf)
 
           const rawVideoSelections: RawVideoSelection[] =
             (source as any)._rawVideoSelections || []
@@ -346,7 +338,7 @@ export async function readQdpx(
           }
 
           ;(source as any).formatData = {
-            videoFilePath: tempPath,
+            videoFilePath: archiveHandle(source.guid, ext),
             mimeType: VIDEO_MIME_BY_EXT[ext] || 'video/mp4',
             duration: 0,
             videoExt: ext
@@ -371,21 +363,17 @@ export async function readQdpx(
       return
     }
 
-    // Image sources (<PictureSource>): write the image binary to a temp
-    // file and convert any rectangle <PictureSelection> codings into
-    // Magnolia's region-based selections (page=1, pixel coords).
+    // Image sources (<PictureSource>): the viewer fetches the binary through
+    // the magnolia-bin:// handle straight from the .qdpx (no temp file). We
+    // still convert any rectangle <PictureSelection> codings into Magnolia's
+    // region-based selections (page=1, pixel coords).
     if ((source as any).sourceType === 'image' && source.plainTextPath) {
       const match = source.plainTextPath.match(/internal:\/\/(.+)/)
       if (match) {
         const internalName = match[1]
         const imgFile = zip.file(`sources/${internalName}`)
         if (imgFile) {
-          const imgBuf = await imgFile.async('nodebuffer')
           const ext = (internalName.split('.').pop() || 'png').toLowerCase()
-          const tempDir = join(app.getPath('temp'), 'magnolia-images')
-          if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-          const tempPath = join(tempDir, `${source.guid}.${ext}`)
-          await writeFile(tempPath, imgBuf)
 
           const rawPictureSelections: RawPictureSelection[] =
             (source as any)._rawPictureSelections || []
@@ -394,7 +382,7 @@ export async function readQdpx(
           }
 
           ;(source as any).formatData = {
-            imageFilePath: tempPath,
+            imageFilePath: archiveHandle(source.guid, ext),
             mimeType: IMAGE_MIME_BY_EXT[ext] || 'application/octet-stream',
             imageExt: ext
           }
@@ -600,42 +588,34 @@ export async function readQdpx(
             }
           }
           if (meta.formatData) {
-            // Restore PDF binary to a temp file. The viewer loads it on
-            // demand via IPC, avoiding a large base64 string in memory.
+            // Binary sources are served to the viewers through a
+            // magnolia-bin:// handle that resolves straight from this .qdpx
+            // — no temp file is written. We only confirm the bytes are
+            // present in the archive before advertising the handle.
             if (meta.formatData.hasPdfBinary) {
               const pdfFile = zip.file(`sources/${meta.guid}.pdf`)
               if (pdfFile) {
-                const pdfBuf = await pdfFile.async('nodebuffer')
-                const tempDir = join(app.getPath('temp'), 'magnolia-pdfs')
-                if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-                const tempPath = join(tempDir, `${meta.guid}.pdf`)
-                await writeFile(tempPath, pdfBuf)
                 ;(source as any).formatData = {
-                  pdfFilePath: tempPath,
+                  pdfFilePath: archiveHandle(meta.guid, 'pdf'),
                   pdfPageOffsets: meta.formatData.pdfPageOffsets
                 }
               }
             } else if (meta.formatData.hasAudioBinary) {
-              // Restore audio binary: write to temp file, store path.
               // Newer exports save the file with its real extension
-              // (m4a / mp3 / wav / etc.) so other QDA tools can read
-              // the AudioSource path attribute. Older exports used the
-              // literal "audio" extension — try the recorded ext first
-              // and fall back to ".audio" for those projects.
+              // (m4a / mp3 / wav / etc.); older ones used the literal
+              // "audio" extension — try the recorded ext first and fall
+              // back to ".audio" for those projects.
               const audioExt = (meta.formatData.audioExt as string | undefined) || 'audio'
               let audioFile = zip.file(`sources/${meta.guid}.${audioExt}`)
+              let resolvedExt = audioExt
               if (!audioFile && audioExt !== 'audio') {
                 audioFile = zip.file(`sources/${meta.guid}.audio`)
+                resolvedExt = 'audio'
               }
               if (audioFile) {
-                const audioBuf = await audioFile.async('nodebuffer')
-                const tempDir = join(app.getPath('temp'), 'magnolia-audio')
-                if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-                const tempPath = join(tempDir, `${meta.guid}.${audioExt}`)
-                await writeFile(tempPath, audioBuf)
                 ;(source as any).formatData = {
-                  audioFilePath: tempPath,
-                  audioExt,
+                  audioFilePath: archiveHandle(meta.guid, resolvedExt),
+                  audioExt: resolvedExt,
                   mimeType: meta.formatData.mimeType,
                   duration: meta.formatData.duration,
                   channels: meta.formatData.channels,
@@ -644,22 +624,13 @@ export async function readQdpx(
                 }
               }
             } else if (meta.formatData.hasVideoBinary) {
-              // Restore video binary: the XML already produced a temp file
-              // via VideoSource parsing, but we still refresh from the
-              // sources/${guid}.${ext} entry to pick up the current export.
-              // Also restore lineTimes (Magnolia-specific transcript tags).
               const ext = meta.formatData.videoExt || 'mp4'
               const vidFile = zip.file(`sources/${meta.guid}.${ext}`)
               const existing = (source as any).formatData || {}
               if (vidFile) {
-                const vidBuf = await vidFile.async('nodebuffer')
-                const tempDir = join(app.getPath('temp'), 'magnolia-videos')
-                if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-                const tempPath = join(tempDir, `${meta.guid}.${ext}`)
-                await writeFile(tempPath, vidBuf)
                 ;(source as any).formatData = {
                   ...existing,
-                  videoFilePath: tempPath,
+                  videoFilePath: archiveHandle(meta.guid, ext),
                   mimeType: meta.formatData.mimeType || existing.mimeType,
                   duration: meta.formatData.duration ?? existing.duration ?? 0,
                   width: meta.formatData.width,
@@ -677,18 +648,11 @@ export async function readQdpx(
                 }
               }
             } else if (meta.formatData.hasImageBinary) {
-              // Image saved by an earlier Magnolia session — find the
-              // sources/${guid}.${ext} file and write it back to a temp path.
               const ext = meta.formatData.imageExt || 'png'
               const imgFile = zip.file(`sources/${meta.guid}.${ext}`)
               if (imgFile) {
-                const imgBuf = await imgFile.async('nodebuffer')
-                const tempDir = join(app.getPath('temp'), 'magnolia-images')
-                if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-                const tempPath = join(tempDir, `${meta.guid}.${ext}`)
-                await writeFile(tempPath, imgBuf)
                 ;(source as any).formatData = {
-                  imageFilePath: tempPath,
+                  imageFilePath: archiveHandle(meta.guid, ext),
                   mimeType: meta.formatData.mimeType,
                   imageExt: ext
                 }

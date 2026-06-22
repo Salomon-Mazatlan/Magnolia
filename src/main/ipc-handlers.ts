@@ -1,76 +1,44 @@
 import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import { readFile, writeFile, stat, unlink } from 'fs/promises'
 import { existsSync, mkdirSync } from 'fs'
-import { basename, dirname, join } from 'path'
-import JSZip from 'jszip'
+import { basename, join } from 'path'
 import { readQdpx } from './qdpx/reader'
 import { writeQdpx, EmptyProjectGuardError, createEmptyProjectFile } from './qdpx/writer'
 import { serializeCodebook } from './qdpx/codebook-serializer'
 import { deserializeCodebook } from './qdpx/codebook-deserializer'
+import {
+  setActiveProjectPath,
+  isBinaryHandle,
+  resolveHandle,
+  readArchiveByName,
+  getOverlayByHandle,
+  markPersisted,
+  putOverlay
+} from './binary-store'
 import type { Project, Code } from '../renderer/models/types'
 
-// Path to the .qdpx currently open in the renderer, set via the
-// 'set-active-project-path' IPC whenever the renderer's project file
-// changes. Used to self-heal media temp files: the reader extracts each
-// PDF / image / audio / video binary to a temp file named `<guid>.<ext>`
-// and the viewers read those on demand. If the OS reaps a temp file
-// mid-session (sleep/wake, aggressive cleaners, age-out), the read would
-// fail and the viewer would go blank. Instead we regenerate the temp file
-// from the source bytes still inside the open .qdpx — the archive is the
-// source of truth, temp is just a disposable cache. (Stage 2 will remove
-// the temp round-trip entirely; this keeps the cache honest in the
-// meantime with no change to any viewer.)
-let activeProjectPath: string | null = null
-
-/** Regenerate a reaped media temp file from the open .qdpx. Reader-created
- *  temp files are named `<guid>.<ext>`, so the source guid is the temp
- *  basename; we pull `sources/<guid>.<ext>` out of the archive, rewrite the
- *  temp file in place (so later reads hit the fast path), and return the
- *  bytes. Returns null when the bytes can't be recovered — no open project,
- *  the path isn't guid-keyed (a fresh import temp, which won't have been
- *  reaped), or the binary genuinely isn't in the archive. */
-async function regenerateMediaTemp(filePath: string): Promise<Buffer | null> {
-  if (!activeProjectPath) return null
-  const file = basename(filePath)
-  const dotAt = file.lastIndexOf('.')
-  const guid = dotAt > 0 ? file.slice(0, dotAt) : file
-  try {
-    const zip = await JSZip.loadAsync(await readFile(activeProjectPath))
-    let entry = zip.file(`sources/${file}`)
-    if (!entry) {
-      // Extension may differ from the temp file's (e.g. an older export) —
-      // match any non-text `sources/<guid>.*` entry.
-      const prefix = `sources/${guid}.`
-      const altName = Object.keys(zip.files).find(
-        (n) => n.startsWith(prefix) && !zip.files[n].dir && !n.toLowerCase().endsWith('.txt')
-      )
-      if (altName) entry = zip.file(altName)
-    }
-    if (!entry) return null
-    const buf = await entry.async('nodebuffer')
-    // Re-cache the temp file so subsequent reads avoid the unzip. Best
-    // effort: if this fails we still return the bytes we recovered.
-    try {
-      mkdirSync(dirname(filePath), { recursive: true })
-      await writeFile(filePath, buf)
-    } catch { /* couldn't re-cache; bytes returned below regardless */ }
-    return buf
-  } catch {
-    return null
-  }
-}
-
-/** Read a media temp file, self-healing from the open .qdpx if the OS has
- *  reaped it. Throws the original ENOENT only when the bytes are genuinely
- *  unrecoverable, so callers' existing "file not available" handling is
- *  preserved. */
+/**
+ * Read a media binary for a viewer. The renderer holds an opaque
+ * `magnolia-bin://` handle (resolved from the open .qdpx or the in-memory
+ * import overlay) — no OS-temp round-trip. A legacy real filesystem path is
+ * still accepted and self-healed from the archive if it was reaped, so old
+ * in-flight references keep working. Throws ENOENT only when the bytes are
+ * genuinely unrecoverable, preserving callers' "file not available" UI.
+ */
 async function readMediaFile(filePath: string): Promise<Buffer> {
+  if (isBinaryHandle(filePath)) {
+    const bytes = await resolveHandle(filePath)
+    if (bytes) return bytes
+    const err: any = new Error(`binary not available: ${filePath}`)
+    err.code = 'ENOENT'
+    throw err
+  }
   try {
     return await readFile(filePath)
   } catch (e: any) {
     if (e?.code !== 'ENOENT') throw e
-    const regenerated = await regenerateMediaTemp(filePath)
-    if (regenerated) return regenerated
+    const recovered = await readArchiveByName(basename(filePath))
+    if (recovered) return recovered
     throw e
   }
 }
@@ -117,9 +85,10 @@ export function registerIpcHandlers(): void {
   })
 
   // Record which .qdpx the renderer currently has open, so the media read
-  // handlers can regenerate reaped temp files from it on demand.
+  // handlers can serve binaries straight from it (and so switching projects
+  // discards the previous one's not-yet-saved import overlay).
   ipcMain.handle('set-active-project-path', (_event, filePath: string | null) => {
-    activeProjectPath = filePath || null
+    setActiveProjectPath(filePath)
   })
 
   ipcMain.handle('open-project', async (event) => {
@@ -133,6 +102,9 @@ export function registerIpcHandlers(): void {
     const data = await readQdpx(filePath, (stage, current, total) => {
       event.sender.send('project-load-progress', { stage, current, total })
     })
+    // Make this the live archive immediately so viewers can resolve
+    // magnolia-bin:// handles before the renderer's own path effect fires.
+    setActiveProjectPath(filePath)
     return { ...data, filePath }
   })
 
@@ -172,7 +144,10 @@ export function registerIpcHandlers(): void {
         filePath = result.filePath
       }
       try {
-        await writeQdpx(filePath, data.project, data.sourceContents)
+        await writeQdpx(filePath, data.project, data.sourceContents, {
+          resolveOverlay: getOverlayByHandle,
+          markPersisted
+        })
       } catch (e) {
         if (e instanceof EmptyProjectGuardError) {
           console.warn('[save-project guard]', e.message)
@@ -180,6 +155,9 @@ export function registerIpcHandlers(): void {
         }
         throw e
       }
+      // The archive is now the live source path and holds every binary; the
+      // renderer keeps it active via set-active-project-path on load/save.
+      setActiveProjectPath(filePath)
       return filePath
     }
   )
@@ -210,10 +188,13 @@ export function registerIpcHandlers(): void {
     if (result.canceled || !result.filePath) return null
     try {
       // Carry imported binaries forward from the project that's currently
-      // open (a different path than the Save As target), so reaped temp
-      // copies don't get dropped when the project moves to a new file.
+      // open (a different path than the Save As target), and embed any
+      // not-yet-saved imports from the overlay, so nothing is dropped when
+      // the project moves to a new file.
       await writeQdpx(result.filePath, data.project, data.sourceContents, {
-        carryForwardFrom: data.currentFilePath
+        carryForwardFrom: data.currentFilePath,
+        resolveOverlay: getOverlayByHandle,
+        markPersisted
       })
     } catch (e) {
       if (e instanceof EmptyProjectGuardError) {
@@ -222,6 +203,8 @@ export function registerIpcHandlers(): void {
       }
       throw e
     }
+    // The new file is now the live archive holding every binary.
+    setActiveProjectPath(result.filePath)
     return result.filePath
   })
 
@@ -229,6 +212,7 @@ export function registerIpcHandlers(): void {
     const data = await readQdpx(filePath, (stage, current, total) => {
       event.sender.send('project-load-progress', { stage, current, total })
     })
+    setActiveProjectPath(filePath)
     return { ...data, filePath }
   })
 
@@ -296,10 +280,11 @@ export function registerIpcHandlers(): void {
         return { name, content: csv, extension: 'xlsx' }
       }
       if (IMAGE_EXTENSIONS.has(ext) || DECODED_IMAGE_EXTENSIONS.has(ext)) {
-        // Write image to temp file — renderer loads via IPC + Blob URL,
-        // matching the audio pattern (avoids huge base64 in memory).
-        // For TIFF / HEIC we decode to PNG first so the rest of the
-        // pipeline only ever sees natively-renderable formats.
+        // Hold the image bytes in the in-memory import overlay and hand the
+        // renderer a magnolia-bin:// handle — no OS-temp file. The next save
+        // embeds the bytes into the .qdpx; the viewer fetches them via the
+        // handle either way. For TIFF / HEIC we decode to PNG first so the
+        // rest of the pipeline only ever sees natively-renderable formats.
         let finalBuffer = buffer
         let finalExt = ext
         let finalMime = IMAGE_MIME[ext] || 'application/octet-stream'
@@ -312,17 +297,12 @@ export function registerIpcHandlers(): void {
           finalExt = converted.ext
           finalMime = converted.mimeType
         }
-        const tempDir = join(app.getPath('temp'), 'magnolia-images')
-        if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-        const tempId = basename(fp, '.' + ext) + '-' + Date.now()
-        const tempPath = join(tempDir, tempId + '.' + finalExt)
-        await writeFile(tempPath, finalBuffer)
         return {
           name,
           content: '',
           extension: finalExt,
           formatting: {
-            imageFilePath: tempPath,
+            imageFilePath: putOverlay(finalBuffer, finalExt),
             mimeType: finalMime,
             imageExt: finalExt
           }
@@ -337,17 +317,12 @@ export function registerIpcHandlers(): void {
         } catch (err) {
           console.error('Video metadata extraction failed, using defaults:', err)
         }
-        const tempDir = join(app.getPath('temp'), 'magnolia-videos')
-        if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-        const tempId = basename(fp, '.' + ext) + '-' + Date.now()
-        const tempPath = join(tempDir, tempId + '.' + ext)
-        await writeFile(tempPath, buffer)
         return {
           name,
           content: '',
           extension: ext,
           formatting: {
-            videoFilePath: tempPath,
+            videoFilePath: putOverlay(buffer, ext),
             mimeType: VIDEO_MIME[ext] || 'video/mp4',
             duration,
             videoExt: ext
@@ -366,18 +341,12 @@ export function registerIpcHandlers(): void {
         } catch (err) {
           console.error('Audio metadata extraction failed, using defaults:', err)
         }
-        // Write audio to temp file — renderer loads via file:// URL to avoid huge base64 in memory
-        const tempDir = join(app.getPath('temp'), 'magnolia-audio')
-        if (!existsSync(tempDir)) mkdirSync(tempDir, { recursive: true })
-        const tempId = basename(fp, '.' + ext) + '-' + Date.now()
-        const tempPath = join(tempDir, tempId + '.' + ext)
-        await writeFile(tempPath, buffer)
         return {
           name,
           content: '',
           extension: ext,
           formatting: {
-            audioFilePath: tempPath,
+            audioFilePath: putOverlay(buffer, ext),
             mimeType: AUDIO_MIME[ext.toLowerCase()] || 'audio/wav',
             duration,
             channels,
