@@ -28,7 +28,7 @@ export function WelcomeScreen() {
       width: '100vw',
       display: 'grid',
       gridTemplateColumns: '1fr 1fr',
-      backgroundImage: `url(${welcomeBgUrl})`,
+      backgroundImage: `url("${welcomeBgUrl}")`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       fontFamily: 'var(--font-family)',
@@ -67,8 +67,8 @@ export function WelcomeScreen() {
               // Same hue as the toolbar wordmark (--text-secondary) so
               // the brand reads consistently across welcome and main app.
               background: 'var(--text-secondary)',
-              WebkitMaskImage: `url(${magnoliaUrl})`,
-              maskImage: `url(${magnoliaUrl})`,
+              WebkitMaskImage: `url("${magnoliaUrl}")`,
+              maskImage: `url("${magnoliaUrl}")`,
               WebkitMaskRepeat: 'no-repeat',
               maskRepeat: 'no-repeat',
               WebkitMaskSize: 'contain',

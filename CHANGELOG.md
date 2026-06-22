@@ -2,6 +2,11 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.5.1]
+
+### Fixed
+- **The Magnolia logo in the toolbar no longer shows as a black square.** In installed builds the toolbar app icon (and the welcome-screen wordmark) could render as a solid filled box instead of the petal mark; it now displays correctly. This only affected packaged releases — the icon was always fine in development.
+
 ## [1.5.0]
 
 ### Added
