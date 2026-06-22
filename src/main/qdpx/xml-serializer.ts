@@ -5,7 +5,8 @@ import type {
   Code,
   TextSource,
   PlainTextSelection,
-  Coding
+  Coding,
+  Memo
 } from '../../renderer/models/types'
 import {
   surveyToRefi,
@@ -497,6 +498,86 @@ export function serializeProject(project: Project): string {
     }
     if (videoSources.length > 0) {
       p.Sources.VideoSource = videoSources.map(serializeVideoSource)
+    }
+  }
+
+  // Anchor memos to their target with REFI-QDA <NoteRef> so the link
+  // survives in other tools. Document memos → a NoteRef on the source.
+  // Text content memos (a span on a text source) → a NoteRef-bearing
+  // PlainTextSelection (no Coding) carrying the span. Other memo types
+  // (survey / analysis / query / PDF-region content) stay project-level.
+  if (project.memos && project.memos.length > 0 && p.Sources) {
+    const docMemosBySource = new Map<string, string[]>()
+    const spanMemosBySource = new Map<string, Memo[]>()
+    for (const m of project.memos) {
+      if (m.type === 'document' && m.sourceGuids) {
+        for (const sg of m.sourceGuids) {
+          const a = docMemosBySource.get(sg) ?? []
+          a.push(m.guid)
+          docMemosBySource.set(sg, a)
+        }
+      } else if (m.type === 'content' && m.sourceGuid && !m.surveyCell && !m.pdfRegion) {
+        const a = spanMemosBySource.get(m.sourceGuid) ?? []
+        a.push(m)
+        spanMemosBySource.set(m.sourceGuid, a)
+      }
+    }
+    const addDocRefs = (sx: any): void => {
+      const refs = docMemosBySource.get(sx['@_guid'])
+      if (refs && refs.length > 0) sx.NoteRef = refs.map((g) => ({ '@_targetGUID': g }))
+    }
+    for (const sx of (p.Sources.TextSource ?? []) as any[]) {
+      const spans = spanMemosBySource.get(sx['@_guid'])
+      if (spans && spans.length > 0) {
+        const sels: any[] = Array.isArray(sx.PlainTextSelection)
+          ? sx.PlainTextSelection
+          : sx.PlainTextSelection
+            ? [sx.PlainTextSelection]
+            : []
+        for (const m of spans) {
+          sels.push({
+            '@_guid': representationGuidFor(m.guid),
+            '@_startPosition': String(m.startPosition ?? 0),
+            '@_endPosition': String(m.endPosition ?? 0),
+            '@_name': m.title || 'Memo',
+            NoteRef: { '@_targetGUID': m.guid }
+          })
+        }
+        sx.PlainTextSelection = sels
+      }
+      addDocRefs(sx)
+    }
+    for (const sx of (p.Sources.PDFSource ?? []) as any[]) addDocRefs(sx)
+    for (const sx of (p.Sources.AudioSource ?? []) as any[]) addDocRefs(sx)
+    for (const sx of (p.Sources.PictureSource ?? []) as any[]) addDocRefs(sx)
+    for (const sx of (p.Sources.VideoSource ?? []) as any[]) addDocRefs(sx)
+  }
+
+  // Notes (memos) — emitted as REFI-QDA project-level <Note>s so memos
+  // round-trip with other tools (Atlas.ti / MAXQDA), which is how Atlas
+  // stores them. Each note's body is a plain-text file the writer adds at
+  // sources/<guid>.txt. Must sit AFTER <Sources> and BEFORE <Sets> in the
+  // QDA-XML 1.0 element sequence (object-key insertion order is what
+  // fast-xml-parser emits). Magnolia also keeps magnolia-memos.json for
+  // full-fidelity round-trips of its own (anchors + survey/analysis/query
+  // memo types REFI can't express); on load it prefers that side table and
+  // falls back to these Notes for files from other tools.
+  if (project.memos && project.memos.length > 0) {
+    p.Notes = {
+      Note: project.memos.map((m) => {
+        const obj: any = {
+          '@_guid': m.guid,
+          '@_name': m.title || 'Memo',
+          '@_plainTextPath': `internal://${m.guid}.txt`
+        }
+        if (project.creatingUserGUID) obj['@_creatingUser'] = project.creatingUserGUID
+        if (m.createdDateTime) obj['@_creationDateTime'] = m.createdDateTime
+        if (project.creatingUserGUID) obj['@_modifyingUser'] = project.creatingUserGUID
+        if (m.modifiedDateTime || m.createdDateTime) {
+          obj['@_modifiedDateTime'] = m.modifiedDateTime || m.createdDateTime
+        }
+        return obj
+      })
     }
   }
 

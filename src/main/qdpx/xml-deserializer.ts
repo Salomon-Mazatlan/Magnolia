@@ -77,6 +77,14 @@ function parseSelection(xmlSel: any): PlainTextSelection {
   }
 }
 
+/** A <PlainTextSelection> that carries only a <NoteRef> (no <Coding>) is a
+ *  memo anchor, not a coding — exclude it from a source's selections so it
+ *  doesn't surface as a phantom uncoded highlight. The memo it anchors is
+ *  reconstructed from the project's <Notes> + this NoteRef (see reader.ts). */
+function isMemoAnchorSelection(xmlSel: any): boolean {
+  return !!xmlSel.NoteRef && !xmlSel.Coding
+}
+
 function parseTextSource(xmlSource: any): TextSource {
   return {
     guid: normalizeGuid(xmlSource['@_guid']),
@@ -88,11 +96,31 @@ function parseTextSource(xmlSource: any): TextSource {
     creationDateTime: xmlSource['@_creationDateTime'],
     modifyingUser: normalizeGuid(xmlSource['@_modifyingUser']),
     modifiedDateTime: xmlSource['@_modifiedDateTime'],
-    selections: ensureArray(xmlSource.PlainTextSelection).map(parseSelection)
+    selections: ensureArray(xmlSource.PlainTextSelection)
+      .filter((sel: any) => !isMemoAnchorSelection(sel))
+      .map(parseSelection)
   }
 }
 
 /** Raw PDFSelection attached to a PDF source for later conversion. */
+/** A REFI-QDA project-level <Note> (a memo), as parsed from the .qde. */
+export interface RawNote {
+  guid: string
+  name: string
+  plainTextPath?: string
+  creationDateTime?: string
+  modifiedDateTime?: string
+}
+
+/** Where a <Note> is anchored, derived from a <NoteRef>. A source-level
+ *  ref has no span (document memo); a selection-level ref carries the span
+ *  (content memo). */
+export interface RawNoteAnchor {
+  sourceGuid: string
+  startPosition?: number
+  endPosition?: number
+}
+
 export interface RawPdfSelection {
   guid: string
   name?: string
@@ -370,6 +398,46 @@ export function deserializeProject(xml: string): Project {
   const refiVariables: RefiVariable[] = ensureArray(proj.Variables?.Variable).map(parseVariable)
   const refiCases: RefiCase[] = ensureArray(proj.Cases?.Case).map(parseCase)
 
+  // REFI-QDA project-level <Note>s (memos). Transient: reader.ts loads each
+  // note's text from its plainTextPath and builds Magnolia memos when the
+  // file has no magnolia-memos.json side table (i.e. came from another tool).
+  const refiNotes: RawNote[] = ensureArray(proj.Notes?.Note).map((n: any) => ({
+    guid: normalizeGuid(n['@_guid']),
+    name: n['@_name'] ?? 'Memo',
+    plainTextPath: n['@_plainTextPath'],
+    creationDateTime: n['@_creationDateTime'],
+    modifiedDateTime: n['@_modifiedDateTime']
+  }))
+
+  // Where each note is anchored, from <NoteRef> elements: on a source =>
+  // document memo; inside a (text) selection => content memo at that span.
+  // reader.ts uses this to anchor memos built from <Notes> (foreign files).
+  const refiNoteAnchors: Record<string, RawNoteAnchor> = {}
+  const scanSourceNoteRefs = (sx: any): void => {
+    const sourceGuid = normalizeGuid(sx['@_guid'])
+    for (const nr of ensureArray(sx.NoteRef)) {
+      refiNoteAnchors[normalizeGuid(nr['@_targetGUID'])] = { sourceGuid }
+    }
+    const scanSelections = (sels: any): void => {
+      for (const sel of ensureArray(sels)) {
+        for (const nr of ensureArray(sel.NoteRef)) {
+          refiNoteAnchors[normalizeGuid(nr['@_targetGUID'])] = {
+            sourceGuid,
+            startPosition: parseInt(sel['@_startPosition'], 10) || 0,
+            endPosition: parseInt(sel['@_endPosition'], 10) || 0
+          }
+        }
+      }
+    }
+    scanSelections(sx.PlainTextSelection)
+    for (const repr of ensureArray(sx.Representation)) scanSelections(repr.PlainTextSelection)
+  }
+  for (const sx of ensureArray(proj.Sources?.TextSource)) scanSourceNoteRefs(sx)
+  for (const sx of ensureArray(proj.Sources?.PDFSource)) scanSourceNoteRefs(sx)
+  for (const sx of ensureArray(proj.Sources?.PictureSource)) scanSourceNoteRefs(sx)
+  for (const sx of ensureArray(proj.Sources?.AudioSource)) scanSourceNoteRefs(sx)
+  for (const sx of ensureArray(proj.Sources?.VideoSource)) scanSourceNoteRefs(sx)
+
   return {
     name: proj['@_name'] ?? 'Untitled',
     origin: proj['@_origin'] ?? '',
@@ -383,6 +451,8 @@ export function deserializeProject(xml: string): Project {
     sets,
     notes: [],
     ...(refiVariables.length > 0 ? { _refiVariables: refiVariables } : {}),
-    ...(refiCases.length > 0 ? { _refiCases: refiCases } : {})
+    ...(refiCases.length > 0 ? { _refiCases: refiCases } : {}),
+    ...(refiNotes.length > 0 ? { _refiNotes: refiNotes } : {}),
+    ...(Object.keys(refiNoteAnchors).length > 0 ? { _refiNoteAnchors: refiNoteAnchors } : {})
   } as Project
 }

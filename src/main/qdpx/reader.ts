@@ -2,9 +2,9 @@ import JSZip from 'jszip'
 import { readFile } from 'fs/promises'
 import { randomUUID } from 'crypto'
 import { deserializeProject } from './xml-deserializer'
-import type { RawPdfSelection, RawPictureSelection, RawVideoSelection } from './xml-deserializer'
+import type { RawPdfSelection, RawPictureSelection, RawVideoSelection, RawNote, RawNoteAnchor } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
-import type { Project, PlainTextSelection } from '../../renderer/models/types'
+import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions, type PdfTextItem } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
 
@@ -491,7 +491,11 @@ export async function readQdpx(
     }
   }
 
-  // Load memos (app-specific JSON, not part of REFI-QDA XML)
+  // Load memos. Magnolia's own files carry full-fidelity memos in
+  // magnolia-memos.json (anchors + every memo type). Files from other tools
+  // (Atlas.ti) instead carry REFI-QDA project-level <Note>s, parsed into
+  // _refiNotes — build project memos from those (loading each note body from
+  // its plainTextPath) when there's no side table, so foreign memos appear.
   const memosFile = zip.file('magnolia-memos.json')
   if (memosFile) {
     try {
@@ -500,6 +504,36 @@ export async function readQdpx(
     } catch {
       // Ignore malformed memos file
     }
+  } else if ((project as any)._refiNotes) {
+    const anchors = ((project as any)._refiNoteAnchors || {}) as Record<string, RawNoteAnchor>
+    const built: Memo[] = []
+    for (const n of (project as any)._refiNotes as RawNote[]) {
+      let content = ''
+      const match = (n.plainTextPath || '').match(/internal:\/\/(.+)/)
+      if (match) {
+        const noteFile = zip.file(`sources/${match[1]}`)
+        if (noteFile) content = await noteFile.async('string')
+      }
+      const base: Memo = {
+        guid: n.guid,
+        type: 'project',
+        title: n.name,
+        content,
+        createdDateTime: n.creationDateTime || n.modifiedDateTime || '',
+        modifiedDateTime: n.modifiedDateTime
+      }
+      // Anchor the memo from its <NoteRef>: a span => content memo on that
+      // source; a bare source ref => document memo.
+      const a = anchors[n.guid]
+      if (a && a.startPosition !== undefined) {
+        built.push({ ...base, type: 'content', sourceGuid: a.sourceGuid, startPosition: a.startPosition, endPosition: a.endPosition })
+      } else if (a) {
+        built.push({ ...base, type: 'document', sourceGuids: [a.sourceGuid] })
+      } else {
+        built.push(base)
+      }
+    }
+    if (built.length > 0) project.memos = built
   }
 
   // Load quotes (app-specific JSON)
@@ -813,8 +847,10 @@ export async function readQdpx(
     .map((s) => ({ guid: s.guid, name: s.name, sourceType: s.sourceType }))
 
   // Drop the transient REFI fields so they don't leak into renderer state.
-  const { _refiVariables, _refiCases, ...cleanProject } = project as any
+  const { _refiVariables, _refiCases, _refiNotes, _refiNoteAnchors, ...cleanProject } = project as any
   void _refiVariables
   void _refiCases
+  void _refiNotes
+  void _refiNoteAnchors
   return { ...cleanProject, sourceContents, missingBinaries }
 }
