@@ -146,16 +146,20 @@ function serializeTextSource(source: TextSource): any {
   return obj
 }
 
-/** Serialize a <PictureSelection> rectangle (REFI-QDA: pixels, top-left). */
+/** Serialize a <PictureSelection> rectangle (REFI-QDA: pixels, top-left).
+ *  firstX/firstY/secondX/secondY are xs:integer in the QDA-XML schema, so
+ *  the pixel coordinates MUST be whole numbers — emitting the raw floats
+ *  (e.g. "1734.0419…") makes Atlas.ti reject the entire project as invalid
+ *  and makes MAXQDA silently drop the image coding. Round to integers. */
 function serializePictureSelection(sel: PlainTextSelection): any | null {
   if (!sel.pdfRegion) return null
   const r = sel.pdfRegion
   const obj: any = {
     '@_guid': sel.guid,
-    '@_firstX': r.x.toString(),
-    '@_firstY': r.y.toString(),
-    '@_secondX': (r.x + r.width).toString(),
-    '@_secondY': (r.y + r.height).toString()
+    '@_firstX': Math.round(r.x).toString(),
+    '@_firstY': Math.round(r.y).toString(),
+    '@_secondX': Math.round(r.x + r.width).toString(),
+    '@_secondY': Math.round(r.y + r.height).toString()
   }
   if (sel.name) obj['@_name'] = sel.name
   if (sel.creatingUser) obj['@_creatingUser'] = sel.creatingUser
