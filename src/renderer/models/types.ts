@@ -442,7 +442,7 @@ export interface QueryResult {
 
 // Data sent to the query builder window
 export interface QueryBuilderInitData {
-  sources: { guid: string; name: string }[]
+  sources: { guid: string; name: string; sourceType?: string }[]
   folders: { guid: string; name: string; parentGuid: string | null }[]
   /** Map of source guid → folder guid. Lets the embedded DocumentSelector
    *  resolve a Folder input node into the documents inside that folder. */

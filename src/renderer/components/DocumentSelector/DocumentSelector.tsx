@@ -15,7 +15,8 @@ const CATEGORY_LABELS: Record<DocCategory, string> = {
   video: 'Video',
   audio: 'Audio',
   document: 'Document',
-  image: 'Image'
+  image: 'Image',
+  survey: 'Survey'
 }
 
 /* ═══════════════════════════════════════════════════
@@ -25,6 +26,9 @@ const CATEGORY_LABELS: Record<DocCategory, string> = {
 export interface DocumentSelectorSource {
   guid: string
   name: string
+  /** Used so the Type filter can scope to surveys (which have no
+   *  identifying file extension). */
+  sourceType?: string
 }
 
 export interface DocumentSelectorTag {
@@ -1587,6 +1591,7 @@ export function DocumentSelector({
                     <option value="audio">Audio</option>
                     <option value="document">Document</option>
                     <option value="image">Image</option>
+                    <option value="survey">Survey</option>
                   </select>
                 </div>
               )}

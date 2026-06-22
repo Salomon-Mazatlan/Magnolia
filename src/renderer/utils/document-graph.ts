@@ -47,10 +47,13 @@ export interface DConn {
   toPort: number
 }
 
-export type DocCategory = 'video' | 'audio' | 'document' | 'image'
+export type DocCategory = 'video' | 'audio' | 'document' | 'image' | 'survey'
 
-export function categoryOfSource(name: string): DocCategory {
-  const st = sourceTypeFromFilename(name)
+export function categoryOfSource(source: { name: string; sourceType?: string }): DocCategory {
+  // Surveys carry no telltale file extension, so they're identified by their
+  // sourceType rather than the name.
+  if (source.sourceType === 'survey') return 'survey'
+  const st = sourceTypeFromFilename(source.name)
   if (st === 'video') return 'video'
   if (st === 'audio') return 'audio'
   if (st === 'image') return 'image'
@@ -60,7 +63,7 @@ export function categoryOfSource(name: string): DocCategory {
 /** Everything the resolver needs about the current project, passed in so the
  *  resolution stays pure (no module-level state, runnable from the engine). */
 export interface DocGraphData {
-  sources: { guid: string; name: string }[]
+  sources: { guid: string; name: string; sourceType?: string }[]
   tags: { guid: string; name: string; categoryGuid?: string; value?: string }[]
   /** tag guid → member source guids (documents/surveys tagged with it) */
   tagMembers: Record<string, string[]>
@@ -142,7 +145,7 @@ function walkNode(
   if (n.kind === 'type') {
     if (!n.typeExt) return new Set()
     const cat = n.typeExt as DocCategory
-    return new Set(data.sources.filter((s) => categoryOfSource(s.name) === cat).map((s) => s.guid))
+    return new Set(data.sources.filter((s) => categoryOfSource(s) === cat).map((s) => s.guid))
   }
 
   if (n.kind === 'folder') {

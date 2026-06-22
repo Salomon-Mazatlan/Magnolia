@@ -73,7 +73,7 @@ export function QueryBuilderDialog({ onClose }: Props) {
     docFilter.tagGuids.length > 0 ||
     docFilter.typeInclude.length > 0
 
-  const selectorSources = sources.map((s) => ({ guid: s.guid, name: s.name }))
+  const selectorSources = sources.map((s) => ({ guid: s.guid, name: s.name, sourceType: s.sourceType }))
   const selectorTags = tags.map((t) => ({
     guid: t.guid,
     name: t.name,

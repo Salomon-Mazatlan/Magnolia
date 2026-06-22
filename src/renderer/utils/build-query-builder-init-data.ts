@@ -36,7 +36,7 @@ export function buildQueryBuilderInitData(opts?: {
   const qStore = useQueryStore.getState()
 
   const initData: QueryBuilderInitData = {
-    sources: docStore.sources.map((s) => ({ guid: s.guid, name: s.name })),
+    sources: docStore.sources.map((s) => ({ guid: s.guid, name: s.name, sourceType: s.sourceType })),
     folders: docStore.folders.map((f) => ({ guid: f.guid, name: f.name, parentGuid: f.parentGuid ?? null })),
     sourceFolder: docStore.sourceFolder,
     codes: flattenCodesWithParent(cdStore.codes),

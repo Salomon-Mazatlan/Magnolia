@@ -60,7 +60,7 @@ function liveResolveFilter(df: Query['documentFilter']): {
   const docState = useDocumentStore.getState()
   const tagState = useTagStore.getState()
   const data: DocGraphData = {
-    sources: docState.sources.map((s) => ({ guid: s.guid, name: s.name })),
+    sources: docState.sources.map((s) => ({ guid: s.guid, name: s.name, sourceType: s.sourceType })),
     tags: tagState.tags.map((t) => ({ guid: t.guid, name: t.name, categoryGuid: t.categoryGuid, value: t.value })),
     tagMembers: tagState.tags.reduce((acc, t) => {
       acc[t.guid] = t.memberSourceGuids
