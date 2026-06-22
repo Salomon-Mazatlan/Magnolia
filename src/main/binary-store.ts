@@ -55,6 +55,14 @@ export function archiveHandle(guid: string, ext: string): string {
   return `${HANDLE_PREFIX}archive/${guid}.${ext}`
 }
 
+/** Handle for a binary stored under an arbitrary in-archive filename
+ *  (e.g. `BB9E2A2C….pdf`). Files from other QDA tools name the binary
+ *  differently from the source guid, so the reader points the handle at
+ *  the real `sources/<fileName>` entry rather than `<guid>.<ext>`. */
+export function archiveHandleForFile(fileName: string): string {
+  return `${HANDLE_PREFIX}archive/${fileName}`
+}
+
 export function overlayHandle(token: string, ext: string): string {
   return `${HANDLE_PREFIX}overlay/${token}.${ext}`
 }

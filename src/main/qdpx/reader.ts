@@ -6,7 +6,7 @@ import type { RawPdfSelection, RawPictureSelection, RawVideoSelection } from './
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
 import type { Project, PlainTextSelection } from '../../renderer/models/types'
 import { extractPdfTextWithPositions, type PdfTextItem } from '../pdf-extract'
-import { archiveHandle } from '../binary-store'
+import { archiveHandle, archiveHandleForFile } from '../binary-store'
 
 const IMAGE_MIME_BY_EXT: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -232,6 +232,19 @@ export async function readQdpx(
   const xml = await qdeFile.async('string')
   const project = deserializeProject(xml)
 
+  // Capture each binary source's referenced in-archive filename (from its
+  // `internal://…` path) BEFORE the per-source loop clears plainTextPath.
+  // Other tools (Atlas.ti) store the binary under a name that differs from
+  // the source guid, so both the runtime handle and the missing-binary
+  // detection below must use this reference, not `<guid>.<ext>`.
+  const binaryRefByGuid = new Map<string, string>()
+  for (const s of project.sources as any[]) {
+    if (['pdf', 'image', 'audio', 'video'].includes(s.sourceType)) {
+      const m = (s.plainTextPath || '').match(/internal:\/\/(.+)/)
+      if (m) binaryRefByGuid.set(s.guid, m[1])
+    }
+  }
+
   // Load source contents from the sources/ folder. The per-source work
   // is dominated by JSZip decompression of binaries (PDF / audio /
   // video / image) and the temp-file writeFile that follows. Sources
@@ -323,7 +336,7 @@ export async function readQdpx(
           }
 
           ;(source as any).formatData = {
-            pdfFilePath: archiveHandle(source.guid, 'pdf'),
+            pdfFilePath: archiveHandleForFile(match[1]),
             pdfPageOffsets: pageOffsets
           }
           sourceContents[source.guid] = extractedText
@@ -356,7 +369,7 @@ export async function readQdpx(
           }
 
           ;(source as any).formatData = {
-            videoFilePath: archiveHandle(source.guid, ext),
+            videoFilePath: archiveHandleForFile(internalName),
             mimeType: VIDEO_MIME_BY_EXT[ext] || 'video/mp4',
             duration: 0,
             videoExt: ext
@@ -400,7 +413,7 @@ export async function readQdpx(
           }
 
           ;(source as any).formatData = {
-            imageFilePath: archiveHandle(source.guid, ext),
+            imageFilePath: archiveHandleForFile(internalName),
             mimeType: IMAGE_MIME_BY_EXT[ext] || 'application/octet-stream',
             imageExt: ext
           }
@@ -781,14 +794,21 @@ export async function readQdpx(
   // bytes that simply aren't in the file.
   const BINARY_TYPES = new Set(['pdf', 'image', 'audio', 'video'])
   const zipNames = Object.keys(zip.files)
+  const isFile = (name: string): boolean => !!zip.files[name] && !zip.files[name].dir
   const missingBinaries = (project.sources as any[])
     .filter((s) => {
       if (!BINARY_TYPES.has(s.sourceType)) return false
+      // The binary is present if the archive holds the file the source
+      // references (its `internal://…` path — used by Atlas.ti etc. where
+      // the filename differs from the guid) OR any non-text `<guid>.*`
+      // entry (Magnolia's own naming).
+      const ref = binaryRefByGuid.get(s.guid)
+      if (ref && isFile(`sources/${ref}`)) return false
       const prefix = `sources/${s.guid}.`
-      const hasBinary = zipNames.some(
+      const hasGuidNamed = zipNames.some(
         (n) => n.startsWith(prefix) && !zip.files[n].dir && !n.toLowerCase().endsWith('.txt')
       )
-      return !hasBinary
+      return !hasGuidNamed
     })
     .map((s) => ({ guid: s.guid, name: s.name, sourceType: s.sourceType }))
 
