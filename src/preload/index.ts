@@ -1,10 +1,20 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type { ElectronAPI } from '../renderer/models/types'
 
+// The open project's .qdpx path, cached renderer-side. The renderer sets it
+// via setActiveProjectPath whenever the project changes, and every binary
+// read forwards it to main — so binary resolution survives a main-process
+// reload (dev HMR) or any load path that didn't register the project, both
+// of which would otherwise leave main's copy null.
+let activeProjectPath: string | null = null
+
 const api: ElectronAPI = {
   getFileSize: (filePath: string) => ipcRenderer.invoke('get-file-size', filePath),
-  readPdfFile: (filePath: string) => ipcRenderer.invoke('read-pdf-file', filePath),
-  setActiveProjectPath: (filePath: string | null) => ipcRenderer.invoke('set-active-project-path', filePath),
+  readPdfFile: (filePath: string) => ipcRenderer.invoke('read-pdf-file', filePath, activeProjectPath),
+  setActiveProjectPath: (filePath: string | null) => {
+    activeProjectPath = filePath || null
+    return ipcRenderer.invoke('set-active-project-path', filePath)
+  },
   onProjectLoadProgress: (callback: (p: { stage: string; current: number; total: number }) => void) => {
     const handler = (_event: any, p: { stage: string; current: number; total: number }) => callback(p)
     ipcRenderer.on('project-load-progress', handler)
@@ -23,9 +33,9 @@ const api: ElectronAPI = {
   reimportDocument: (sourceType: string) => ipcRenderer.invoke('reimport-document', sourceType),
   openLicence: () => ipcRenderer.invoke('open-licence'),
   openAcknowledgements: () => ipcRenderer.invoke('open-acknowledgements'),
-  readAudioFile: (filePath: string) => ipcRenderer.invoke('read-audio-file', filePath),
-  readImageFile: (filePath: string) => ipcRenderer.invoke('read-image-file', filePath),
-  readVideoFile: (filePath: string) => ipcRenderer.invoke('read-video-file', filePath),
+  readAudioFile: (filePath: string) => ipcRenderer.invoke('read-audio-file', filePath, activeProjectPath),
+  readImageFile: (filePath: string) => ipcRenderer.invoke('read-image-file', filePath, activeProjectPath),
+  readVideoFile: (filePath: string) => ipcRenderer.invoke('read-video-file', filePath, activeProjectPath),
   importTranscript: () => ipcRenderer.invoke('import-transcript'),
   exportPdf: (
     html: string,

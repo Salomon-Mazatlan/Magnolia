@@ -47,6 +47,15 @@ export function getActiveProjectPath(): string | null {
   return activeProjectPath
 }
 
+/** Set the active archive path WITHOUT clearing the import overlay. Used by
+ *  the binary-read IPCs, which receive the open project's path from the
+ *  renderer on every call — so resolution survives a main-process reload
+ *  (dev HMR) or any load path that forgot to register the project. Never
+ *  nulls an existing path. */
+export function noteActiveProjectPath(filePath: string | null | undefined): void {
+  if (filePath) activeProjectPath = filePath
+}
+
 export function isBinaryHandle(value: string | undefined | null): boolean {
   return typeof value === 'string' && value.startsWith(HANDLE_PREFIX)
 }

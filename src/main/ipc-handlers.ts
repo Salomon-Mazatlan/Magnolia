@@ -8,6 +8,7 @@ import { serializeCodebook } from './qdpx/codebook-serializer'
 import { deserializeCodebook } from './qdpx/codebook-deserializer'
 import {
   setActiveProjectPath,
+  noteActiveProjectPath,
   isBinaryHandle,
   resolveHandle,
   readArchiveByName,
@@ -75,11 +76,12 @@ export function registerIpcHandlers(): void {
     }
   })
 
-  ipcMain.handle('read-pdf-file', async (_event, filePath: string) => {
+  ipcMain.handle('read-pdf-file', async (_event, filePath: string, archivePath?: string) => {
     // Return raw PDF bytes as a Uint8Array. Electron's structured clone
     // sends this as-is without base64 overhead, which is much faster than
-    // passing a base64 string through contextBridge. Self-heals from the
-    // open .qdpx if the temp copy was reaped.
+    // passing a base64 string through contextBridge. archivePath is the open
+    // project (passed by the renderer so resolution survives a main reload).
+    noteActiveProjectPath(archivePath)
     const buffer = await readMediaFile(filePath)
     return new Uint8Array(buffer)
   })
@@ -424,22 +426,28 @@ export function registerIpcHandlers(): void {
   })
 
   // Read an audio file and return as ArrayBuffer for blob URL creation in
-  // renderer. Self-heals from the open .qdpx if the temp copy was reaped.
-  ipcMain.handle('read-audio-file', async (_event, filePath: string) => {
+  // renderer. archivePath = the open project (passed so resolution survives
+  // a main reload); self-heals from the open .qdpx if temp was reaped.
+  ipcMain.handle('read-audio-file', async (_event, filePath: string, archivePath?: string) => {
+    noteActiveProjectPath(archivePath)
     const buffer = await readMediaFile(filePath)
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   })
 
   // Read an image file and return as ArrayBuffer for blob URL creation in
-  // renderer. Self-heals from the open .qdpx if the temp copy was reaped.
-  ipcMain.handle('read-image-file', async (_event, filePath: string) => {
+  // renderer. archivePath = the open project (passed so resolution survives
+  // a main reload); self-heals from the open .qdpx if temp was reaped.
+  ipcMain.handle('read-image-file', async (_event, filePath: string, archivePath?: string) => {
+    noteActiveProjectPath(archivePath)
     const buffer = await readMediaFile(filePath)
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   })
 
   // Read a video file and return as ArrayBuffer for blob URL creation in
-  // renderer. Self-heals from the open .qdpx if the temp copy was reaped.
-  ipcMain.handle('read-video-file', async (_event, filePath: string) => {
+  // renderer. archivePath = the open project (passed so resolution survives
+  // a main reload); self-heals from the open .qdpx if temp was reaped.
+  ipcMain.handle('read-video-file', async (_event, filePath: string, archivePath?: string) => {
+    noteActiveProjectPath(archivePath)
     const buffer = await readMediaFile(filePath)
     return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
   })
