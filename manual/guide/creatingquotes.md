@@ -7,7 +7,7 @@ To create a quote:
 2. Right-click on the selection and choose "Add as quote".
 
    <figure>
-     <img src="./images/QuotesRightClick.png" alt="Adding a quote.">
+     <img src="./images/QuoteRightClick.png" alt="Adding a quote.">
      <figcaption>Adding a quote.</figcaption>
    </figure>
 
