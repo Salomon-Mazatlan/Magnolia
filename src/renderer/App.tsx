@@ -67,8 +67,8 @@ import { isAnalysisTab, isMapTab, isQueryBuilderTab, makeAnalysisTabId, makeMapT
 import { requestPreferencesCategory } from './components/Preferences/PreferencesWindow'
 import type { PersistedTab, PersistedTabState, MissingBinary } from './models/types'
 import { MissingBinariesBanner } from './components/MissingBinariesBanner'
-// ES import so Vite bundles + hashes the Magnolia wordmark for production.
-import magnoliaUrl from './assets/magnolia.svg'
+// ES import so Vite bundles + hashes the Magnolia toolbar icon for production.
+import magnoliaIconUrl from './assets/magnoliaicononly.svg'
 import { usePendingSelectionStore } from './stores/pending-selection-store'
 import { useNewCodeTriggerStore } from './stores/new-code-trigger-store'
 import { generateGuid } from './utils/guid'
@@ -2048,45 +2048,73 @@ function App() {
           height: 54
         }}
       >
-        {/* Left cell: Magnolia wordmark, themed to match the rest of
-            the toolbar's icon hue. Purely decorative — Settings now has
-            its own toolbar button (see the centre cell). The masked div
-            paints the actual glyph (using magnolia.svg, the short
-            toolbar-tuned variant of the wordmark; the welcome screen and
-            PDF exports use the longer magnoliaqda.svg form instead). */}
+        {/* Left cell: the Magnolia icon followed by the open project's
+            file name. Clicking the name opens the Project Info pane. The
+            right margin keeps breathing room from the centred icon row on
+            narrower windows. */}
         <div
-          aria-label="Magnolia"
           style={{
             justifySelf: 'start',
-            // Right margin guarantees breathing room between the
-            // wordmark and the centred icon row, even on narrower
-            // windows where the 1fr columns shrink.
             marginRight: 32,
             padding: '4px 6px',
             display: 'flex',
-            alignItems: 'center'
+            alignItems: 'center',
+            gap: 8,
+            minWidth: 0
           }}
         >
           <div
-            aria-hidden
+            aria-label="Magnolia"
+            // Masked so the icon is themed to the toolbar's icon hue, like
+            // the old wordmark. viewBox 42×49 (~0.857:1) → 21×24 fills the
+            // box with no padding at the original ~24px height.
             style={{
-              // magnolia.svg viewBox is 241×49 (~4.92:1), so sizing
-              // to 104×21 keeps the mask filling the box with no
-              // padding while preserving the original ~22px height.
-              width: 104,
-              height: 21,
+              width: 21,
+              height: 24,
+              flexShrink: 0,
               background: 'var(--text-secondary)',
-              WebkitMaskImage: `url(${magnoliaUrl})`,
-              maskImage: `url(${magnoliaUrl})`,
+              WebkitMaskImage: `url(${magnoliaIconUrl})`,
+              maskImage: `url(${magnoliaIconUrl})`,
               WebkitMaskRepeat: 'no-repeat',
               maskRepeat: 'no-repeat',
               WebkitMaskSize: 'contain',
               maskSize: 'contain',
-              WebkitMaskPosition: 'left center',
-              maskPosition: 'left center',
+              WebkitMaskPosition: 'center',
+              maskPosition: 'center',
               pointerEvents: 'none'
             }}
           />
+          <button
+            type="button"
+            className="app-toolbar-btn"
+            title="Project info"
+            onClick={() => setShowProjectDetails(true)}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              fontSize: 13,
+              fontWeight: 500,
+              padding: '2px 6px',
+              borderRadius: 'var(--radius-sm)',
+              maxWidth: 240,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              transition: 'background 0.12s, color 0.12s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--bg-tertiary)'
+              e.currentTarget.style.color = 'var(--text-primary)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--text-secondary)'
+            }}
+          >
+            {projectStore.name}
+          </button>
         </div>
 
         {/* Center cell: icons */}
