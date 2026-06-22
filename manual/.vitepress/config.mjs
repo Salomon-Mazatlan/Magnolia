@@ -113,15 +113,57 @@ export default defineConfig({
       {
         text: 'Getting started',
         items: [
-          page('Introduction', '/guide/introduction'),
-          page('Installation', '/guide/installation')
+          page('Introduction', '/guide/introduction'), // DONE
+          page('Installation', '/guide/installation'), // DONE
+//          page('Interface', '/guide/interface'),
+//          page('Preferences', '/guide/preferences'),
+//          page('Logbook', '/guide/logbook'),
         ]
       },
       {
-        text: 'Using Magnolia',
+        text: 'Documents',
         items: [
-          page('Coding your data', '/guide/coding'),
-          page('Querying', '/guide/querying'),
+          page('Supported document types and formats', '/guide/supportedformats'), // DONE
+          page('Importing documents', '/guide/importing'),  // DONE
+//          page('Tags', '/guide/tags'),
+        ]
+      },
+      {
+        text: 'Codes',
+        items: [
+          page('Coding your data', '/guide/coding'),  // DONE
+//          page('Organising codes', '/guide/organisingcodes'),
+//          page('Codebook', '/guide/codebook'),
+        ]
+      },
+      {
+        text: 'Queries and analyses',
+        items: [
+          page('Querying your data', '/guide/querying'),  // DONE
+          page('Selecting Documents', '/guide/documentselector'),  // DONE
+          page('Grouping Results', '/guide/grouping'), // DONE
+//          page('Codes in Documents', '/guide/codesindocuments'),
+//          page('Results in Documents', '/guide/resultsindocuments'),
+//          page('Code Co-Occurrences', '/guide/codecooccurrences'),
+//          page('Code Orders', '/guide/codeorders'),
+//          page('Code Frequencies', '/guide/codefrequencies'),
+//         page('Word Frequencies', '/guide/wordfrequencies'),
+//          page('Relationships', '/guide/relationships'),
+//          page('Reports', '/guide/reports'),
+        ]
+      },
+      {
+        text: 'Memos',
+        items: [
+          page('What is a memo', '/guide/whatisamemo'), // DONE
+          page('Creating memos', '/guide/creatingmemos'), // DONE
+        ]
+      },
+      {
+        text: 'Quotes',
+        items: [
+          page('What is a quote', '/guide/whatisaquote'),  // DONE
+          page('Creating quotes', '/guide/creatingquotes'),  // DONE
         ]
       },
     ],

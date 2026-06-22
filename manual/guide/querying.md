@@ -4,6 +4,8 @@ Querying data allows you to see all selections coded with particular codes.
 
 ## See all selections with a code
 
+**To see all selections with a code:**
+
 1. In the Code Browser, right-click on the code you wish to query.
 
 2. Select either `Show in Active Document` or `Show in All Documents`.
@@ -22,6 +24,15 @@ Querying data allows you to see all selections coded with particular codes.
 
 4. You can save the query to be run later by clicking `Save Query` in the Query Results pane. Magnolia will suggest a name for the query, but you are free to change it.
 
+## The Document Selector
+The Query tool contains the [Document Selector](/guide/documentselector). It can be used to target your query to specific documents. 
+
+By default, the Document Selector is collapsed and applies your query to all documents in your project.
+<figure>
+     <img src="./images/DocumentSelectorCollapsed.png" alt="The Document Selector in its default, collapsed state.">
+     <figcaption>The Document Selector in its default, collapsed state.</figcaption>
+</figure>
+
 ## The Query Builder
 
 The Query Builder allows you to create complex queries that target specific documents, groups of documents, survey questions, or survey respondents.
@@ -39,7 +50,7 @@ When a new query is created, the Query Builder is empty.
 
 The Query Builder is a visual, node-based editor. Think of it like a pipeline that you can pour different things into.
 
-To create a query:
+**To create a query:**
 
 1. Drag a code from the Code Browser onto the Query Builder's canvas; and,
 
@@ -53,6 +64,8 @@ To create a query:
 3. Ensure it is connected the Results node.
 
 ## Searching for text
+
+**To search for a string of text:**
 
 1. Drag the text node onto the canvas.
 
@@ -76,7 +89,7 @@ You can add logical operators into your query to refine it. Magnolia uses the co
 | NOT | Outputs segments that do not match the inputs | 
 | XOR | Outputs segments where one, but not more, of the inputs are met | 
 
-To use a logical operator:
+**To use a logical operator:**
 
 1. Drag the logical operator onto the canvas.
 

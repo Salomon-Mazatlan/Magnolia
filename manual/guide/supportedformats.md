@@ -9,9 +9,7 @@
 | Survey | `.csv .xlsx`                                        |
 
 ::: info
-
 `.docx` and `.rtf` files are converted to `.pdf` when imported.
-
 :::
 
 
