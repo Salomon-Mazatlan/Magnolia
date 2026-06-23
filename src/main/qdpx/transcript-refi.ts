@@ -223,6 +223,61 @@ export function buildTranscript(
   }
 }
 
+/** Codepoint offset of the start of each line, plus a trailing total — the
+ *  i-th line spans [offsets[i], offsets[i+1]). Used to map character ranges
+ *  to/from transcript lines. */
+export function lineStartOffsetsWithEnd(text: string): number[] {
+  const lines = (text || '').split('\n')
+  const out: number[] = []
+  let cp = 0
+  for (const line of lines) {
+    out.push(cp)
+    cp += [...line].length + 1
+  }
+  out.push(cp)
+  return out
+}
+
+/** The content line a character offset falls on. */
+export function lineForChar(text: string, cp: number): number {
+  const offsets = lineStartOffsetsWithEnd(text)
+  let line = 0
+  for (let i = 0; i < offsets.length - 1; i++) {
+    if (cp >= offsets[i]) line = i
+    else break
+  }
+  return line
+}
+
+/**
+ * Derive a video time range (seconds) for a coded CHARACTER span from the
+ * transcript's per-line times. The span's first/last lines give the in/out:
+ * start = that start-line's time, end = the line after the end-line's time
+ * (so the range covers the spoken lines). Returns undefined when there are no
+ * line times — the coding still renders char-precise; it just isn't on the
+ * timeline. This is the "best of both worlds" coupling: char-precise text,
+ * line-granular time.
+ */
+export function deriveLineTimeRange(
+  text: string,
+  startCp: number,
+  endCp: number,
+  lineTimes: Record<string, number> | undefined
+): { startTime: number; endTime: number } | undefined {
+  if (!lineTimes || Object.keys(lineTimes).length === 0) return undefined
+  const startLine = lineForChar(text, startCp)
+  const endLine = lineForChar(text, Math.max(endCp - 1, startCp))
+  const at = (line: number): number | undefined => {
+    const v = lineTimes[String(line)]
+    return typeof v === 'number' ? v : undefined
+  }
+  const startTime = at(startLine)
+  if (startTime == null) return undefined
+  // End time: the next line's start if known, else the end-line's own time.
+  const endTime = at(endLine + 1) ?? at(endLine) ?? startTime
+  return { startTime, endTime: Math.max(endTime, startTime) }
+}
+
 /** Per-source path lookups the media-transcript reconciliation needs,
  *  captured by the reader before paths are cleared / _refiTranscript is
  *  deleted. Keys are source guids. */
@@ -239,86 +294,43 @@ interface ReconcilableSource {
   guid: string
   sourceType?: string
   name?: string
-  selections?: unknown[]
-}
-
-/**
- * Convert a char-offset transcript coding into Magnolia's VIDEO coding
- * model. Video codings render only when they carry a `timeRange`, and they
- * anchor to transcript LINES (startPosition/endPosition are content-line
- * indexes, used when `manuallyAnchored`) rather than character offsets. So
- * map the coded character span to the line(s) it falls on, anchor the
- * bracket there, and give it a timeRange (from the source's lineTimes when
- * known, otherwise a synthetic per-line range so the bracket still draws on
- * an un-timed transcript). Audio codings stay char-offset and aren't
- * converted — they render directly in the text view.
- */
-function toVideoLineCoding(
-  sel: any,
-  text: string,
-  lineTimes: Record<string, number> | undefined
-): any {
-  const lines = text.split('\n')
-  const starts: number[] = []
-  let cp = 0
-  for (const line of lines) {
-    starts.push(cp)
-    cp += [...line].length + 1
-  }
-  const lineOf = (pos: number): number => {
-    let ln = 0
-    for (let i = 0; i < starts.length; i++) {
-      if (pos >= starts[i]) ln = i
-      else break
-    }
-    return ln
-  }
-  const startLine = lineOf(sel.startPosition ?? 0)
-  const endLine = lineOf(Math.max((sel.endPosition ?? 0) - 1, sel.startPosition ?? 0))
-  const t = (line: number, fallback: number): number => {
-    const v = lineTimes?.[String(line)]
-    return typeof v === 'number' ? v : fallback
-  }
-  return {
-    ...sel,
-    startPosition: startLine,
-    endPosition: endLine,
-    manuallyAnchored: true,
-    timeRange: { startTime: t(startLine, startLine), endTime: t(endLine, endLine) + (lineTimes ? 0 : 1) }
-  }
+  formatData?: any
+  selections?: any[]
 }
 
 /**
  * Collapse the multiple sources another tool (Atlas) emits for ONE coded
- * video/audio into a single media document.
+ * video/audio into a single media document with an inline transcript.
  *
  * Atlas exports a coded video as up to three sources: the media
- * <VideoSource>/<AudioSource>, a standalone transcript <TextSource> that
- * carries the codings, and a second media source whose <Transcript> child
- * re-references the same transcript text. Imported as-is that's two or three
- * duplicate, unlinked documents. Here we:
- *   1. fold each standalone transcript <TextSource> (its text + codings)
- *      into a per-transcript-file bucket and drop it;
- *   2. group the remaining media sources by their media file path and, for
- *      each group that has a transcript, keep one canonical document (the
- *      one NOT named after the transcript), give it the transcript text +
- *      codings, and drop the rest.
+ * <VideoSource>/<AudioSource> (e.g. "Video.mp4"), a standalone transcript
+ * <TextSource> ("Video-transcript") that carries the CHARACTER-precise
+ * codings, and a SECOND media source whose <Transcript> child re-references
+ * the same transcript text. We fold that into one document: the real media
+ * source gets the transcript text and the character-precise codings; the
+ * standalone transcript and the duplicate media source are dropped.
  *
- * Mutates `sourceContents` (moves/removes content) and returns the surviving
- * sources. A Magnolia-authored file — one media source with its <Transcript>
- * inline and no standalone transcript — is left untouched.
+ * Codings keep their character offsets (the text highlight is char-precise)
+ * and gain a derived `timeRange` from the transcript's line times when known
+ * (for the timeline) — the unified char-precise + line-timed model. A
+ * Magnolia-authored file (one media source, inline <Transcript>, no
+ * standalone transcript) is left untouched.
  */
 export function reconcileMediaTranscripts<T extends ReconcilableSource>(
   sources: T[],
   sourceContents: Record<string, string>,
   paths: MediaTranscriptPaths
 ): T[] {
-  const { mediaPathByGuid, transcriptFileByGuid, textFileByGuid } = paths
+  const mediaPathByGuid = paths.mediaPathByGuid ?? new Map<string, string>()
+  const transcriptFileByGuid = paths.transcriptFileByGuid ?? new Map<string, string>()
+  const textFileByGuid = paths.textFileByGuid ?? new Map<string, string>()
   const transcriptTextFiles = new Set(transcriptFileByGuid.values())
   if (transcriptTextFiles.size === 0) return sources
 
+  // 1. Gather each transcript file's text + codings from the standalone
+  //    <TextSource> that carries them, and mark those sources for removal.
   const removed = new Set<string>()
-  const codingsByFile = new Map<string, unknown[]>()
+  const codingsByFile = new Map<string, any[]>()
   const textByFile = new Map<string, string>()
   for (const s of sources) {
     if (s.sourceType && s.sourceType !== 'text') continue
@@ -329,6 +341,8 @@ export function reconcileMediaTranscripts<T extends ReconcilableSource>(
     removed.add(s.guid)
   }
 
+  // 2. Group media sources by media path; fold the transcript into one
+  //    canonical media document per group and drop the duplicates.
   const byMedia = new Map<string, T[]>()
   for (const s of sources) {
     if (s.sourceType !== 'audio' && s.sourceType !== 'video') continue
@@ -343,14 +357,16 @@ export function reconcileMediaTranscripts<T extends ReconcilableSource>(
     const canonical = group.find((s) => !/transcript/i.test(s.name ?? '')) ?? group[0]
     const text = textByFile.get(file)
     if (text != null) sourceContents[canonical.guid] = text
-    let codings = codingsByFile.get(file) ?? []
-    // A video's transcript codings must be line-anchored + time-ranged to
-    // render; an audio's stay char-offset. (See toVideoLineCoding.)
-    if (canonical.sourceType === 'video' && text != null) {
-      const lineTimes = (canonical as any).formatData?.lineTimes as Record<string, number> | undefined
-      codings = codings.map((sel) => toVideoLineCoding(sel, text, lineTimes))
-    }
-    if (codings.length > 0) canonical.selections = [...(canonical.selections ?? []), ...codings]
+    const lineTimes = (canonical.formatData?.lineTimes ?? undefined) as Record<string, number> | undefined
+    const folded = (codingsByFile.get(file) ?? []).map((sel) => {
+      // Keep the char offsets (char-precise highlight); add a derived time
+      // range so the coding also appears on the video timeline when timed.
+      const tr = text != null
+        ? deriveLineTimeRange(text, sel.startPosition ?? 0, sel.endPosition ?? 0, lineTimes)
+        : undefined
+      return tr ? { ...sel, timeRange: tr } : sel
+    })
+    if (folded.length > 0) canonical.selections = [...(canonical.selections ?? []), ...folded]
     for (const s of group) if (s !== canonical) removed.add(s.guid)
   }
 

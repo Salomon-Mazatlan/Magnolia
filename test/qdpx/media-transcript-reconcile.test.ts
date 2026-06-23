@@ -25,28 +25,42 @@ function atlasVideoSources() {
 }
 
 describe('reconcileMediaTranscripts', () => {
-  it('collapses Atlas\'s split video+transcript into one media document with the coding', () => {
+  it('folds the transcript inline into one video, keeping the coding char-precise', () => {
     const { sources, sourceContents, paths } = atlasVideoSources()
     const result = reconcileMediaTranscripts(sources, sourceContents, paths)
 
+    // One document survives: the video, now carrying its transcript inline.
     expect(result).toHaveLength(1)
-    const v: any = result[0]
-    expect(v.sourceType).toBe('video')
-    expect(v.name).toBe('Video.mp4') // the non-transcript name wins
-    expect(sourceContents[v.guid]).toBe('This is a video transcript.\nIt has a code here.')
-    expect(v.selections).toHaveLength(1)
-    // The char-offset coding [42,46] ("here", on line 1) is converted to the
-    // video model: line-anchored, manuallyAnchored, with a timeRange so it
-    // renders on the transcript.
-    const sel = v.selections[0]
-    expect(sel.startPosition).toBe(1) // content line index, not char offset
-    expect(sel.endPosition).toBe(1)
-    expect(sel.manuallyAnchored).toBe(true)
-    expect(sel.timeRange).toBeDefined()
-    expect(sel.codings[0].codeGuid).toBe('CODE')
-    // The folded/duplicate sources' content is dropped from the map.
+    const video: any = result[0]
+    expect(video.guid).toBe('VID1')
+    expect(video.sourceType).toBe('video')
+    expect(sourceContents.VID1).toBe('This is a video transcript.\nIt has a code here.')
+    // The coding keeps its exact character offsets (char-precise highlight).
+    expect(video.selections).toHaveLength(1)
+    expect(video.selections[0].startPosition).toBe(42)
+    expect(video.selections[0].endPosition).toBe(46)
+    expect(video.selections[0].codings[0].codeGuid).toBe('CODE')
+    // The standalone transcript + duplicate video were folded away.
     expect(sourceContents.TXT1).toBeUndefined()
     expect(sourceContents.VID2).toBeUndefined()
+  })
+
+  it('derives a timeRange for a folded coding when the video has line times', () => {
+    const sources = [
+      { guid: 'V', sourceType: 'video', name: 'Clip.mp4', formatData: { lineTimes: { '0': 0, '1': 5 } }, selections: [] as any[] },
+      { guid: 'T', sourceType: 'text', name: 'Clip-transcript', selections: [{ guid: 'S', startPosition: 30, endPosition: 34, codings: [] }] },
+      { guid: 'V2', sourceType: 'video', name: 'Clip-transcript', selections: [] as any[] }
+    ]
+    // "Line one is here.\nLine two is here." → char 30 is on line 1.
+    const sourceContents: Record<string, string> = { T: 'Line one is here.\nLine two is here.', V2: 'Line one is here.\nLine two is here.' }
+    const result = reconcileMediaTranscripts(sources, sourceContents, {
+      mediaPathByGuid: new Map([['V', 'p'], ['V2', 'p']]),
+      transcriptFileByGuid: new Map([['V2', 'f']]),
+      textFileByGuid: new Map([['T', 'f']])
+    })
+    const v: any = result[0]
+    expect(v.selections[0].timeRange).toBeDefined()
+    expect(v.selections[0].timeRange.startTime).toBe(5) // line 1's time
   })
 
   it('leaves a Magnolia-native file (one media source, inline transcript) untouched', () => {
@@ -56,8 +70,8 @@ describe('reconcileMediaTranscripts', () => {
     const sourceContents = { V: 'hello transcript' }
     const paths = {
       mediaPathByGuid: new Map([['V', 'internal://V.mp4']]),
-      transcriptFileByGuid: new Map([['V', 'V.txt']]), // its own inline transcript
-      textFileByGuid: new Map<string, string>()        // no standalone transcript
+      transcriptFileByGuid: new Map([['V', 'V.txt']]), // its own inline transcript, no duplicate
+      textFileByGuid: new Map<string, string>()
     }
     const result = reconcileMediaTranscripts(sources, sourceContents, paths)
     expect(result).toHaveLength(1)

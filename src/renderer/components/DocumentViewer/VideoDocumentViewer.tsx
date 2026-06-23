@@ -228,8 +228,12 @@ export function VideoDocumentViewer({ source, content }: Props) {
     return () => window.removeEventListener('keydown', handler)
   }, [footPedalMappings, togglePlayPause, rewind, fastForward])
 
-  // Transcript-only fallback (no video binary available — e.g. imported
-  // transcript with a missing file). Mirrors AudioDocumentViewer's path.
+  // Transcript-only fallback (no video binary available — e.g. a video
+  // transcript imported from another tool with the media missing). With no
+  // timeline to anchor to, render the transcript character-precise like a
+  // text/audio document (no `videoMode`) so codings highlight the exact
+  // coded text rather than widening to whole lines. Mirrors
+  // AudioDocumentViewer's path.
   if (!hasVideo) {
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -239,7 +243,6 @@ export function VideoDocumentViewer({ source, content }: Props) {
           content={content}
           selections={source.selections}
           currentPlaybackTime={0}
-          videoMode
           videoDuration={0}
           externalHighlight={externalHighlight}
         />
