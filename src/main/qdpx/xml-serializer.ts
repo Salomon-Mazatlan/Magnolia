@@ -295,6 +295,85 @@ function serializeAudioSource(source: TextSource): any {
   return obj
 }
 
+// Node tags (the 12-hex tail of a guid) for the two synthetic sources a coded
+// media transcript is split into. Deterministic + distinct from the media
+// guid, its <Transcript> guid, and its SyncPoint guids (those use small
+// position tails), so they're stable across saves and never collide.
+const SPLIT_TEXT_SOURCE_NODE = 'D0C0DE000001'
+const SPLIT_MEDIA_TRANSCRIPT_NODE = 'D0C0DE000002'
+
+/** Keep a guid's first 24 chars (XXXXXXXX-XXXX-XXXX-XXXX-) and replace the
+ *  12-hex node — mirrors syncPointGuidFor. */
+function splitSourceGuid(g: string, node: string): string {
+  return (g.length >= 24 ? g.slice(0, 24) : g) + node
+}
+
+/**
+ * Serialize a coded media (video/audio) transcript the way Atlas.ti itself
+ * does — as THREE sources — or return null when the source has no transcript
+ * codings (it's then serialized inline, normally).
+ *
+ * Atlas silently drops a <Coding> that sits inside a <TranscriptSelection> of
+ * a <Transcript>; it only honours a coding on a <PlainTextSelection> of a real
+ * <TextSource>. So Magnolia must mirror Atlas's layout:
+ *   1. the media <VideoSource>/<AudioSource> — no transcript, transcript
+ *      codings removed (only any pure-timeline VideoSelections stay);
+ *   2. a <TextSource> "Transcript" — the transcript text + the codings as
+ *      <PlainTextSelection>s (this is the anchor Atlas keeps the code on);
+ *   3. a second media source "Transcript" — a <Transcript> (SyncPoints only)
+ *      referencing the SAME transcript text path, providing the text↔time link.
+ * All three share the media file (sources/<guid>.<ext>) and transcript text
+ * (sources/<guid>.txt) the writer already emits. Magnolia's reader folds them
+ * back into one source (reconcileMediaTranscripts), so this is transparent to
+ * Magnolia↔Magnolia.
+ */
+function splitCodedMediaTranscript(
+  source: TextSource,
+  kind: 'video' | 'audio',
+  serializeMedia: (s: TextSource) => any
+): { media: any; text: any; transcript: any } | null {
+  const transcript = (source as any)._refiTranscript as RefiTranscript | undefined
+  if (!transcript) return null
+  const codings = (source.selections ?? []).filter((sel) => isTranscriptCoding(sel as any))
+  if (codings.length === 0) return null
+
+  const ext = kind === 'video'
+    ? ((source.formatData?.videoExt as string) || 'mp4')
+    : audioExtensionFor(source as any)
+  const mediaPath = `internal://${source.guid}.${ext}`
+  const textPath = `internal://${source.guid}.txt`
+
+  // 1. Media source — strip the inline transcript and the transcript codings.
+  const mediaClone: any = {
+    ...source,
+    _refiTranscript: undefined,
+    selections: (source.selections ?? []).filter((sel) => !isTranscriptCoding(sel as any))
+  }
+  const media = serializeMedia(mediaClone)
+
+  // 2. TextSource holding the transcript text + coded <PlainTextSelection>s.
+  const text: any = {
+    '@_guid': splitSourceGuid(source.guid, SPLIT_TEXT_SOURCE_NODE),
+    '@_name': 'Transcript',
+    '@_plainTextPath': textPath,
+    PlainTextSelection: codings.map(serializeSelection)
+  }
+
+  // 3. Media-transcript source — the <Transcript> (SyncPoints) for the time link.
+  const transcriptSource: any = {
+    '@_guid': splitSourceGuid(source.guid, SPLIT_MEDIA_TRANSCRIPT_NODE),
+    '@_name': 'Transcript',
+    '@_path': mediaPath,
+    Transcript: serializeTranscript({
+      guid: transcript.guid,
+      plainTextPath: textPath,
+      syncPoints: transcript.syncPoints,
+      selections: []
+    })
+  }
+  return { media, text, transcript: transcriptSource }
+}
+
 /** Stable derivation of a Representation GUID from a source GUID. The
  *  RFC-4122 spec doesn't mandate that a child element's guid differ
  *  from its parent's, but Atlas.ti's validator (and the Phase 1
@@ -648,11 +727,36 @@ export function serializeProject(project: Project): string {
         && (s as any).sourceType !== 'video'
     )
     p.Sources = {}
-    // Real text sources plus the generated per-respondent open-ended
-    // documents (which carry the promoted survey-cell codings).
+    // Coded media transcripts are split into Atlas's three-source layout (media
+    // source + transcript <TextSource> with the codings + a media-transcript
+    // source with the SyncPoints); the extra <TextSource>s are collected here.
+    const splitTextSources: any[] = []
+    const audioXml: any[] = []
+    for (const s of audioSources) {
+      const split = splitCodedMediaTranscript(s as any, 'audio', serializeAudioSource)
+      if (split) {
+        audioXml.push(split.media, split.transcript)
+        splitTextSources.push(split.text)
+      } else {
+        audioXml.push(serializeAudioSource(s))
+      }
+    }
+    const videoXml: any[] = []
+    for (const s of videoSources) {
+      const split = splitCodedMediaTranscript(s as any, 'video', serializeVideoSource)
+      if (split) {
+        videoXml.push(split.media, split.transcript)
+        splitTextSources.push(split.text)
+      } else {
+        videoXml.push(serializeVideoSource(s))
+      }
+    }
+    // Real text sources, the per-respondent open-ended survey docs (which carry
+    // the promoted survey-cell codings), and the split transcript text sources.
     const textSourceXml = [
       ...textSources.map(serializeTextSource),
-      ...surveyRefi.respondentDocs.map(serializeRespondentDoc)
+      ...surveyRefi.respondentDocs.map(serializeRespondentDoc),
+      ...splitTextSources
     ]
     if (textSourceXml.length > 0) {
       p.Sources.TextSource = textSourceXml
@@ -660,14 +764,14 @@ export function serializeProject(project: Project): string {
     if (pdfSources.length > 0) {
       p.Sources.PDFSource = pdfSources.map(serializePdfSource)
     }
-    if (audioSources.length > 0) {
-      p.Sources.AudioSource = audioSources.map(serializeAudioSource)
+    if (audioXml.length > 0) {
+      p.Sources.AudioSource = audioXml
     }
     if (imageSources.length > 0) {
       p.Sources.PictureSource = imageSources.map(serializeImageSource)
     }
-    if (videoSources.length > 0) {
-      p.Sources.VideoSource = videoSources.map(serializeVideoSource)
+    if (videoXml.length > 0) {
+      p.Sources.VideoSource = videoXml
     }
   }
 

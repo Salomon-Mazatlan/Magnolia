@@ -94,28 +94,33 @@ describe('Audio/Video transcripts → REFI-QDA <Transcript>/<SyncPoint>', () => 
     expect(xml.indexOf('<Transcript')).toBeLessThan(xml.indexOf('<VideoSelection'))
   })
 
-  it('round-trips a transcript (timings + codings) through serialize → deserialize → reconstruct', () => {
+  it('splits a coded audio transcript into Atlas\'s layout (media + coded TextSource + SyncPoints)', () => {
     const xml = serializeProject(projectWithTranscripts())
     const parsed = deserializeProject(xml) as any
-    const audio = parsed.sources.find((s: any) => s.guid === AUDIO)
-    expect(audio._refiTranscript).toBeDefined()
-    // 3 line-start sync points + 1 coding-boundary point (end of the coding).
-    expect(audio._refiTranscript.syncPoints).toHaveLength(4)
-    expect(reconstructLineTimes(TEXT, audio._refiTranscript.syncPoints)).toEqual(LINE_TIMES)
-    // The coding comes back at its exact character offsets with its CodeRef.
-    const codings = reconstructTranscriptSelections(audio._refiTranscript)
-    expect(codings).toHaveLength(1)
-    expect(codings[0].startPosition).toBe(12)
-    expect(codings[0].endPosition).toBe(23)
-    expect(codings[0].codings[0].codeGuid).toBe(CODE)
+    // The media source carries NO inline transcript and no transcript codings.
+    const media = parsed.sources.find((s: any) => s.guid === AUDIO)
+    expect(media).toBeDefined()
+    expect(media._refiTranscript).toBeUndefined()
+    // A TextSource carries the coding as a <PlainTextSelection> at its exact
+    // char offsets — the anchor Atlas keeps the code on.
+    const textSrc = parsed.sources.find(
+      (s: any) => s.guid !== AUDIO && (s.selections?.length ?? 0) > 0 && (s.plainTextPath ?? '').includes(`${AUDIO}.txt`)
+    )
+    expect(textSrc).toBeDefined()
+    expect(textSrc.selections[0].startPosition).toBe(12)
+    expect(textSrc.selections[0].endPosition).toBe(23)
+    expect(textSrc.selections[0].codings[0].codeGuid).toBe(CODE)
+    // A media-transcript source carries the SyncPoints referencing that text.
+    const tsrc = parsed.sources.find((s: any) => (s._refiTranscript?.plainTextPath ?? '').includes(`${AUDIO}.txt`))
+    expect(tsrc).toBeDefined()
+    expect(reconstructLineTimes(TEXT, tsrc._refiTranscript.syncPoints)).toEqual(LINE_TIMES)
   })
 
-  it('emits a <TranscriptSelection> with a CodeRef for each audio coding', () => {
+  it('codes the transcript as a <PlainTextSelection> on a <TextSource>, NOT a <TranscriptSelection> (Atlas honours only the former)', () => {
     const xml = serializeProject(projectWithTranscripts())
-    expect(xml).toContain('<TranscriptSelection')
-    expect(/<TranscriptSelection[^>]*fromSyncPoint=/.test(xml)).toBe(true)
-    // SyncPoint must precede TranscriptSelection (TranscriptType order).
-    expect(xml.indexOf('<SyncPoint')).toBeLessThan(xml.indexOf('<TranscriptSelection'))
+    expect(xml).not.toContain('<TranscriptSelection')
+    // The audio coding's code rides on a PlainTextSelection's CodeRef.
+    expect(/<PlainTextSelection[\s\S]*?<CodeRef targetGUID="C0DEC0DE-0000-4000-8000-00000000C0DE"/.test(xml)).toBe(true)
   })
 
   it('gives every SyncPoint a timeStamp, incl. interpolated coding boundaries (Atlas rejects timeless points)', () => {
@@ -154,9 +159,12 @@ describe('Audio/Video transcripts → REFI-QDA <Transcript>/<SyncPoint>', () => 
     expect(sel).toBeDefined()
   })
 
-  it('serializes a video transcript coding as a coded <TranscriptSelection> with NO twin <VideoSelection> (Atlas round-trip)', () => {
-    // Emitting both made Atlas merge the two same-code anchors and strip the
-    // code from the transcript text, losing the text coding on round-trip.
+  it('serializes a video transcript coding as Atlas\'s 3-source split (no TranscriptSelection, no VideoSelection)', () => {
+    // Emitting the coding inside the media source's <Transcript> (as a
+    // <TranscriptSelection>) makes Atlas drop the code. Atlas only honours a
+    // coding on a <PlainTextSelection> of a real <TextSource>, so we mirror
+    // its three-source layout: empty media source, coded TextSource, and a
+    // media-transcript source with the SyncPoints.
     const video: any = {
       guid: VIDEO, name: 'Clip', sourceType: 'video',
       formatData: { videoExt: 'mp4', lineTimes: LINE_TIMES },
@@ -172,16 +180,37 @@ describe('Audio/Video transcripts → REFI-QDA <Transcript>/<SyncPoint>', () => 
       sources: [video], sets: [], notes: []
     }
     const xml = serializeProject(project)
-    // No VideoSelection at all for this transcript-text coding...
+    expect(xml).not.toContain('<TranscriptSelection')
     expect(xml).not.toContain('<VideoSelection')
-    // ...and the TranscriptSelection carries the code.
-    expect(xml).toContain('<TranscriptSelection')
-    const tsGuid = /<TranscriptSelection[^>]*guid="([^"]+)"/.exec(xml)?.[1]
-    expect(tsGuid).toBe('B0000000-0000-4000-8000-000000000001')
-    expect(/<TranscriptSelection[\s\S]*?<CodeRef targetGUID="C0DEC0DE-0000-4000-8000-00000000C0DE"/.test(xml)).toBe(true)
+    // The code rides on a <PlainTextSelection> in a <TextSource>.
+    expect(/<PlainTextSelection[\s\S]*?<CodeRef targetGUID="C0DEC0DE-0000-4000-8000-00000000C0DE"/.test(xml)).toBe(true)
+    // Both the TextSource and the media-transcript source reference the SAME
+    // transcript text path, so Atlas (and our reader) link them.
+    const textRefs = [...xml.matchAll(/plainTextPath="internal:\/\/([^"]+)"/g)].map((m) => m[1])
+    expect(textRefs).toContain(`${VIDEO}.txt`)
+    expect(textRefs.filter((r) => r === `${VIDEO}.txt`).length).toBe(2)
     // Every guid in the document is unique.
     const allGuids = [...xml.matchAll(/\bguid="([^"]+)"/g)].map((m) => m[1])
     expect(new Set(allGuids).size).toBe(allGuids.length)
+  })
+
+  it('serializes an uncoded video transcript inline (single source, no split)', () => {
+    const video: any = {
+      guid: VIDEO, name: 'Clip', sourceType: 'video',
+      formatData: { videoExt: 'mp4', lineTimes: LINE_TIMES },
+      selections: []
+    }
+    video._refiTranscript = buildTranscript(VIDEO, TEXT, LINE_TIMES, [])
+    const project: Project = {
+      name: 'P', origin: 'test',
+      users: [{ guid: '00000000-0000-0000-0000-000000000001', name: 'T' }],
+      codes: [], sources: [video], sets: [], notes: []
+    }
+    const xml = serializeProject(project)
+    // One VideoSource with an inline Transcript; no extra TextSource.
+    expect((xml.match(/<VideoSource/g) ?? []).length).toBe(1)
+    expect(xml).not.toContain('<TextSource')
+    expect(xml).toContain('<Transcript')
   })
 
   it('STILL emits a <VideoSelection> for a pure timeline coding (no transcript-text anchor)', () => {

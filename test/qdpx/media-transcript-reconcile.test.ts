@@ -1,5 +1,29 @@
-import { describe, it, expect } from 'vitest'
-import { reconcileMediaTranscripts } from '../../src/main/qdpx/transcript-refi'
+import { describe, it, expect, vi } from 'vitest'
+
+vi.mock('electron', () => ({ app: { getVersion: () => '0.0.0-test' } }))
+
+import { reconcileMediaTranscripts, buildTranscript } from '../../src/main/qdpx/transcript-refi'
+import { serializeProject } from '../../src/main/qdpx/xml-serializer'
+import { deserializeProject } from '../../src/main/qdpx/xml-deserializer'
+
+/** Rebuild the three reconciliation maps the reader derives from parsed
+ *  sources (mirrors reader.ts). */
+function readerMaps(sources: any[]) {
+  const mediaPathByGuid = new Map<string, string>()
+  const transcriptFileByGuid = new Map<string, string>()
+  const textFileByGuid = new Map<string, string>()
+  for (const s of sources) {
+    if (s.sourceType === 'audio' || s.sourceType === 'video') {
+      if (s.plainTextPath) mediaPathByGuid.set(s.guid, s.plainTextPath)
+      const tp = (s._refiTranscript?.plainTextPath || '').match(/internal:\/\/(.+)/)
+      if (tp) transcriptFileByGuid.set(s.guid, tp[1])
+    } else if (!s.sourceType || s.sourceType === 'text') {
+      const tp = (s.plainTextPath || '').match(/internal:\/\/(.+)/)
+      if (tp) textFileByGuid.set(s.guid, tp[1])
+    }
+  }
+  return { mediaPathByGuid, transcriptFileByGuid, textFileByGuid }
+}
 
 /** Mirrors Atlas's VideoFromAtlas.qdpx: a media VideoSource, a standalone
  *  transcript TextSource carrying the coding, and a second VideoSource whose
@@ -77,6 +101,52 @@ describe('reconcileMediaTranscripts', () => {
     expect(result).toHaveLength(1)
     expect(result[0]).toBe(sources[0]) // unchanged
     expect(sourceContents.V).toBe('hello transcript')
+  })
+
+  it('full round-trip: a Magnolia video coding survives serialize → deserialize → reconcile', () => {
+    const VIDEO = 'E2222222-2222-2222-2222-222222222222'
+    const CODE = 'C0DEC0DE-0000-4000-8000-00000000C0DE'
+    const TEXT = 'Hello world\nSecond line\nThird'
+    const LINE_TIMES = { '0': 0, '1': 2.5, '2': 5 }
+    const sel = {
+      guid: 'B0000000-0000-4000-8000-000000000001',
+      startPosition: 12, endPosition: 23,
+      timeRange: { startTime: 2.5, endTime: 5 },
+      codings: [{ guid: 'A0000000-0000-4000-8000-00000000000C', codeGuid: CODE }]
+    }
+    const video: any = {
+      guid: VIDEO, name: 'Clip', sourceType: 'video',
+      formatData: { videoExt: 'mp4', lineTimes: LINE_TIMES }, selections: [sel]
+    }
+    video._refiTranscript = buildTranscript(VIDEO, TEXT, LINE_TIMES, video.selections)
+    const project: any = {
+      name: 'P', origin: 'test',
+      users: [{ guid: 'U0000000-0000-4000-8000-000000000001', name: 'T' }],
+      codes: [{ guid: CODE, name: 'theme', isCodable: true, children: [] }],
+      sources: [video], sets: [], notes: []
+    }
+    // Serialize (Atlas 3-source split) → deserialize.
+    const parsed: any = deserializeProject(serializeProject(project))
+    // The reader restores the media source's line times from the sidecar.
+    const media = parsed.sources.find((s: any) => s.guid === VIDEO)
+    media.formatData = { ...(media.formatData || {}), lineTimes: LINE_TIMES }
+    // The reader loads each referenced text file's content; here both the
+    // TextSource and the media-transcript source resolve to the transcript text.
+    const sourceContents: Record<string, string> = {}
+    for (const s of parsed.sources) {
+      if ((s.selections?.length ?? 0) > 0 || s._refiTranscript) sourceContents[s.guid] = TEXT
+    }
+    const folded = reconcileMediaTranscripts(parsed.sources, sourceContents, readerMaps(parsed.sources))
+    // Back to ONE source — the coding preserved char-precise, with its code.
+    expect(folded).toHaveLength(1)
+    const v: any = folded[0]
+    expect(v.guid).toBe(VIDEO)
+    expect(v.selections).toHaveLength(1)
+    expect(v.selections[0].startPosition).toBe(12)
+    expect(v.selections[0].endPosition).toBe(23)
+    expect(v.selections[0].codings[0].codeGuid).toBe(CODE)
+    // ...and a timeRange re-derived from the line times for the timeline.
+    expect(v.selections[0].timeRange).toBeDefined()
   })
 
   it('is a no-op when no media source references a transcript', () => {
