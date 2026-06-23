@@ -7,7 +7,7 @@ import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
 import { graphToMap, type RefiGraph, type RefiLink, type GraphEntity } from './graph-refi'
 import { reconstructLineTimes, reconstructTranscriptSelections, type RefiTranscript } from './transcript-refi'
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
-import { extractPdfTextWithPositions, type PdfTextItem } from '../pdf-extract'
+import { extractPdfTextWithPositions } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
 
 const IMAGE_MIME_BY_EXT: Record<string, string> = {
@@ -145,61 +145,37 @@ function resolveRawRect(
 }
 
 /**
- * Convert a PDFSelection into either:
- *   - A character-offset text selection (if the rectangle overlaps extracted
- *     text items) — these behave exactly like native Magnolia codings with
- *     hover/lock/search.
- *   - A region-based box selection (fallback) — for image-only areas or
- *     regions where no text was extracted.
+ * Convert a standalone <PDFSelection> into a region-based box selection.
+ *
+ * A <PDFSelection> is a geometric rectangle on the page — that's a *box*
+ * coding, and Magnolia keeps it as one. (We used to "upgrade" rectangles
+ * that happened to overlap text into char-offset text selections for
+ * hover/search, but that mis-imported a genuine box drawn over text or an
+ * image as a thin text bracket — the bug this fixes.) Text codings come in
+ * through the <PlainTextSelection> path instead and never reach here: a
+ * tool that exports a text coding as both a PlainTextSelection and a
+ * duplicate-guid PDFSelection has the PDFSelection filtered out by the
+ * caller's existing-guid check, so only true box codings are converted.
  */
 function convertPdfSelection(
   raw: RawPdfSelection,
   quirks: PdfSelectionQuirks,
-  pageSizes: { width: number; height: number }[],
-  pageItems: Map<number, PdfTextItem[]>
+  pageSizes: { width: number; height: number }[]
 ): PlainTextSelection {
   const page = raw.page + quirks.pageBase
   const rect = resolveRawRect(raw, quirks, pageSizes, page)
-
-  // Try to find extracted text items that intersect this rectangle.
-  // If found, build a character-offset range → proper text selection.
-  const items = pageItems.get(page) || []
-  let cpStart = Infinity
-  let cpEnd = -Infinity
-  for (const it of items) {
-    // Standard rectangle intersection (both in top-origin PDF points).
-    const ix1 = it.x
-    const ix2 = it.x + it.width
-    const iy1 = it.y
-    const iy2 = it.y + it.height
-    if (ix1 < rect.x + rect.width && ix2 > rect.x && iy1 < rect.y + rect.height && iy2 > rect.y) {
-      if (it.cpStart < cpStart) cpStart = it.cpStart
-      if (it.cpEnd > cpEnd) cpEnd = it.cpEnd
-    }
-  }
-
-  const base: PlainTextSelection = {
+  return {
     guid: raw.guid,
     name: raw.name,
     startPosition: 0,
     endPosition: 0,
+    pdfRegion: { page, ...rect },
     creatingUser: raw.creatingUser,
     creationDateTime: raw.creationDateTime,
     modifyingUser: raw.modifyingUser,
     modifiedDateTime: raw.modifiedDateTime,
     codings: raw.codings
   }
-
-  if (cpStart < cpEnd) {
-    // Text selection — character-offset based. Full hover/search support.
-    base.startPosition = cpStart
-    base.endPosition = cpEnd
-  } else {
-    // No text found — keep as a region-based box selection.
-    base.pdfRegion = { page, ...rect }
-  }
-
-  return base
 }
 
 /** Progress reporter: (stage, current, total). `total` may be 0 for indeterminate stages. */
@@ -294,46 +270,36 @@ export async function readQdpx(
           let extractedText = ''
           let pageOffsets: number[] = []
           let pageSizes: { width: number; height: number }[] = []
-          let extractedItems: PdfTextItem[] = []
           try {
             const extracted = await extractPdfTextWithPositions(pdfBuf)
             extractedText = extracted.text
             pageOffsets = extracted.pageOffsets
             pageSizes = extracted.pageSizes
-            extractedItems = extracted.items
           } catch (err) {
             // Text extraction failed — document still viewable, just no
             // searchable text.
             console.error(`Failed to extract text from PDF ${source.guid}:`, err)
           }
 
-          // Convert raw <PDFSelection> rectangles into either character-
-          // offset text selections (preferred — works with hover/search)
-          // or region-based box selections (fallback for non-text areas).
+          // Convert raw <PDFSelection> rectangles into region-based box
+          // selections.
           //
-          // Atlas.ti (and others) export the SAME coding twice: as a
+          // Atlas.ti (and others) export a TEXT coding twice: as a
           // <PDFSelection> page rectangle AND as a char-offset
           // <PlainTextSelection> inside the <Representation> (same selection
           // guid). The char-offset form is already in source.selections from
-          // the deserializer and is reliable; the rectangle needs lossy
-          // coordinate conversion. So we keep the existing text selections and
-          // only convert region PDFSelections whose guid isn't already
-          // represented — otherwise we'd clobber a correct text coding with a
-          // mis-placed box (the bug that made Atlas.ti PDF codings vanish).
+          // the deserializer and is reliable, so we drop the duplicate
+          // PDFSelection (existing-guid check) — otherwise we'd clobber a
+          // correct text coding with a mis-placed box (the bug that made
+          // Atlas.ti PDF codings vanish). What remains are genuine BOX
+          // codings (a rectangle with no char-offset twin), which stay boxes.
           const rawSelections: RawPdfSelection[] = (source as any)._rawPdfSelections || []
           if (rawSelections.length > 0) {
             const quirks = getPdfSelectionQuirks(project.origin || '')
-            // Build a per-page index of text items for rect → char-offset matching.
-            const itemsByPage = new Map<number, PdfTextItem[]>()
-            for (const it of extractedItems) {
-              const arr = itemsByPage.get(it.page) || []
-              arr.push(it)
-              itemsByPage.set(it.page, arr)
-            }
             const existingGuids = new Set(source.selections.map((s) => s.guid))
             const converted = rawSelections
               .filter((raw) => !existingGuids.has(raw.guid))
-              .map((raw) => convertPdfSelection(raw, quirks, pageSizes, itemsByPage))
+              .map((raw) => convertPdfSelection(raw, quirks, pageSizes))
             source.selections = [...source.selections, ...converted]
           }
 
