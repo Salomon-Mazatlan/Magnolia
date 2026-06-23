@@ -5,6 +5,7 @@ import { deserializeProject } from './xml-deserializer'
 import type { RawPdfSelection, RawPictureSelection, RawVideoSelection, RawNote, RawNoteAnchor } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
 import { graphToMap, type RefiGraph } from './graph-refi'
+import { reconstructLineTimes } from './transcript-refi'
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions, type PdfTextItem } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
@@ -747,6 +748,36 @@ export async function readQdpx(
     } catch {
       // Ignore malformed sources extension file
     }
+  }
+
+  // ── Transcript reconciliation ──
+  // Magnolia's own files carry per-line timings in magnolia-sources.json
+  // (restored above as formatData.lineTimes) and the transcript text at
+  // sources/<guid>.txt. Files from other tools instead carry a REFI-QDA
+  // <Transcript> (parsed onto _refiTranscript): its text may live at a
+  // differently-named path, and its time-sync is in <SyncPoint>s, not
+  // lineTimes. For those, load the transcript text from the Transcript's
+  // path if we don't already have it, and rebuild lineTimes from the
+  // SyncPoints — so a transcript that round-tripped through another tool
+  // comes back time-synced. The side-table always wins when present.
+  for (const source of project.sources as any[]) {
+    const transcript = source._refiTranscript as { plainTextPath?: string; syncPoints: any[] } | undefined
+    if (!transcript) continue
+    if (!sourceContents[source.guid]) {
+      const m = (transcript.plainTextPath || '').match(/internal:\/\/(.+)/)
+      if (m && m[1] !== `${source.guid}.txt`) {
+        const f = zip.file(`sources/${m[1]}`)
+        if (f) sourceContents[source.guid] = await f.async('string')
+      }
+    }
+    const existing = source.formatData?.lineTimes
+    if ((!existing || Object.keys(existing).length === 0) && transcript.syncPoints.length > 0) {
+      const rebuilt = reconstructLineTimes(sourceContents[source.guid] ?? '', transcript.syncPoints)
+      if (Object.keys(rebuilt).length > 0) {
+        source.formatData = { ...(source.formatData || {}), lineTimes: rebuilt }
+      }
+    }
+    delete source._refiTranscript
   }
 
   // ── Survey REFI reconciliation ──

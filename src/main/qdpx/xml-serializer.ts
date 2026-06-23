@@ -14,6 +14,7 @@ import {
   type RefiRespondentDoc
 } from './survey-refi'
 import { collectGraphs, type RefiGraph, type RefiVertex, type RefiEdge } from './graph-refi'
+import type { RefiTranscript } from './transcript-refi'
 
 // XML special-char escaping. Order matters: replace & first so the
 // subsequent replacements don't re-escape the ampersand we just emitted
@@ -195,6 +196,27 @@ function serializeVideoSelection(sel: PlainTextSelection): any | null {
   return obj
 }
 
+/** Serialize a REFI-QDA <Transcript> (a child of an audio/video source).
+ *  TranscriptType's child sequence is Description?, PlainTextContent?,
+ *  SyncPoint*, TranscriptSelection*, NoteRef* — we reference the transcript
+ *  text by plainTextPath (the existing sources/<guid>.txt) and emit one
+ *  SyncPoint per timed line. */
+function serializeTranscript(t: RefiTranscript): any {
+  const obj: any = {
+    '@_guid': t.guid,
+    '@_plainTextPath': t.plainTextPath
+  }
+  if (t.syncPoints.length > 0) {
+    obj.SyncPoint = t.syncPoints.map((sp) => {
+      const o: any = { '@_guid': sp.guid }
+      if (sp.timeStamp != null) o['@_timeStamp'] = Math.round(sp.timeStamp).toString()
+      if (sp.position != null) o['@_position'] = Math.round(sp.position).toString()
+      return o
+    })
+  }
+  return obj
+}
+
 /** Serialize a video source as REFI-QDA <VideoSource>. The video bytes are
  *  stored separately by writer.ts as `sources/${guid}.${ext}`. */
 function serializeVideoSource(source: TextSource): any {
@@ -208,6 +230,12 @@ function serializeVideoSource(source: TextSource): any {
   if (source.creationDateTime) obj['@_creationDateTime'] = source.creationDateTime
   if (source.modifyingUser) obj['@_modifyingUser'] = source.modifyingUser
   if (source.modifiedDateTime) obj['@_modifiedDateTime'] = source.modifiedDateTime
+  // VideoSourceType sequence is Description?, Transcript*, VideoSelection*,
+  // … — Transcript MUST be assigned before VideoSelection. The transcript
+  // (text path + per-line SyncPoints) is attached by writer.ts, which has
+  // the transcript text needed to compute SyncPoint character offsets.
+  const transcript = (source as any)._refiTranscript as RefiTranscript | undefined
+  if (transcript) obj.Transcript = serializeTranscript(transcript)
   const videoSelections = source.selections
     .map(serializeVideoSelection)
     .filter((s) => s !== null)
@@ -235,6 +263,12 @@ function serializeAudioSource(source: TextSource): any {
   if (source.creationDateTime) obj['@_creationDateTime'] = source.creationDateTime
   if (source.modifyingUser) obj['@_modifyingUser'] = source.modifyingUser
   if (source.modifiedDateTime) obj['@_modifiedDateTime'] = source.modifiedDateTime
+  // AudioSourceType sequence is Description?, Transcript*, AudioSelection*,
+  // … — the transcript (text path + per-line SyncPoints) is attached by
+  // writer.ts. This is what makes a media transcript portable: other tools
+  // see the synced transcript instead of an orphaned .txt.
+  const transcript = (source as any)._refiTranscript as RefiTranscript | undefined
+  if (transcript) obj.Transcript = serializeTranscript(transcript)
   return obj
 }
 

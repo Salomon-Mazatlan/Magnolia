@@ -10,6 +10,7 @@ import type {
 } from '../../renderer/models/types'
 import type { RefiVariable, RefiCase, RefiVariableValue, RefiVariableType } from './survey-refi'
 import type { RefiGraph, RefiVertex, RefiEdge, RefiEdgeDirection, RefiLineStyle } from './graph-refi'
+import type { RefiTranscript, RefiSyncPoint } from './transcript-refi'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -22,7 +23,7 @@ const parser = new XMLParser({
       'PictureSelection', 'VideoSelection',
       'Coding', 'CodeRef', 'NoteRef', 'Set', 'MemberSource', 'MemberCode',
       'Note', 'Link', 'VariableValue', 'Variable', 'Case', 'SourceRef',
-      'Graph', 'Vertex', 'Edge'
+      'Graph', 'Vertex', 'Edge', 'Transcript', 'SyncPoint'
     ].includes(name)
   }
 })
@@ -247,7 +248,10 @@ function parseVideoSelection(xmlSel: any): RawVideoSelection {
  * temp file.
  */
 function parseVideoSource(xmlSource: any): TextSource {
-  const source: TextSource & { _rawVideoSelections?: RawVideoSelection[] } = {
+  const source: TextSource & {
+    _rawVideoSelections?: RawVideoSelection[]
+    _refiTranscript?: RefiTranscript
+  } = {
     guid: normalizeGuid(xmlSource['@_guid']),
     name: xmlSource['@_name'] ?? '',
     sourceType: 'video',
@@ -260,16 +264,45 @@ function parseVideoSource(xmlSource: any): TextSource {
   }
   const raw = ensureArray(xmlSource.VideoSelection).map(parseVideoSelection)
   if (raw.length > 0) source._rawVideoSelections = raw
+  const transcript = parseTranscript(xmlSource)
+  if (transcript) source._refiTranscript = transcript
   return source
+}
+
+/** Parse a <Transcript> (child of an audio/video source) into the
+ *  RefiTranscript shape — its text path plus the SyncPoints that pin
+ *  transcript offsets to media times. The reader uses these to recover
+ *  the per-line timings (lineTimes) for files that arrive without
+ *  Magnolia's side-table. Only the first <Transcript> is consumed;
+ *  Magnolia emits at most one per source. */
+function parseTranscript(xmlSource: any): RefiTranscript | undefined {
+  const xmlT = ensureArray(xmlSource.Transcript)[0]
+  if (!xmlT) return undefined
+  const num = (v: any): number | undefined => {
+    const n = parseInt(v, 10)
+    return Number.isFinite(n) ? n : undefined
+  }
+  const syncPoints: RefiSyncPoint[] = ensureArray(xmlT.SyncPoint).map((sp: any) => ({
+    guid: normalizeGuid(sp['@_guid']),
+    timeStamp: num(sp['@_timeStamp']),
+    position: num(sp['@_position'])
+  }))
+  return {
+    guid: normalizeGuid(xmlT['@_guid']),
+    plainTextPath: xmlT['@_plainTextPath'] ?? '',
+    syncPoints
+  }
 }
 
 /**
  * Parse an <AudioSource>. Returns a TextSource-shaped record with
  * sourceType 'audio' and the internal audio path stored in
- * plainTextPath so the reader can locate the binary inside the zip.
+ * plainTextPath so the reader can locate the binary inside the zip. Any
+ * <Transcript> child is parsed onto the transient `_refiTranscript`
+ * field for the reader to reconcile.
  */
 function parseAudioSource(xmlSource: any): TextSource {
-  const source: TextSource = {
+  const source: TextSource & { _refiTranscript?: RefiTranscript } = {
     guid: normalizeGuid(xmlSource['@_guid']),
     name: xmlSource['@_name'] ?? '',
     sourceType: 'audio',
@@ -280,6 +313,8 @@ function parseAudioSource(xmlSource: any): TextSource {
     modifiedDateTime: xmlSource['@_modifiedDateTime'],
     selections: []
   }
+  const transcript = parseTranscript(xmlSource)
+  if (transcript) source._refiTranscript = transcript
   return source
 }
 
