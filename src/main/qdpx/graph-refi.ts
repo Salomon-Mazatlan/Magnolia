@@ -94,6 +94,9 @@ export interface RefiVertex {
 
 export interface RefiEdge {
   guid: string
+  /** GUID of the project-level <Link> this edge visualises. Atlas keys a
+   *  network link to its relation here; without it the edge is dropped. */
+  representedGuid?: string
   name?: string
   sourceVertex: string
   targetVertex: string
@@ -107,6 +110,37 @@ export interface RefiGraph {
   name?: string
   vertices: RefiVertex[]
   edges: RefiEdge[]
+}
+
+/** A project-level REFI-QDA <Link> — the entity-to-entity relation an
+ *  <Edge> represents. originGUID/targetGUID point at the linked *entities*
+ *  (a vertex's representedGUID), not the vertices. */
+export interface RefiLink {
+  guid: string
+  name?: string
+  direction?: RefiEdgeDirection
+  color?: string
+  originGuid?: string
+  targetGuid?: string
+}
+
+/** A synthetic <Note> minted to give an otherwise-unbound vertex (a
+ *  free-text box) a representedGUID, since Atlas drops vertices that
+ *  represent nothing. Carries the box's text so it stays portable. */
+export interface RefiSyntheticNote {
+  guid: string
+  name: string
+  content: string
+}
+
+/** Everything the serializer needs to emit a project's maps in the
+ *  standards-native form: the <Graph>s, the <Link>s their edges
+ *  reference, and the synthetic <Note>s their free-text vertices
+ *  represent. */
+export interface GraphBundle {
+  graphs: RefiGraph[]
+  links: RefiLink[]
+  notes: RefiSyntheticNote[]
 }
 
 const GUID_RE = /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/
@@ -141,65 +175,134 @@ function directionFor(
   return { source: conn.fromId, target: conn.toId, direction: 'Associative' }
 }
 
-function elementToVertex(el: MapElement): RefiVertex {
-  return {
-    guid: el.id,
-    representedGuid: asGuid(el.entityGuid),
-    name: el.label,
-    firstX: el.x,
-    firstY: el.y,
-    secondX: el.x + el.width,
-    secondY: el.y + el.height,
-    shape: 'RoundedRectangle',
-    color: asRgb(el.codeColor)
-  }
+/** Flip the first hex nibble of a guid: deterministic, reversible, and
+ *  guaranteed to differ from the input (15 - n === n has no solution in
+ *  0..15). Used to mint a distinct-but-stable derived guid. */
+function flipFirstNibble(guid: string): string {
+  const n = parseInt(guid[0], 16)
+  if (Number.isNaN(n)) return guid
+  return (15 - n).toString(16).toUpperCase() + guid.slice(1)
 }
 
-function freeTextToVertex(ft: FreeTextElement): RefiVertex {
-  return {
-    guid: ft.id,
-    name: ft.content,
-    firstX: ft.x,
-    firstY: ft.y,
-    secondX: ft.x + ft.width,
-    secondY: ft.y + ft.height,
-    shape: 'Note'
-  }
+/** A free-text box's backing <Note> guid (derived from the box id). */
+function noteGuidFor(freeTextId: string): string {
+  return flipFirstNibble(freeTextId)
 }
 
-/** Map one relationship-map SavedAnalysis onto a REFI-QDA <Graph>. */
-export function mapToGraph(analysis: SavedAnalysis): RefiGraph {
+/** A connection's backing <Link> guid (derived from the connection id, so
+ *  it's distinct from the <Edge> guid, which is the connection id). */
+function linkGuidFor(connectionId: string): string {
+  return flipFirstNibble(connectionId)
+}
+
+/** First non-empty line of a free-text box, for the backing note's name. */
+function firstLine(content: string): string {
+  const line = (content || '').split('\n').map((l) => l.trim()).find((l) => l.length > 0)
+  return line ? line.replace(/^#+\s*/, '').slice(0, 80) : 'Free text'
+}
+
+/**
+ * Build the standards-native representation of one relationship-map
+ * SavedAnalysis: a <Graph> plus the <Link>s its edges reference and the
+ * synthetic <Note>s its free-text vertices represent.
+ *
+ * Atlas (and the REFI model generally) treats a vertex as a *view of an
+ * entity* and an edge as a *view of a Link between entities* — it drops
+ * any vertex without a representedGUID and any edge without one. So:
+ *   - every element vertex represents its bound entity; every free-text
+ *     vertex represents a freshly-minted <Note> carrying its text;
+ *   - every connection becomes a project-level <Link> (origin/target =
+ *     the endpoints' entities) plus an <Edge> that representedGUID-points
+ *     at that Link (and still wires the vertices via sourceVertex/
+ *     targetVertex, which Atlas keys on).
+ */
+export function mapToGraph(analysis: SavedAnalysis): GraphBundle {
   const config = (analysis.config ?? {}) as Partial<RelationshipMapConfig>
-  const vertices: RefiVertex[] = [
-    ...(config.elements ?? []).map(elementToVertex),
-    ...(config.freeTexts ?? []).map(freeTextToVertex)
-  ]
-  // Drop edges whose endpoints don't both resolve to a vertex on this
-  // graph — a dangling sourceVertex/targetVertex is invalid and would
-  // also confuse importing tools.
-  const vertexIds = new Set(vertices.map((v) => v.guid))
-  const edges: RefiEdge[] = (config.connections ?? [])
-    .filter((c) => vertexIds.has(c.fromId) && vertexIds.has(c.toId))
-    .map((c) => {
-      const { source, target, direction } = directionFor(c)
-      return {
-        guid: c.id,
-        name: c.label || undefined,
-        sourceVertex: source,
-        targetVertex: target,
-        direction,
-        lineStyle: 'solid' as const
-      }
+  const notes: RefiSyntheticNote[] = []
+  // vertexId → the entity guid that vertex represents (real entity for a
+  // bound element; the synthetic note for a free-text box).
+  const represented = new Map<string, string>()
+
+  const vertices: RefiVertex[] = []
+  for (const el of config.elements ?? []) {
+    const rep = asGuid(el.entityGuid)
+    if (rep) represented.set(el.id, rep)
+    vertices.push({
+      guid: el.id,
+      representedGuid: rep,
+      name: el.label,
+      firstX: el.x,
+      firstY: el.y,
+      secondX: el.x + el.width,
+      secondY: el.y + el.height,
+      shape: 'RoundedRectangle',
+      color: asRgb(el.codeColor)
     })
-  return { guid: analysis.guid, name: analysis.name, vertices, edges }
+  }
+  for (const ft of config.freeTexts ?? []) {
+    const noteGuid = noteGuidFor(ft.id)
+    notes.push({ guid: noteGuid, name: firstLine(ft.content), content: ft.content ?? '' })
+    represented.set(ft.id, noteGuid)
+    vertices.push({
+      guid: ft.id,
+      representedGuid: noteGuid,
+      name: ft.content,
+      firstX: ft.x,
+      firstY: ft.y,
+      secondX: ft.x + ft.width,
+      secondY: ft.y + ft.height,
+      shape: 'Note'
+    })
+  }
+
+  // Drop edges whose endpoints don't both resolve to a vertex on this graph.
+  const vertexIds = new Set(vertices.map((v) => v.guid))
+  const links: RefiLink[] = []
+  const edges: RefiEdge[] = []
+  for (const c of config.connections ?? []) {
+    if (!vertexIds.has(c.fromId) || !vertexIds.has(c.toId)) continue
+    const { source, target, direction } = directionFor(c)
+    const edge: RefiEdge = {
+      guid: c.id,
+      name: c.label || undefined,
+      sourceVertex: source,
+      targetVertex: target,
+      direction,
+      lineStyle: 'solid'
+    }
+    // Back the edge with a <Link> when both endpoints resolve to an
+    // entity — Atlas needs that relation to render the link. (After the
+    // free-text→Note backing above, both ends resolve unless an element
+    // had no GUID entity binding, e.g. a query-result composite id.)
+    const originGuid = represented.get(source)
+    const targetGuid = represented.get(target)
+    if (originGuid && targetGuid) {
+      const linkGuid = linkGuidFor(c.id)
+      links.push({ guid: linkGuid, name: c.label || undefined, direction, originGuid, targetGuid })
+      edge.representedGuid = linkGuid
+    }
+    edges.push(edge)
+  }
+
+  return {
+    graphs: [{ guid: analysis.guid, name: analysis.name, vertices, edges }],
+    links,
+    notes
+  }
 }
 
-/** Collect a <Graph> for every relationship-map saved analysis in the
- *  project. Returns [] when there are none. */
-export function collectGraphs(savedAnalyses: SavedAnalysis[] | undefined): RefiGraph[] {
-  return (savedAnalyses ?? [])
-    .filter((a) => a.toolType === 'relationship-map')
-    .map(mapToGraph)
+/** Collect the graphs, links, and synthetic notes for every
+ *  relationship-map saved analysis in the project. */
+export function collectGraphs(savedAnalyses: SavedAnalysis[] | undefined): GraphBundle {
+  const out: GraphBundle = { graphs: [], links: [], notes: [] }
+  for (const a of savedAnalyses ?? []) {
+    if (a.toolType !== 'relationship-map') continue
+    const bundle = mapToGraph(a)
+    out.graphs.push(...bundle.graphs)
+    out.links.push(...bundle.links)
+    out.notes.push(...bundle.notes)
+  }
+  return out
 }
 
 /**

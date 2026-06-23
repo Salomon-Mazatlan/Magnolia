@@ -508,8 +508,19 @@ export async function readQdpx(
     }
   } else if ((project as any)._refiNotes) {
     const anchors = ((project as any)._refiNoteAnchors || {}) as Record<string, RawNoteAnchor>
+    // Notes minted to back a map's free-text boxes (the representedGUID of a
+    // shape="Note" vertex) aren't real memos — they round-trip as part of
+    // the map (via the side-table, or graphToMap for foreign files). Skip
+    // them here so they don't surface as phantom project memos.
+    const freeTextNoteGuids = new Set<string>()
+    for (const g of ((project as any)._refiGraphs as RefiGraph[] | undefined) ?? []) {
+      for (const v of g.vertices) {
+        if (v.shape === 'Note' && v.representedGuid) freeTextNoteGuids.add(v.representedGuid)
+      }
+    }
     const built: Memo[] = []
     for (const n of (project as any)._refiNotes as RawNote[]) {
+      if (freeTextNoteGuids.has(n.guid)) continue
       let content = ''
       const match = (n.plainTextPath || '').match(/internal:\/\/(.+)/)
       if (match) {

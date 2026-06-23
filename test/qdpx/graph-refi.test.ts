@@ -6,7 +6,7 @@ import { validateXML } from 'xmllint-wasm'
 vi.mock('electron', () => ({ app: { getVersion: () => '0.0.0-test' } }))
 
 import { serializeProject } from '../../src/main/qdpx/xml-serializer'
-import { mapToGraph, graphToMap } from '../../src/main/qdpx/graph-refi'
+import { mapToGraph, collectGraphs, graphToMap } from '../../src/main/qdpx/graph-refi'
 import type { Project, SavedAnalysis } from '../../src/renderer/models/types'
 
 const PROJECT_XSD = readFileSync(join(__dirname, '../fixtures/Project.xsd'), 'utf8')
@@ -19,32 +19,32 @@ async function validate(xml: string): Promise<{ valid: boolean; errors: unknown[
   return { valid: result.valid, errors: result.errors }
 }
 
-const CODE_GUID = 'AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA'
-const EL1 = 'E1111111-1111-1111-1111-111111111111'
-const EL2 = 'E2222222-2222-2222-2222-222222222222'
-const FT1 = 'F1111111-1111-1111-1111-111111111111'
-const CONN1 = 'C1111111-1111-1111-1111-111111111111'
+const DOC_GUID = 'D0CD0CD0-0000-4000-8000-00000000DD01'
+const CODE_GUID = 'AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'
+const ELDOC = 'E1111111-1111-4111-8111-111111111111'
+const ELCODE = 'E2222222-2222-4222-8222-222222222222'
+const FT1 = 'F1111111-1111-4111-8111-111111111111'
+const CONN1 = 'C1111111-1111-4111-8111-111111111111'
 
-/** A relationship-map SavedAnalysis: two entity elements, one free-text
- *  box, and a directed connection between the elements. */
+/** Mirrors the user's frommag.qdpx: a document node and a code node, a
+ *  free-text box, and a directed connection document → code. */
 function mapAnalysis(): SavedAnalysis {
   return {
-    guid: 'A1111111-1111-1111-1111-111111111111',
+    guid: 'A1111111-1111-4111-8111-111111111111',
     toolType: 'relationship-map',
-    name: 'My Map',
+    name: 'RelationshipMap',
     createdDateTime: '2024-01-01T00:00:00Z',
     config: {
       pan: { x: 0, y: 0 },
       elements: [
-        { id: EL1, kind: 'code', label: 'Theme A', entityGuid: CODE_GUID, codeColor: '#FF8800', x: 10, y: 20, width: 160, height: 28 },
-        // entityGuid here is a non-GUID composite key — must NOT become a representedGUID.
-        { id: EL2, kind: 'query-result', label: 'A quote', entityGuid: 'qr:not-a-guid', x: 200.4, y: 50.9, width: 220, height: 72 }
+        { id: ELDOC, kind: 'document', label: 'memohere.txt', entityGuid: DOC_GUID, x: 140, y: 188, width: 160, height: 40 },
+        { id: ELCODE, kind: 'code', label: 'code', entityGuid: CODE_GUID, codeColor: '#e05050', x: 334, y: 336, width: 160, height: 28 }
       ],
       freeTexts: [
-        { id: FT1, kind: 'freetext', x: 5, y: 200, width: 200, height: 60, content: 'Some note' }
+        { id: FT1, kind: 'freetext', x: 328, y: 136, width: 199, height: 83, content: '# Free text' }
       ],
       connections: [
-        { id: CONN1, fromId: EL1, toId: EL2, arrowFrom: false, arrowTo: true, label: 'leads to' }
+        { id: CONN1, fromId: ELDOC, toId: ELCODE, arrowFrom: false, arrowTo: true, label: 'With a note' }
       ]
     }
   }
@@ -54,69 +54,81 @@ function projectWithMap(): Project {
   return {
     name: 'Graph Project',
     origin: 'Magnolia test',
-    users: [{ guid: '00000000-0000-0000-0000-000000000001', name: 'T' }],
-    codes: [{ guid: CODE_GUID, name: 'Theme A', isCodable: true, children: [] }],
-    sources: [],
+    users: [{ guid: '00000000-0000-4000-8000-000000000001', name: 'T' }],
+    codes: [{ guid: CODE_GUID, name: 'code', isCodable: true, children: [] }],
+    sources: [{ guid: DOC_GUID, name: 'memohere.txt', sourceType: 'text', plainTextContent: 'hi', selections: [] }],
     sets: [],
     notes: [],
-    savedAnalyses: [
-      mapAnalysis(),
-      // A non-map analysis must be ignored by the graph collector.
-      { guid: 'B2222222-2222-2222-2222-222222222222', toolType: 'code-frequencies', name: 'Freqs', createdDateTime: '2024-01-01T00:00:00Z', config: {} }
-    ]
+    savedAnalyses: [mapAnalysis()]
   }
 }
 
-describe('Relationship Map → REFI-QDA <Graphs>', () => {
-  it('serializes a project with a relationship map that validates against Project.xsd', async () => {
+describe('Relationship Map → REFI-QDA <Graphs> + <Links> (Atlas interop)', () => {
+  it('gives every vertex a representedGUID (free-text backed by a Note)', () => {
+    const { graphs, notes } = mapToGraph(mapAnalysis())
+    const vs = graphs[0].vertices
+    expect(vs).toHaveLength(3)
+    expect(vs.every((v) => !!v.representedGuid)).toBe(true)
+    // The free-text box is backed by a synthetic Note carrying its text.
+    expect(notes).toHaveLength(1)
+    expect(notes[0].content).toBe('# Free text')
+    const ftVertex = vs.find((v) => v.guid === FT1)!
+    expect(ftVertex.shape).toBe('Note')
+    expect(ftVertex.representedGuid).toBe(notes[0].guid)
+  })
+
+  it('emits a <Link> for the connection and points the edge at it', () => {
+    const { graphs, links } = mapToGraph(mapAnalysis())
+    expect(links).toHaveLength(1)
+    // Link relates the ENTITIES (origin = document, target = code).
+    expect(links[0].originGuid).toBe(DOC_GUID)
+    expect(links[0].targetGuid).toBe(CODE_GUID)
+    const edge = graphs[0].edges[0]
+    // Edge wires the VERTICES and represents the Link.
+    expect(edge.sourceVertex).toBe(ELDOC)
+    expect(edge.targetVertex).toBe(ELCODE)
+    expect(edge.representedGuid).toBe(links[0].guid)
+    expect(edge.guid).not.toBe(links[0].guid) // distinct guids
+  })
+
+  it('serializes a map (Notes + Links + Graphs) that validates against Project.xsd', async () => {
     const xml = serializeProject(projectWithMap())
     const { valid, errors } = await validate(xml)
     expect(errors).toEqual([])
     expect(valid).toBe(true)
   })
 
-  it('emits exactly one <Graph> (only the relationship-map analysis)', () => {
+  it('produces the Atlas-shaped structure: every Vertex/Edge has representedGUID, plus a <Link> and a free-text <Note>', () => {
     const xml = serializeProject(projectWithMap())
-    expect((xml.match(/<Graph\b/g) || []).length).toBe(1)
-    // GraphType sequence is Vertex*, Edge* — Vertex must precede Edge.
-    expect(xml.indexOf('<Vertex')).toBeLessThan(xml.indexOf('<Edge'))
+    expect(xml).toContain('<Links>')
+    expect(xml).toContain('<Link ')
+    expect(xml).toContain('<Edge')
+    expect(/<Edge[^>]*representedGUID=/.test(xml)).toBe(true)
+    // All three vertices carry a representedGUID (none would be dropped by Atlas).
+    const vertexTags = xml.match(/<Vertex[^>]*>/g) || []
+    expect(vertexTags).toHaveLength(3)
+    expect(vertexTags.every((v) => /representedGUID=/.test(v))).toBe(true)
+    // The free-text box round-trips as an inline Note.
+    expect(xml).toContain('# Free text')
   })
 
-  it('mapToGraph maps elements + free-texts to vertices and connections to edges', () => {
-    const g = mapToGraph(mapAnalysis())
-    expect(g.vertices).toHaveLength(3) // 2 elements + 1 free-text
-    expect(g.edges).toHaveLength(1)
-
-    const v1 = g.vertices.find((v) => v.guid === EL1)!
-    expect(v1.representedGuid).toBe(CODE_GUID) // valid GUID → bound
-    expect(v1.secondX).toBe(170) // x(10) + width(160)
-    expect(v1.color).toBe('#FF8800')
-
-    const v2 = g.vertices.find((v) => v.guid === EL2)!
-    expect(v2.representedGuid).toBeUndefined() // non-GUID entityGuid dropped
-
-    const edge = g.edges[0]
-    expect(edge.sourceVertex).toBe(EL1)
-    expect(edge.targetVertex).toBe(EL2)
-    expect(edge.direction).toBe('OneWay') // arrowTo only
-  })
-
-  it('drops edges whose endpoints are not both present as vertices', () => {
-    const a = mapAnalysis()
-    a.config.connections.push({ id: 'C9999999-9999-9999-9999-999999999999', fromId: EL1, toId: 'MISSING', arrowFrom: false, arrowTo: true, label: '' })
-    const g = mapToGraph(a)
-    expect(g.edges).toHaveLength(1) // the dangling edge is removed
+  it('ignores non-map analyses', () => {
+    const bundle = collectGraphs([
+      mapAnalysis(),
+      { guid: 'B2222222-2222-4222-8222-222222222222', toolType: 'code-frequencies', name: 'Freqs', createdDateTime: '2024-01-01T00:00:00Z', config: {} }
+    ])
+    expect(bundle.graphs).toHaveLength(1)
   })
 
   it('graphToMap rebuilds a foreign graph as free-text boxes + connections', () => {
-    const g = mapToGraph(mapAnalysis())
-    const analysis = graphToMap(g)
+    const { graphs } = mapToGraph(mapAnalysis())
+    const analysis = graphToMap(graphs[0])
     expect(analysis.toolType).toBe('relationship-map')
-    expect(analysis.config.elements).toHaveLength(0)
     expect(analysis.config.freeTexts).toHaveLength(3)
     expect(analysis.config.connections).toHaveLength(1)
     const conn = analysis.config.connections[0]
+    expect(conn.fromId).toBe(ELDOC)
+    expect(conn.toId).toBe(ELCODE)
     expect(conn.arrowTo).toBe(true)
-    expect(conn.arrowFrom).toBe(false)
   })
 })

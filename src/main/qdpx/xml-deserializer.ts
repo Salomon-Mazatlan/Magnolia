@@ -417,6 +417,7 @@ function parseVertex(xmlV: any): RefiVertex {
 function parseEdge(xmlE: any): RefiEdge {
   return {
     guid: normalizeGuid(xmlE['@_guid']),
+    representedGuid: xmlE['@_representedGUID'] ? normalizeGuid(xmlE['@_representedGUID']) : undefined,
     name: xmlE['@_name'],
     sourceVertex: normalizeGuid(xmlE['@_sourceVertex']),
     targetVertex: normalizeGuid(xmlE['@_targetVertex']),

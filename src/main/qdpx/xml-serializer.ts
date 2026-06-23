@@ -13,7 +13,7 @@ import {
   type RefiCase,
   type RefiRespondentDoc
 } from './survey-refi'
-import { collectGraphs, type RefiGraph, type RefiVertex, type RefiEdge } from './graph-refi'
+import { collectGraphs, type RefiGraph, type RefiVertex, type RefiEdge, type RefiLink } from './graph-refi'
 import type { RefiTranscript } from './transcript-refi'
 
 // XML special-char escaping. Order matters: replace & first so the
@@ -466,10 +466,23 @@ function serializeEdge(e: RefiEdge): any {
     '@_sourceVertex': e.sourceVertex,
     '@_targetVertex': e.targetVertex
   }
+  if (e.representedGuid) obj['@_representedGUID'] = e.representedGuid
   if (e.name) obj['@_name'] = e.name
   if (e.color) obj['@_color'] = e.color
   if (e.direction) obj['@_direction'] = e.direction
   if (e.lineStyle) obj['@_lineStyle'] = e.lineStyle
+  return obj
+}
+
+/** Serialize one REFI-QDA project-level <Link> (a relation an edge
+ *  represents). LinkType has no required child sequence we use. */
+function serializeLink(l: RefiLink): any {
+  const obj: any = { '@_guid': l.guid }
+  if (l.name) obj['@_name'] = l.name
+  if (l.direction) obj['@_direction'] = l.direction
+  if (l.color) obj['@_color'] = l.color
+  if (l.originGuid) obj['@_originGUID'] = l.originGuid
+  if (l.targetGuid) obj['@_targetGUID'] = l.targetGuid
   return obj
 }
 
@@ -596,23 +609,42 @@ export function serializeProject(project: Project): string {
   // full-fidelity round-trips of its own (anchors + survey/analysis/query
   // memo types REFI can't express); on load it prefers that side table and
   // falls back to these Notes for files from other tools.
-  if (project.memos && project.memos.length > 0) {
-    p.Notes = {
-      Note: project.memos.map((m) => {
-        const obj: any = {
-          '@_guid': m.guid,
-          '@_name': m.title || 'Memo',
-          '@_plainTextPath': `internal://${m.guid}.txt`
-        }
-        if (project.creatingUserGUID) obj['@_creatingUser'] = project.creatingUserGUID
-        if (m.createdDateTime) obj['@_creationDateTime'] = m.createdDateTime
-        if (project.creatingUserGUID) obj['@_modifyingUser'] = project.creatingUserGUID
-        if (m.modifiedDateTime || m.createdDateTime) {
-          obj['@_modifiedDateTime'] = m.modifiedDateTime || m.createdDateTime
-        }
-        return obj
-      })
+  //
+  // Relationship maps also contribute here: each free-text box on a map is
+  // backed by a synthetic <Note> (emitted inline) so its vertex has a
+  // representedGUID — Atlas drops vertices that represent nothing. These
+  // are re-absorbed into the map (not surfaced as memos) on load; see
+  // reader.ts. Computed up-front because the notes belong in <Notes> while
+  // the graphs/links they pair with sit later in the document.
+  const graphBundle = collectGraphs(project.savedAnalyses)
+  const memoNotes = (project.memos ?? []).map((m) => {
+    const obj: any = {
+      '@_guid': m.guid,
+      '@_name': m.title || 'Memo',
+      '@_plainTextPath': `internal://${m.guid}.txt`
     }
+    if (project.creatingUserGUID) obj['@_creatingUser'] = project.creatingUserGUID
+    if (m.createdDateTime) obj['@_creationDateTime'] = m.createdDateTime
+    if (project.creatingUserGUID) obj['@_modifyingUser'] = project.creatingUserGUID
+    if (m.modifiedDateTime || m.createdDateTime) {
+      obj['@_modifiedDateTime'] = m.modifiedDateTime || m.createdDateTime
+    }
+    return obj
+  })
+  const freeTextNotes = graphBundle.notes.map((n) => {
+    const obj: any = { '@_guid': n.guid, '@_name': n.name }
+    if (n.content) obj.PlainTextContent = n.content
+    return obj
+  })
+  if (memoNotes.length > 0 || freeTextNotes.length > 0) {
+    p.Notes = { Note: [...memoNotes, ...freeTextNotes] }
+  }
+
+  // Links — the entity-to-entity relations a map's edges represent. Sit
+  // AFTER <Notes> and BEFORE <Sets> in the QDA-XML 1.0 sequence (Users,
+  // CodeBook, Variables, Cases, Sources, Notes, Links, Sets, Graphs, …).
+  if (graphBundle.links.length > 0) {
+    p.Links = { Link: graphBundle.links.map(serializeLink) }
   }
 
   // Sets (tags)
@@ -661,10 +693,11 @@ export function serializeProject(project: Project): string {
   // CodeBook, Variables, Cases, Sources, Notes, Links, Sets, Graphs, …);
   // object-key insertion order is what fast-xml-parser emits. The rich
   // Magnolia node kinds / pan / zoom keep round-tripping in full via
-  // magnolia-analyses.json — this is the interop-portable view.
-  const graphs = collectGraphs(project.savedAnalyses)
-  if (graphs.length > 0) {
-    p.Graphs = { Graph: graphs.map(serializeGraph) }
+  // magnolia-analyses.json — this is the interop-portable view. The bundle
+  // (graphs + their <Link>s + free-text <Note>s) was computed above so the
+  // notes/links could be emitted in their earlier document positions.
+  if (graphBundle.graphs.length > 0) {
+    p.Graphs = { Graph: graphBundle.graphs.map(serializeGraph) }
   }
 
   return uppercaseGuids(builder.build(proj))
