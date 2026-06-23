@@ -261,3 +261,29 @@ export async function extractPdfText(buffer: Buffer): Promise<PdfExtractResult> 
     pdfBase64: buffer.toString('base64')
   }
 }
+
+/**
+ * Lightweight page-dimension extraction — loads each page's viewport only,
+ * no text. Returns sizes 1-indexed to match extractPdfTextWithPositions
+ * ([0] is a dummy, so [n] is page n). Used at save time to flip PDF box
+ * selections from Magnolia's top-left origin into the bottom-left,
+ * 0-based-page convention other QDA tools (Atlas.ti) expect.
+ */
+export async function getPdfPageSizes(buffer: Buffer): Promise<{ width: number; height: number }[]> {
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs')
+  const data = new Uint8Array(buffer)
+  const doc = await pdfjsLib.getDocument({
+    data,
+    useSystemFonts: true,
+    standardFontDataUrl: getStandardFontDataUrl(),
+    cMapUrl: getCmapUrl(),
+    cMapPacked: true
+  }).promise
+  const pageSizes: { width: number; height: number }[] = [{ width: 0, height: 0 }]
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i)
+    const viewport = page.getViewport({ scale: 1 })
+    pageSizes.push({ width: viewport.width, height: viewport.height })
+  }
+  return pageSizes
+}

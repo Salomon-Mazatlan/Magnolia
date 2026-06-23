@@ -304,6 +304,47 @@ function representationGuidFor(sourceGuid: string): string {
   return Number.isNaN(parseInt(first, 16)) ? sourceGuid : flipped + sourceGuid.slice(1)
 }
 
+/** Serialize a PDF box/region coding as a REFI-QDA <PDFSelection> on the
+ *  PDFSource. Magnolia stores the rectangle top-left-origin with a 1-based
+ *  page; other tools (Atlas.ti) expect PDF-native bottom-left origin with a
+ *  0-based page, so flip Y using the page height and shift the page. Falls
+ *  back to a top-left rectangle when the page height isn't available (still
+ *  emitted, just possibly mirrored in a strict bottom-origin reader).
+ *  firstX/firstY/secondX/secondY/page are xs:integer, so all are rounded. */
+function serializePdfSelection(
+  sel: PlainTextSelection,
+  pageSizes: { width: number; height: number }[] | undefined
+): any | null {
+  const r = sel.pdfRegion
+  if (!r) return null
+  const page = Math.max(0, (r.page ?? 1) - 1)
+  const height = pageSizes?.[r.page ?? 1]?.height
+  let firstY: number
+  let secondY: number
+  if (height && height > 0) {
+    firstY = Math.round(height - (r.y + r.height))
+    secondY = Math.round(height - r.y)
+  } else {
+    firstY = Math.round(r.y)
+    secondY = Math.round(r.y + r.height)
+  }
+  const obj: any = {
+    '@_guid': sel.guid,
+    '@_page': page.toString(),
+    '@_firstX': Math.round(r.x).toString(),
+    '@_firstY': firstY.toString(),
+    '@_secondX': Math.round(r.x + r.width).toString(),
+    '@_secondY': secondY.toString()
+  }
+  if (sel.name) obj['@_name'] = sel.name
+  if (sel.creatingUser) obj['@_creatingUser'] = sel.creatingUser
+  if (sel.creationDateTime) obj['@_creationDateTime'] = sel.creationDateTime
+  if (sel.modifyingUser) obj['@_modifyingUser'] = sel.modifyingUser
+  if (sel.modifiedDateTime) obj['@_modifiedDateTime'] = sel.modifiedDateTime
+  if (sel.codings.length > 0) obj.Coding = sel.codings.map(serializeCoding)
+  return obj
+}
+
 /** Serialize a PDF source as REFI-QDA <PDFSource>. The PDF bytes are
  *  stored separately by writer.ts as `sources/${guid}.pdf`; the
  *  extracted text lives at `sources/${reprGuid}.txt` and is referenced
@@ -339,8 +380,25 @@ function serializePdfSource(source: TextSource): any {
   if (source.creationDateTime) repr['@_creationDateTime'] = source.creationDateTime
   if (source.modifyingUser) repr['@_modifyingUser'] = source.modifyingUser
   if (source.modifiedDateTime) repr['@_modifiedDateTime'] = source.modifiedDateTime
-  if (source.selections.length > 0) {
-    repr.PlainTextSelection = source.selections.map(serializeSelection)
+  // Box/region codings become <PDFSelection> rectangles directly on the
+  // PDFSource (they were previously emitted as degenerate 0–0
+  // PlainTextSelections that other tools couldn't place). Text codings —
+  // real character ranges — stay as <PlainTextSelection> in the
+  // Representation. PDFSourceType's sequence is Description?, PDFSelection*,
+  // Representation?, … so PDFSelection MUST be assigned before Representation.
+  const regionSelections = source.selections.filter((sel) => (sel as any).pdfRegion)
+  const textSelections = source.selections.filter((sel) => !(sel as any).pdfRegion)
+  const pageSizes = (source as any).formatData?.pdfPageSizes as
+    | { width: number; height: number }[]
+    | undefined
+  const pdfSelectionXml = regionSelections
+    .map((sel) => serializePdfSelection(sel, pageSizes))
+    .filter((s) => s !== null)
+  if (pdfSelectionXml.length > 0) {
+    obj.PDFSelection = pdfSelectionXml
+  }
+  if (textSelections.length > 0) {
+    repr.PlainTextSelection = textSelections.map(serializeSelection)
   }
   obj.Representation = repr
   return obj

@@ -339,7 +339,11 @@ export async function readQdpx(
 
           ;(source as any).formatData = {
             pdfFilePath: archiveHandleForFile(match[1]),
-            pdfPageOffsets: pageOffsets
+            pdfPageOffsets: pageOffsets,
+            // Page sizes (1-indexed) — kept so a re-save can flip box
+            // selections back into the bottom-left, 0-based-page convention
+            // other tools expect. Recomputed each load; not persisted.
+            pdfPageSizes: pageSizes
           }
           sourceContents[source.guid] = extractedText
         }
@@ -685,7 +689,15 @@ export async function readQdpx(
             )
             for (const sel of source.selections) {
               const region = regionByGuid.get(sel.guid)
-              if (region) (sel as any).pdfRegion = region
+              if (region) {
+                ;(sel as any).pdfRegion = region
+                // The side-table region is authoritative. Clear any char
+                // range convertPdfSelection may have inferred from the
+                // <PDFSelection> rectangle (whose coords are in another
+                // tool's convention) so a region coding stays a 0–0 box.
+                sel.startPosition = 0
+                sel.endPosition = 0
+              }
             }
           }
           // Restore survey-cell selections from the side table. The
