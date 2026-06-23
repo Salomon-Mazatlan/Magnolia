@@ -5,7 +5,7 @@ import { deserializeProject } from './xml-deserializer'
 import type { RawPdfSelection, RawPictureSelection, RawVideoSelection, RawNote, RawNoteAnchor } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
 import { graphToMap, type RefiGraph, type RefiLink, type GraphEntity } from './graph-refi'
-import { reconstructLineTimes } from './transcript-refi'
+import { reconstructLineTimes, reconstructTranscriptSelections, type RefiTranscript } from './transcript-refi'
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions, type PdfTextItem } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
@@ -802,7 +802,7 @@ export async function readQdpx(
   // SyncPoints — so a transcript that round-tripped through another tool
   // comes back time-synced. The side-table always wins when present.
   for (const source of project.sources as any[]) {
-    const transcript = source._refiTranscript as { plainTextPath?: string; syncPoints: any[] } | undefined
+    const transcript = source._refiTranscript as RefiTranscript | undefined
     if (!transcript) continue
     if (!sourceContents[source.guid]) {
       const m = (transcript.plainTextPath || '').match(/internal:\/\/(.+)/)
@@ -817,6 +817,25 @@ export async function readQdpx(
       if (Object.keys(rebuilt).length > 0) {
         source.formatData = { ...(source.formatData || {}), lineTimes: rebuilt }
       }
+    }
+    // Rebuild char-offset transcript codings from <TranscriptSelection>s.
+    // This is the only place audio codings are restored — they're stored
+    // nowhere else — so it both loads Magnolia's own files and imports
+    // codings authored in another tool. Skip any whose guid we already have.
+    if (transcript.selections.length > 0) {
+      const have = new Set((source.selections ?? []).map((s: any) => s.guid))
+      const rebuilt = reconstructTranscriptSelections(transcript)
+        .filter((s) => !have.has(s.guid))
+        .map((s) => ({
+          guid: s.guid,
+          name: s.name,
+          startPosition: s.startPosition,
+          endPosition: s.endPosition,
+          creatingUser: s.creatingUser,
+          creationDateTime: s.creationDateTime,
+          codings: s.codings
+        }))
+      if (rebuilt.length > 0) source.selections = [...(source.selections ?? []), ...rebuilt]
     }
     delete source._refiTranscript
   }

@@ -24,6 +24,8 @@
  * the magnolia-sources.json side-table was dropped.
  */
 
+import type { Coding } from '../../renderer/models/types'
+
 export interface RefiSyncPoint {
   guid: string
   /** Media time in milliseconds. */
@@ -33,10 +35,40 @@ export interface RefiSyncPoint {
   position?: number
 }
 
+/** A coded span on a transcript: REFI-QDA <TranscriptSelection>, whose
+ *  range is bounded by two <SyncPoint>s (their `position`s give the start
+ *  and end character offsets). Carries its <Coding>s. */
+export interface RefiTranscriptSelection {
+  guid: string
+  name?: string
+  fromSyncPoint?: string
+  toSyncPoint?: string
+  creatingUser?: string
+  creationDateTime?: string
+  codings: Coding[]
+}
+
 export interface RefiTranscript {
   guid: string
   plainTextPath: string
   syncPoints: RefiSyncPoint[]
+  selections: RefiTranscriptSelection[]
+}
+
+/** The slice of a transcript coding selection buildTranscript needs. */
+export interface TranscriptCodingInput {
+  guid: string
+  name?: string
+  startPosition: number
+  endPosition: number
+  codings: Coding[]
+  creatingUser?: string
+  creationDateTime?: string
+  // Discriminators that mark a selection as NOT a plain transcript coding
+  // (video time-ranges, PDF/image regions, survey cells) — excluded below.
+  timeRange?: unknown
+  pdfRegion?: unknown
+  surveyCell?: unknown
 }
 
 /** Codepoint length (not UTF-16 code-unit length) — Magnolia indexes text
@@ -57,13 +89,15 @@ function transcriptGuidFor(sourceGuid: string): string {
 }
 
 /** Derive a stable, schema-valid SyncPoint guid from the source guid and a
- *  line index: keep the source's first 24 chars (`XXXXXXXX-XXXX-XXXX-XXXX-`)
- *  and replace the 12-hex node with the zero-padded line index. Unique per
- *  line, distinct from the source and transcript guids, and stable across
- *  saves. */
-function syncPointGuidFor(sourceGuid: string, lineIndex: number): string {
+ *  character position: keep the source's first 24 chars
+ *  (`XXXXXXXX-XXXX-XXXX-XXXX-`) and replace the 12-hex node with the
+ *  zero-padded position. Keying on position (not line index) means a
+ *  line-start sync point and a coding-boundary sync point at the same
+ *  offset share one guid — the dedup the builder relies on — while staying
+ *  distinct from the source and transcript guids and stable across saves. */
+function syncPointGuidFor(sourceGuid: string, position: number): string {
   const prefix = sourceGuid.slice(0, 24)
-  const node = lineIndex.toString(16).padStart(12, '0').slice(-12).toUpperCase()
+  const node = position.toString(16).padStart(12, '0').slice(-12).toUpperCase()
   return prefix + node
 }
 
@@ -79,41 +113,109 @@ function lineStartOffsets(text: string): number[] {
   return starts
 }
 
+/** True for a plain char-offset transcript coding (what we map to a
+ *  <TranscriptSelection>) — excludes video time-ranges, PDF/image regions,
+ *  and survey cells, which have their own representations. */
+function isTranscriptCoding(sel: TranscriptCodingInput): boolean {
+  return (
+    Array.isArray(sel.codings) && sel.codings.length > 0 &&
+    typeof sel.startPosition === 'number' && typeof sel.endPosition === 'number' &&
+    sel.endPosition > sel.startPosition &&
+    !sel.timeRange && !sel.pdfRegion && !sel.surveyCell
+  )
+}
+
 /**
- * Build a <Transcript> for an audio/video source from its transcript text
- * and lineTimes. Returns null when there's nothing to emit (no text and no
- * timings) so silent sources don't get an empty Transcript.
+ * Build a <Transcript> for an audio/video source from its transcript text,
+ * lineTimes, and any char-offset codings. SyncPoints come from lineTimes
+ * (line-start → media time) plus a position-only point at each coding
+ * boundary that isn't already a line start; each coding becomes a
+ * <TranscriptSelection> bounded by its start/end SyncPoints. Returns null
+ * when there's nothing to emit (no text, timings, or codings).
  */
 export function buildTranscript(
   sourceGuid: string,
   text: string,
-  lineTimes: Record<string, number> | undefined
+  lineTimes: Record<string, number> | undefined,
+  selections?: TranscriptCodingInput[]
 ): RefiTranscript | null {
   const hasText = !!text && text.trim() !== ''
   const timed = lineTimes && Object.keys(lineTimes).length > 0
-  if (!hasText && !timed) return null
+  const codings = (selections ?? []).filter(isTranscriptCoding)
+  if (!hasText && !timed && codings.length === 0) return null
 
   const starts = lineStartOffsets(text || '')
-  const syncPoints: RefiSyncPoint[] = []
+  // Sync points keyed by character position so a line-start point and a
+  // coding boundary at the same offset coalesce into one.
+  const byPos = new Map<number, RefiSyncPoint>()
+  const syncAt = (position: number, timeStamp?: number): RefiSyncPoint => {
+    let sp = byPos.get(position)
+    if (!sp) {
+      sp = { guid: syncPointGuidFor(sourceGuid, position), position }
+      byPos.set(position, sp)
+    }
+    if (timeStamp != null && sp.timeStamp == null) sp.timeStamp = timeStamp
+    return sp
+  }
+
   if (timed) {
     for (const [idxStr, secs] of Object.entries(lineTimes!)) {
       const i = parseInt(idxStr, 10)
       if (!Number.isFinite(i) || i < 0) continue
       if (typeof secs !== 'number' || !Number.isFinite(secs)) continue
-      syncPoints.push({
-        guid: syncPointGuidFor(sourceGuid, i),
-        timeStamp: Math.round(secs * 1000),
-        position: starts[i] ?? 0
-      })
+      syncAt(starts[i] ?? 0, Math.round(secs * 1000))
     }
-    syncPoints.sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
   }
+
+  const transcriptSelections: RefiTranscriptSelection[] = codings.map((sel) => ({
+    guid: sel.guid,
+    name: sel.name,
+    fromSyncPoint: syncAt(sel.startPosition).guid,
+    toSyncPoint: syncAt(sel.endPosition).guid,
+    creatingUser: sel.creatingUser,
+    creationDateTime: sel.creationDateTime,
+    codings: sel.codings
+  }))
+
+  const syncPoints = [...byPos.values()].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
 
   return {
     guid: transcriptGuidFor(sourceGuid),
     plainTextPath: `internal://${sourceGuid}.txt`,
-    syncPoints
+    syncPoints,
+    selections: transcriptSelections
   }
+}
+
+/**
+ * Inverse of buildTranscript's coding pass: turn a parsed transcript's
+ * <TranscriptSelection>s back into char-offset codings by resolving each
+ * selection's from/to SyncPoint to its `position`. Returns the data the
+ * reader needs to rebuild Magnolia PlainTextSelections.
+ */
+export function reconstructTranscriptSelections(
+  transcript: RefiTranscript
+): Array<{ guid: string; name?: string; startPosition: number; endPosition: number; creatingUser?: string; creationDateTime?: string; codings: Coding[] }> {
+  const posByGuid = new Map<string, number>()
+  for (const sp of transcript.syncPoints) {
+    if (sp.position != null) posByGuid.set(sp.guid, sp.position)
+  }
+  const out: Array<{ guid: string; name?: string; startPosition: number; endPosition: number; creatingUser?: string; creationDateTime?: string; codings: Coding[] }> = []
+  for (const ts of transcript.selections ?? []) {
+    const a = ts.fromSyncPoint ? posByGuid.get(ts.fromSyncPoint) : undefined
+    const b = ts.toSyncPoint ? posByGuid.get(ts.toSyncPoint) : undefined
+    if (a == null || b == null) continue
+    out.push({
+      guid: ts.guid,
+      name: ts.name,
+      startPosition: Math.min(a, b),
+      endPosition: Math.max(a, b),
+      creatingUser: ts.creatingUser,
+      creationDateTime: ts.creationDateTime,
+      codings: ts.codings
+    })
+  }
+  return out
 }
 
 /**

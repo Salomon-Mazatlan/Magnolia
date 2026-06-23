@@ -7,7 +7,7 @@ vi.mock('electron', () => ({ app: { getVersion: () => '0.0.0-test' } }))
 
 import { serializeProject } from '../../src/main/qdpx/xml-serializer'
 import { deserializeProject } from '../../src/main/qdpx/xml-deserializer'
-import { buildTranscript, reconstructLineTimes } from '../../src/main/qdpx/transcript-refi'
+import { buildTranscript, reconstructLineTimes, reconstructTranscriptSelections } from '../../src/main/qdpx/transcript-refi'
 import type { Project } from '../../src/renderer/models/types'
 
 const PROJECT_XSD = readFileSync(join(__dirname, '../fixtures/Project.xsd'), 'utf8')
@@ -22,14 +22,20 @@ async function validate(xml: string): Promise<{ valid: boolean; errors: unknown[
 
 const AUDIO = 'D1111111-1111-1111-1111-111111111111'
 const VIDEO = 'E2222222-2222-2222-2222-222222222222'
+const CODE = 'C0DEC0DE-0000-4000-8000-00000000C0DE'
 const TEXT = 'Hello world\nSecond line\nThird'
 const LINE_TIMES = { '0': 0, '1': 2.5, '2': 5 }
+// "Second line" spans codepoints 12–23 (line 2), so a coding there crosses
+// a line-start sync point (12) and ends mid-line (23, a new boundary point).
+const AUDIO_SELECTIONS = [
+  { guid: 'D1111111-1111-1111-1111-00000000C001', startPosition: 12, endPosition: 23, codings: [{ guid: 'D1111111-1111-1111-1111-00000000A001', codeGuid: CODE }] }
+]
 
 /** Attach a transcript transient (as the writer does) and return a project
  *  with an audio + video source. */
 function projectWithTranscripts(): Project {
-  const audio: any = { guid: AUDIO, name: 'Recording', sourceType: 'audio', formatData: { audioExt: 'm4a', lineTimes: LINE_TIMES }, selections: [] }
-  audio._refiTranscript = buildTranscript(AUDIO, TEXT, LINE_TIMES)
+  const audio: any = { guid: AUDIO, name: 'Recording', sourceType: 'audio', formatData: { audioExt: 'm4a', lineTimes: LINE_TIMES }, selections: AUDIO_SELECTIONS }
+  audio._refiTranscript = buildTranscript(AUDIO, TEXT, LINE_TIMES, AUDIO_SELECTIONS)
   const video: any = {
     guid: VIDEO,
     name: 'Clip',
@@ -44,7 +50,7 @@ function projectWithTranscripts(): Project {
     name: 'Media Project',
     origin: 'Magnolia test',
     users: [{ guid: '00000000-0000-0000-0000-000000000001', name: 'T' }],
-    codes: [],
+    codes: [{ guid: CODE, name: 'theme', isCodable: true, children: [] }],
     sources: [audio, video],
     sets: [],
     notes: []
@@ -88,13 +94,36 @@ describe('Audio/Video transcripts → REFI-QDA <Transcript>/<SyncPoint>', () => 
     expect(xml.indexOf('<Transcript')).toBeLessThan(xml.indexOf('<VideoSelection'))
   })
 
-  it('round-trips a transcript through serialize → deserialize → reconstruct', () => {
+  it('round-trips a transcript (timings + codings) through serialize → deserialize → reconstruct', () => {
     const xml = serializeProject(projectWithTranscripts())
     const parsed = deserializeProject(xml) as any
     const audio = parsed.sources.find((s: any) => s.guid === AUDIO)
     expect(audio._refiTranscript).toBeDefined()
-    expect(audio._refiTranscript.syncPoints).toHaveLength(3)
-    const rebuilt = reconstructLineTimes(TEXT, audio._refiTranscript.syncPoints)
-    expect(rebuilt).toEqual(LINE_TIMES)
+    // 3 line-start sync points + 1 coding-boundary point (end of the coding).
+    expect(audio._refiTranscript.syncPoints).toHaveLength(4)
+    expect(reconstructLineTimes(TEXT, audio._refiTranscript.syncPoints)).toEqual(LINE_TIMES)
+    // The coding comes back at its exact character offsets with its CodeRef.
+    const codings = reconstructTranscriptSelections(audio._refiTranscript)
+    expect(codings).toHaveLength(1)
+    expect(codings[0].startPosition).toBe(12)
+    expect(codings[0].endPosition).toBe(23)
+    expect(codings[0].codings[0].codeGuid).toBe(CODE)
+  })
+
+  it('emits a <TranscriptSelection> with a CodeRef for each audio coding', () => {
+    const xml = serializeProject(projectWithTranscripts())
+    expect(xml).toContain('<TranscriptSelection')
+    expect(/<TranscriptSelection[^>]*fromSyncPoint=/.test(xml)).toBe(true)
+    // SyncPoint must precede TranscriptSelection (TranscriptType order).
+    expect(xml.indexOf('<SyncPoint')).toBeLessThan(xml.indexOf('<TranscriptSelection'))
+  })
+
+  it('does not emit a TranscriptSelection for a video time-range coding', () => {
+    // Video codings carry timeRange → they belong in <VideoSelection>, not
+    // <TranscriptSelection>; buildTranscript must skip them.
+    const t = buildTranscript(VIDEO, TEXT, LINE_TIMES, [
+      { guid: 'V0000000-0000-4000-8000-000000000001', startPosition: 0, endPosition: 0, timeRange: { startTime: 1, endTime: 2 }, codings: [{ guid: 'X', codeGuid: CODE }] }
+    ])!
+    expect(t.selections).toHaveLength(0)
   })
 })

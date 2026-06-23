@@ -10,7 +10,7 @@ import type {
 } from '../../renderer/models/types'
 import type { RefiVariable, RefiCase, RefiVariableValue, RefiVariableType } from './survey-refi'
 import type { RefiGraph, RefiVertex, RefiEdge, RefiEdgeDirection, RefiLineStyle, RefiLink } from './graph-refi'
-import type { RefiTranscript, RefiSyncPoint } from './transcript-refi'
+import type { RefiTranscript, RefiSyncPoint, RefiTranscriptSelection } from './transcript-refi'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -23,7 +23,7 @@ const parser = new XMLParser({
       'PictureSelection', 'VideoSelection',
       'Coding', 'CodeRef', 'NoteRef', 'Set', 'MemberSource', 'MemberCode',
       'Note', 'Link', 'VariableValue', 'Variable', 'Case', 'SourceRef',
-      'Graph', 'Vertex', 'Edge', 'Transcript', 'SyncPoint'
+      'Graph', 'Vertex', 'Edge', 'Transcript', 'SyncPoint', 'TranscriptSelection'
     ].includes(name)
   }
 })
@@ -287,10 +287,20 @@ function parseTranscript(xmlSource: any): RefiTranscript | undefined {
     timeStamp: num(sp['@_timeStamp']),
     position: num(sp['@_position'])
   }))
+  const selections: RefiTranscriptSelection[] = ensureArray(xmlT.TranscriptSelection).map((ts: any) => ({
+    guid: normalizeGuid(ts['@_guid']),
+    name: ts['@_name'],
+    fromSyncPoint: ts['@_fromSyncPoint'] ? normalizeGuid(ts['@_fromSyncPoint']) : undefined,
+    toSyncPoint: ts['@_toSyncPoint'] ? normalizeGuid(ts['@_toSyncPoint']) : undefined,
+    creatingUser: normalizeGuid(ts['@_creatingUser']) || undefined,
+    creationDateTime: ts['@_creationDateTime'],
+    codings: ensureArray(ts.Coding).map(parseCoding)
+  }))
   return {
     guid: normalizeGuid(xmlT['@_guid']),
     plainTextPath: xmlT['@_plainTextPath'] ?? '',
-    syncPoints
+    syncPoints,
+    selections
   }
 }
 

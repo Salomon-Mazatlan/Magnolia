@@ -14,7 +14,7 @@ import {
   type RefiRespondentDoc
 } from './survey-refi'
 import { collectGraphs, type RefiGraph, type RefiVertex, type RefiEdge, type RefiLink } from './graph-refi'
-import type { RefiTranscript } from './transcript-refi'
+import type { RefiTranscript, RefiTranscriptSelection } from './transcript-refi'
 
 // XML special-char escaping. Order matters: replace & first so the
 // subsequent replacements don't re-escape the ampersand we just emitted
@@ -201,11 +201,24 @@ function serializeVideoSelection(sel: PlainTextSelection): any | null {
  *  SyncPoint*, TranscriptSelection*, NoteRef* — we reference the transcript
  *  text by plainTextPath (the existing sources/<guid>.txt) and emit one
  *  SyncPoint per timed line. */
+function serializeTranscriptSelection(ts: RefiTranscriptSelection): any {
+  const obj: any = { '@_guid': ts.guid }
+  if (ts.name) obj['@_name'] = ts.name
+  if (ts.fromSyncPoint) obj['@_fromSyncPoint'] = ts.fromSyncPoint
+  if (ts.toSyncPoint) obj['@_toSyncPoint'] = ts.toSyncPoint
+  if (ts.creatingUser) obj['@_creatingUser'] = ts.creatingUser
+  if (ts.creationDateTime) obj['@_creationDateTime'] = ts.creationDateTime
+  if (ts.codings.length > 0) obj.Coding = ts.codings.map(serializeCoding)
+  return obj
+}
+
 function serializeTranscript(t: RefiTranscript): any {
   const obj: any = {
     '@_guid': t.guid,
     '@_plainTextPath': t.plainTextPath
   }
+  // TranscriptType sequence is Description?, PlainTextContent?, SyncPoint*,
+  // TranscriptSelection*, NoteRef* — SyncPoint MUST precede TranscriptSelection.
   if (t.syncPoints.length > 0) {
     obj.SyncPoint = t.syncPoints.map((sp) => {
       const o: any = { '@_guid': sp.guid }
@@ -213,6 +226,9 @@ function serializeTranscript(t: RefiTranscript): any {
       if (sp.position != null) o['@_position'] = Math.round(sp.position).toString()
       return o
     })
+  }
+  if (t.selections.length > 0) {
+    obj.TranscriptSelection = t.selections.map(serializeTranscriptSelection)
   }
   return obj
 }
