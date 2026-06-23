@@ -88,6 +88,23 @@ function transcriptGuidFor(sourceGuid: string): string {
   return (15 - n).toString(16) + sourceGuid.slice(1)
 }
 
+/** Derive a distinct guid for a transcript twin element by flipping the first
+ *  hex nibble. A video coding is written BOTH as a <VideoSelection> (timeline)
+ *  and a <TranscriptSelection> (transcript text) — REFI-QDA requires every
+ *  element's guid to be unique, so the two can't share one guid (Atlas, and
+ *  any conformant reader, collapses the duplicate and silently drops the
+ *  transcript text coding on round-trip). Flipping the first nibble keeps the
+ *  derivation deterministic and reversible (15-n is never n), so the reader
+ *  can still recognise the transcript twin of a VideoSelection and merge them
+ *  back into one selection. Used for both the selection guid and its inner
+ *  Coding guid(s). */
+export function transcriptTwinGuidFor(guid: string): string {
+  if (!guid) return guid
+  const n = parseInt(guid[0], 16)
+  if (Number.isNaN(n)) return guid
+  return (15 - n).toString(16).toUpperCase() + guid.slice(1)
+}
+
 /** Derive a stable, schema-valid SyncPoint guid from the source guid and a
  *  character position: keep the source's first 24 chars
  *  (`XXXXXXXX-XXXX-XXXX-XXXX-`) and replace the 12-hex node with the
@@ -206,15 +223,26 @@ export function buildTranscript(
     .map((sp) => ({ pos: sp.position ?? 0, time: sp.timeStamp! }))
     .sort((a, b) => a.pos - b.pos)
 
-  const transcriptSelections: RefiTranscriptSelection[] = codings.map((sel) => ({
-    guid: sel.guid,
-    name: sel.name,
-    fromSyncPoint: syncAt(sel.startPosition, interpolateTime(sel.startPosition, timedAnchors)).guid,
-    toSyncPoint: syncAt(sel.endPosition, interpolateTime(sel.endPosition, timedAnchors)).guid,
-    creatingUser: sel.creatingUser,
-    creationDateTime: sel.creationDateTime,
-    codings: sel.codings
-  }))
+  const transcriptSelections: RefiTranscriptSelection[] = codings.map((sel) => {
+    // A video coding (one with a timeRange) is also written as a twin
+    // <VideoSelection> that keeps sel.guid, so this <TranscriptSelection>
+    // must take a distinct, deterministically-derived guid or a conformant
+    // reader collapses the duplicate and drops the text coding. An audio
+    // coding has no twin, so it keeps its own guid (transcriptTwinGuidFor is
+    // an involution — deriving it here would oscillate the guid across saves).
+    const hasTwin = (sel as any).timeRange != null
+    return {
+      guid: hasTwin ? transcriptTwinGuidFor(sel.guid) : sel.guid,
+      name: sel.name,
+      fromSyncPoint: syncAt(sel.startPosition, interpolateTime(sel.startPosition, timedAnchors)).guid,
+      toSyncPoint: syncAt(sel.endPosition, interpolateTime(sel.endPosition, timedAnchors)).guid,
+      creatingUser: sel.creatingUser,
+      creationDateTime: sel.creationDateTime,
+      codings: hasTwin
+        ? sel.codings.map((c) => ({ ...c, guid: transcriptTwinGuidFor(c.guid) }))
+        : sel.codings
+    }
+  })
 
   const syncPoints = [...byPos.values()].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
 

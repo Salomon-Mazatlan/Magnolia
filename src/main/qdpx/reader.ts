@@ -5,7 +5,7 @@ import { deserializeProject } from './xml-deserializer'
 import type { RawPdfSelection, RawPictureSelection, RawVideoSelection, RawNote, RawNoteAnchor } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
 import { graphToMap, type RefiGraph, type RefiLink, type GraphEntity } from './graph-refi'
-import { reconstructLineTimes, reconstructTranscriptSelections, reconcileMediaTranscripts, lineStartOffsetsWithEnd, type RefiTranscript } from './transcript-refi'
+import { reconstructLineTimes, reconstructTranscriptSelections, reconcileMediaTranscripts, lineStartOffsetsWithEnd, transcriptTwinGuidFor, type RefiTranscript } from './transcript-refi'
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
@@ -839,7 +839,17 @@ export async function readQdpx(
     // nowhere else — so it both loads Magnolia's own files and imports
     // codings authored in another tool. Skip any whose guid we already have.
     if (transcript.selections.length > 0) {
-      const have = new Set((source.selections ?? []).map((s: any) => s.guid))
+      // A video coding round-trips as a <VideoSelection> (already converted
+      // into source.selections, keeping its guid) plus a twin
+      // <TranscriptSelection> whose guid is transcriptTwinGuidFor(videoGuid).
+      // Treat both forms as "already have it" so the twin doesn't re-add a
+      // duplicate coding. (Older files wrote the twin with the SAME guid; the
+      // plain s.guid entry still covers those.)
+      const have = new Set<string>()
+      for (const s of (source.selections ?? []) as any[]) {
+        have.add(s.guid)
+        have.add(transcriptTwinGuidFor(s.guid))
+      }
       const rebuilt = reconstructTranscriptSelections(transcript)
         .filter((s) => !have.has(s.guid))
         .map((s) => ({

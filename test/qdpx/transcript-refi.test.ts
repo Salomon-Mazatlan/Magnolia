@@ -7,7 +7,7 @@ vi.mock('electron', () => ({ app: { getVersion: () => '0.0.0-test' } }))
 
 import { serializeProject } from '../../src/main/qdpx/xml-serializer'
 import { deserializeProject } from '../../src/main/qdpx/xml-deserializer'
-import { buildTranscript, reconstructLineTimes, reconstructTranscriptSelections } from '../../src/main/qdpx/transcript-refi'
+import { buildTranscript, reconstructLineTimes, reconstructTranscriptSelections, transcriptTwinGuidFor } from '../../src/main/qdpx/transcript-refi'
 import type { Project } from '../../src/renderer/models/types'
 
 const PROJECT_XSD = readFileSync(join(__dirname, '../fixtures/Project.xsd'), 'utf8')
@@ -142,9 +142,49 @@ describe('Audio/Video transcripts → REFI-QDA <Transcript>/<SyncPoint>', () => 
     // its <VideoSelection> (the timeline coding), so the text coding survives
     // export to other tools.
     const t = buildTranscript(VIDEO, TEXT, LINE_TIMES, [
-      { guid: 'V0000000-0000-4000-8000-000000000001', startPosition: 12, endPosition: 23, timeRange: { startTime: 2.5, endTime: 5 }, codings: [{ guid: 'X', codeGuid: CODE }] }
+      { guid: 'B0000000-0000-4000-8000-000000000001', startPosition: 12, endPosition: 23, timeRange: { startTime: 2.5, endTime: 5 }, codings: [{ guid: 'A0000000-0000-4000-8000-00000000000C', codeGuid: CODE }] }
     ])!
     expect(t.selections).toHaveLength(1)
-    expect(t.selections[0].guid).toBe('V0000000-0000-4000-8000-000000000001')
+    // ...but with a DISTINCT guid from the twin <VideoSelection> (which keeps
+    // the original guid). REFI-QDA requires unique element guids; a shared
+    // guid makes a conformant reader (Atlas) drop the transcript text coding.
+    expect(t.selections[0].guid).not.toBe('B0000000-0000-4000-8000-000000000001')
+    expect(t.selections[0].guid).toBe(transcriptTwinGuidFor('B0000000-0000-4000-8000-000000000001'))
+    // The inner Coding guid is likewise distinct from its VideoSelection twin.
+    expect(t.selections[0].codings[0].guid).not.toBe('A0000000-0000-4000-8000-00000000000C')
+    // The derivation is a reversible involution so the reader can re-pair them.
+    expect(transcriptTwinGuidFor(t.selections[0].guid)).toBe('B0000000-0000-4000-8000-000000000001')
+  })
+
+  it('an AUDIO coding (no timeRange, no twin) keeps its own guid — no oscillation', () => {
+    const t = buildTranscript(AUDIO, TEXT, LINE_TIMES, AUDIO_SELECTIONS)!
+    const sel = t.selections.find((s) => s.guid === AUDIO_SELECTIONS[0].guid)
+    expect(sel).toBeDefined() // unchanged: no VideoSelection twin to disambiguate from
+  })
+
+  it('serializes a video coding with DISTINCT VideoSelection and TranscriptSelection guids (Atlas keeps both)', () => {
+    const video: any = {
+      guid: VIDEO, name: 'Clip', sourceType: 'video',
+      formatData: { videoExt: 'mp4', lineTimes: LINE_TIMES },
+      selections: [
+        { guid: 'B0000000-0000-4000-8000-000000000001', startPosition: 12, endPosition: 23, timeRange: { startTime: 2.5, endTime: 5 }, codings: [{ guid: 'A0000000-0000-4000-8000-00000000000C', codeGuid: CODE }] }
+      ]
+    }
+    video._refiTranscript = buildTranscript(VIDEO, TEXT, LINE_TIMES, video.selections)
+    const project: Project = {
+      name: 'P', origin: 'test',
+      users: [{ guid: '00000000-0000-0000-0000-000000000001', name: 'T' }],
+      codes: [{ guid: CODE, name: 'theme', isCodable: true, children: [] }],
+      sources: [video], sets: [], notes: []
+    }
+    const xml = serializeProject(project)
+    const vsGuid = /<VideoSelection[^>]*guid="([^"]+)"/.exec(xml)?.[1]
+    const tsGuid = /<TranscriptSelection[^>]*guid="([^"]+)"/.exec(xml)?.[1]
+    expect(vsGuid).toBe('B0000000-0000-4000-8000-000000000001')
+    expect(tsGuid).toBeDefined()
+    expect(tsGuid).not.toBe(vsGuid)
+    // Every guid in the document is unique (no duplicate element guids).
+    const allGuids = [...xml.matchAll(/\bguid="([^"]+)"/g)].map((m) => m[1])
+    expect(new Set(allGuids).size).toBe(allGuids.length)
   })
 })
