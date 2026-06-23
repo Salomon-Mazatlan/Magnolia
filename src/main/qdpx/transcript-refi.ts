@@ -101,6 +101,35 @@ function syncPointGuidFor(sourceGuid: string, position: number): string {
   return prefix + node
 }
 
+/** Interpolate a media time (ms) for an arbitrary character position from
+ *  the known line-start (position, time) points. Atlas rejects a SyncPoint
+ *  without a timeStamp ("Position is invalid"), so every point — including
+ *  coding boundaries minted mid-line — needs one. Linear between the two
+ *  bracketing line points; extrapolated past the last using the final
+ *  segment's rate; falls back to the position itself (monotonic) when there
+ *  are no timed points at all. Always non-decreasing in position. */
+function interpolateTime(position: number, timed: Array<{ pos: number; time: number }>): number {
+  if (timed.length === 0) return position
+  let lo: { pos: number; time: number } | null = null
+  let hi: { pos: number; time: number } | null = null
+  for (const p of timed) {
+    if (p.pos <= position) lo = p
+    if (p.pos >= position && !hi) hi = p
+  }
+  if (lo && hi) {
+    if (hi.pos === lo.pos) return lo.time
+    return Math.round(lo.time + ((position - lo.pos) / (hi.pos - lo.pos)) * (hi.time - lo.time))
+  }
+  if (lo && timed.length >= 2) {
+    const a = timed[timed.length - 2]
+    const b = timed[timed.length - 1]
+    const rate = (b.time - a.time) / Math.max(1, b.pos - a.pos)
+    return Math.round(lo.time + (position - lo.pos) * rate)
+  }
+  if (lo) return lo.time
+  return hi ? hi.time : position
+}
+
 /** Codepoint offset of the start of each line (split on '\n'). */
 function lineStartOffsets(text: string): number[] {
   const lines = text.split('\n')
@@ -167,11 +196,18 @@ export function buildTranscript(
     }
   }
 
+  // The line-start (position, time) anchors used to time coding-boundary
+  // sync points, so every emitted SyncPoint carries a valid timeStamp.
+  const timedAnchors = [...byPos.values()]
+    .filter((sp) => sp.timeStamp != null)
+    .map((sp) => ({ pos: sp.position ?? 0, time: sp.timeStamp! }))
+    .sort((a, b) => a.pos - b.pos)
+
   const transcriptSelections: RefiTranscriptSelection[] = codings.map((sel) => ({
     guid: sel.guid,
     name: sel.name,
-    fromSyncPoint: syncAt(sel.startPosition).guid,
-    toSyncPoint: syncAt(sel.endPosition).guid,
+    fromSyncPoint: syncAt(sel.startPosition, interpolateTime(sel.startPosition, timedAnchors)).guid,
+    toSyncPoint: syncAt(sel.endPosition, interpolateTime(sel.endPosition, timedAnchors)).guid,
     creatingUser: sel.creatingUser,
     creationDateTime: sel.creationDateTime,
     codings: sel.codings
@@ -231,17 +267,17 @@ export function reconstructLineTimes(
 ): Record<string, number> {
   if (!text || syncPoints.length === 0) return {}
   const starts = lineStartOffsets(text)
+  // Map a position back to a line ONLY when it's exactly a line start. Coding
+  // boundaries now also carry timeStamps (Atlas requires it), so the old
+  // "containing line" rule would let a mid-line boundary overwrite a real
+  // line time. Line-start sync points are the authoritative per-line timing.
+  const lineByStart = new Map<number, number>()
+  starts.forEach((pos, i) => lineByStart.set(pos, i))
   const lineTimes: Record<string, number> = {}
   for (const sp of syncPoints) {
-    if (sp.timeStamp == null) continue
-    const pos = sp.position ?? 0
-    // Find the line whose [start, nextStart) range contains pos.
-    let line = 0
-    for (let i = 0; i < starts.length; i++) {
-      if (pos >= starts[i]) line = i
-      else break
-    }
-    lineTimes[String(line)] = sp.timeStamp / 1000
+    if (sp.timeStamp == null || sp.position == null) continue
+    const line = lineByStart.get(sp.position)
+    if (line != null) lineTimes[String(line)] = sp.timeStamp / 1000
   }
   return lineTimes
 }

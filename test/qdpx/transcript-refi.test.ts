@@ -118,6 +118,24 @@ describe('Audio/Video transcripts → REFI-QDA <Transcript>/<SyncPoint>', () => 
     expect(xml.indexOf('<SyncPoint')).toBeLessThan(xml.indexOf('<TranscriptSelection'))
   })
 
+  it('gives every SyncPoint a timeStamp, incl. interpolated coding boundaries (Atlas rejects timeless points)', () => {
+    const t = buildTranscript(AUDIO, TEXT, LINE_TIMES, AUDIO_SELECTIONS)!
+    // 3 line starts (0,12,24) + 1 boundary (23). All must be timed.
+    expect(t.syncPoints).toHaveLength(4)
+    expect(t.syncPoints.every((sp) => typeof sp.timeStamp === 'number')).toBe(true)
+    // Times are non-decreasing in position (Atlas needs monotonic sync).
+    const byPos = [...t.syncPoints].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    for (let i = 1; i < byPos.length; i++) {
+      expect(byPos[i].timeStamp!).toBeGreaterThanOrEqual(byPos[i - 1].timeStamp!)
+    }
+    // The boundary at 23 sits between line starts 12 (2500ms) and 24 (5000ms).
+    const boundary = t.syncPoints.find((sp) => sp.position === 23)!
+    expect(boundary.timeStamp!).toBeGreaterThan(2500)
+    expect(boundary.timeStamp!).toBeLessThan(5000)
+    // ...and the boundary point must NOT corrupt the per-line times.
+    expect(reconstructLineTimes(TEXT, t.syncPoints)).toEqual(LINE_TIMES)
+  })
+
   it('does not emit a TranscriptSelection for a video time-range coding', () => {
     // Video codings carry timeRange → they belong in <VideoSelection>, not
     // <TranscriptSelection>; buildTranscript must skip them.
