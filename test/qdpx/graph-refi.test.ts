@@ -169,6 +169,15 @@ describe('Relationship Map → REFI-QDA <Graphs> + <Links> (Atlas interop)', () 
     expect(code.kind).toBe('code')
     expect(code.codeColor).toBe('#E05050')
 
+    // Imported nodes use Magnolia's native chip size, not Atlas's taller
+    // vertex box (the code vertex was 160x63, the document 160x97).
+    expect(code.height).toBe(28)
+    expect(code.width).toBe(160)
+    expect(doc.height).toBe(28)
+    // Foreign POSITION is preserved so the layout matches the source.
+    expect(doc.x).toBe(231)
+    expect(doc.y).toBe(97)
+
     // The edge recovers its label + bidirectional arrows from the <Link>.
     expect(analysis.config.connections).toHaveLength(1)
     const conn = analysis.config.connections[0]

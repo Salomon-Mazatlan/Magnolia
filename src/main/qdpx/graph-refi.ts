@@ -316,6 +316,19 @@ export interface GraphEntity {
   sourceType?: string
 }
 
+/** Magnolia's native per-kind node dimensions (mirrors the renderer's
+ *  ELEMENT_DIMS for the kinds graphToMap produces). Imported vertices use
+ *  these rather than the foreign tool's vertex box, which is often much
+ *  taller — otherwise Atlas's ~63–97px boxes render as oversized bubbles
+ *  instead of Magnolia's compact chips. The renderer's ResizeObserver then
+ *  grows height to fit content, exactly as for a natively-created node. */
+const ENTITY_DIMS: Record<GraphEntity['kind'], { w: number; h: number }> = {
+  code: { w: 160, h: 28 },
+  document: { w: 160, h: 28 },
+  tag: { w: 160, h: 28 },
+  memo: { w: 220, h: 116 }
+}
+
 /** Context the reader passes into graphToMap to rebuild a faithful map. */
 export interface GraphImportContext {
   /** Resolve a vertex's representedGUID to the project entity it shows. */
@@ -349,7 +362,11 @@ export function graphToMap(graph: RefiGraph, ctx: GraphImportContext = {}): Save
     const height = v.secondY != null ? Math.max(24, v.secondY - v.firstY) : 28
     const entity = v.representedGuid ? ctx.resolveEntity?.(v.representedGuid) ?? null : null
     if (entity) {
-      const el: MapElement = { id: v.guid, kind: entity.kind, label: entity.label, entityGuid: v.representedGuid, x, y, width, height }
+      // Use Magnolia's native node size for the kind (position is kept from
+      // the foreign vertex); the foreign box height would otherwise render
+      // as an oversized bubble.
+      const dims = ENTITY_DIMS[entity.kind] ?? { w: 160, h: 28 }
+      const el: MapElement = { id: v.guid, kind: entity.kind, label: entity.label, entityGuid: v.representedGuid, x, y, width: dims.w, height: dims.h }
       if (entity.codeColor) el.codeColor = entity.codeColor
       if (entity.sourceType) el.sourceType = entity.sourceType
       elements.push(el)
