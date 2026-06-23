@@ -547,6 +547,18 @@ export function serializeProject(project: Project): string {
           '@_name': s.name
         }
         if (s.description) obj.Description = s.description
+        // SetType's child sequence is fixed: Description?, MemberCode*,
+        // MemberSource*, MemberNote*. fast-xml-parser emits in object-key
+        // insertion order, so MemberCode MUST be assigned before
+        // MemberSource — a strict validator (Atlas.ti) rejects the whole
+        // file on any out-of-order child here, exactly as it does for
+        // CaseType above. Any Set carrying both code and source members
+        // would otherwise serialize MemberSource first and fail validation.
+        if (s.memberCodeGuids.length > 0) {
+          obj.MemberCode = s.memberCodeGuids.map((g) => ({
+            '@_targetGUID': g
+          }))
+        }
         // A tag on a survey respondent maps to a <MemberSource> pointing
         // at that respondent's exported open-ended document (REFI Sets
         // have no MemberCase), so Atlas.ti / MAXQDA surface the tag on
@@ -558,11 +570,6 @@ export function serializeProject(project: Project): string {
         const memberSources = [...s.memberSourceGuids, ...respondentDocGuids]
         if (memberSources.length > 0) {
           obj.MemberSource = memberSources.map((g) => ({
-            '@_targetGUID': g
-          }))
-        }
-        if (s.memberCodeGuids.length > 0) {
-          obj.MemberCode = s.memberCodeGuids.map((g) => ({
             '@_targetGUID': g
           }))
         }
