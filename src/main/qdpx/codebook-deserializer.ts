@@ -9,7 +9,12 @@ const parser = new XMLParser({
 
 function normalizeGuid(guid: string | undefined): string {
   if (!guid) return ''
-  return guid.replace(/[{}]/g, '')
+  // GUIDs are uppercase end-to-end in Magnolia (renderer state, the
+  // magnolia-*.json side-tables, sources/<guid>.<ext> filenames, and the
+  // .qde XML attributes — see renderer/utils/guid.ts and xml-deserializer.ts).
+  // A standalone .qdc imported with lowercase guids would mismatch those
+  // lookups, so normalise to uppercase here too.
+  return guid.replace(/[{}]/g, '').toUpperCase()
 }
 
 function ensureArray<T>(val: T | T[] | undefined): T[] {
