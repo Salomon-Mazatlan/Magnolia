@@ -9,6 +9,17 @@ import { reconstructLineTimes, reconstructTranscriptSelections, reconcileMediaTr
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
+import { decodeMaybeWindows1252 } from './text-encoding'
+
+/**
+ * Read a text file from the archive, tolerating non-UTF-8 transcripts.
+ * Other tools (Atlas.ti) write transcript .txt files in Windows-1252, which a
+ * strict UTF-8 read turns into U+FFFD replacement chars — see
+ * decodeMaybeWindows1252.
+ */
+async function readZipText(file: JSZip.JSZipObject): Promise<string> {
+  return decodeMaybeWindows1252(await file.async('nodebuffer'))
+}
 
 const IMAGE_MIME_BY_EXT: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -259,7 +270,7 @@ export async function readQdpx(
     if ((source as any).sourceType === 'audio') {
       const transcriptFile = zip.file(`sources/${source.guid}.txt`)
       sourceContents[source.guid] = transcriptFile
-        ? await transcriptFile.async('string')
+        ? await readZipText(transcriptFile)
         : ''
       source.plainTextPath = undefined
       sourcesDone++
@@ -371,7 +382,7 @@ export async function readQdpx(
       if (sourceContents[source.guid] === undefined) {
         const transcriptFile = zip.file(`sources/${source.guid}.txt`)
         if (transcriptFile) {
-          sourceContents[source.guid] = await transcriptFile.async('string')
+          sourceContents[source.guid] = await readZipText(transcriptFile)
         } else {
           sourceContents[source.guid] = ''
         }
@@ -421,7 +432,7 @@ export async function readQdpx(
         const filename = match[1]
         const file = zip.file(`sources/${filename}`)
         if (file) {
-          sourceContents[source.guid] = await file.async('string')
+          sourceContents[source.guid] = await readZipText(file)
         }
       }
     } else if (source.plainTextContent) {
@@ -510,7 +521,7 @@ export async function readQdpx(
       const match = (n.plainTextPath || '').match(/internal:\/\/(.+)/)
       if (match) {
         const noteFile = zip.file(`sources/${match[1]}`)
-        if (noteFile) content = await noteFile.async('string')
+        if (noteFile) content = await readZipText(noteFile)
       }
       const base: Memo = {
         guid: n.guid,
@@ -813,7 +824,7 @@ export async function readQdpx(
       const m = (transcript.plainTextPath || '').match(/internal:\/\/(.+)/)
       if (m && m[1] !== `${source.guid}.txt`) {
         const f = zip.file(`sources/${m[1]}`)
-        if (f) sourceContents[source.guid] = await f.async('string')
+        if (f) sourceContents[source.guid] = await readZipText(f)
       }
     }
     const existing = source.formatData?.lineTimes
