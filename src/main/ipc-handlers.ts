@@ -422,7 +422,22 @@ export function registerIpcHandlers(): void {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     try {
-      return await readDocumentFile(result.filePaths[0])
+      const doc = await readDocumentFile(result.filePaths[0])
+      // Honor the SOURCE's media type, not the file extension. Atlas (and
+      // others) reference a video's media as .m4a, which readDocumentFile
+      // types as audio; re-attaching it onto a video source must still come
+      // back as video (videoFilePath) so the player shows. The overlay
+      // handle is the same bytes for either media kind.
+      const f = (doc as any)?.formatting
+      if (f) {
+        const handle = f.videoFilePath || f.audioFilePath
+        if (sourceType === 'video' && handle && !f.videoFilePath) {
+          ;(doc as any).formatting = { videoFilePath: handle, mimeType: 'video/mp4', duration: f.duration ?? 0, videoExt: (doc as any).extension }
+        } else if (sourceType === 'audio' && handle && !f.audioFilePath) {
+          ;(doc as any).formatting = { audioFilePath: handle, mimeType: 'audio/mp4', duration: f.duration ?? 0, channels: f.channels ?? 1, sampleRate: f.sampleRate ?? 44100 }
+        }
+      }
+      return doc
     } catch (err: any) {
       return { name: basename(result.filePaths[0]), error: err?.message || String(err) }
     }
