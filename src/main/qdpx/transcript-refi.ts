@@ -223,6 +223,90 @@ export function buildTranscript(
   }
 }
 
+/** Per-source path lookups the media-transcript reconciliation needs,
+ *  captured by the reader before paths are cleared / _refiTranscript is
+ *  deleted. Keys are source guids. */
+export interface MediaTranscriptPaths {
+  /** media source guid → its raw media `path` (e.g. `relative:///x.m4a`). */
+  mediaPathByGuid: Map<string, string>
+  /** media source guid → the internal text file its <Transcript> references. */
+  transcriptFileByGuid: Map<string, string>
+  /** text source guid → its own internal text file. */
+  textFileByGuid: Map<string, string>
+}
+
+interface ReconcilableSource {
+  guid: string
+  sourceType?: string
+  name?: string
+  selections?: unknown[]
+}
+
+/**
+ * Collapse the multiple sources another tool (Atlas) emits for ONE coded
+ * video/audio into a single media document.
+ *
+ * Atlas exports a coded video as up to three sources: the media
+ * <VideoSource>/<AudioSource>, a standalone transcript <TextSource> that
+ * carries the codings, and a second media source whose <Transcript> child
+ * re-references the same transcript text. Imported as-is that's two or three
+ * duplicate, unlinked documents. Here we:
+ *   1. fold each standalone transcript <TextSource> (its text + codings)
+ *      into a per-transcript-file bucket and drop it;
+ *   2. group the remaining media sources by their media file path and, for
+ *      each group that has a transcript, keep one canonical document (the
+ *      one NOT named after the transcript), give it the transcript text +
+ *      codings, and drop the rest.
+ *
+ * Mutates `sourceContents` (moves/removes content) and returns the surviving
+ * sources. A Magnolia-authored file — one media source with its <Transcript>
+ * inline and no standalone transcript — is left untouched.
+ */
+export function reconcileMediaTranscripts<T extends ReconcilableSource>(
+  sources: T[],
+  sourceContents: Record<string, string>,
+  paths: MediaTranscriptPaths
+): T[] {
+  const { mediaPathByGuid, transcriptFileByGuid, textFileByGuid } = paths
+  const transcriptTextFiles = new Set(transcriptFileByGuid.values())
+  if (transcriptTextFiles.size === 0) return sources
+
+  const removed = new Set<string>()
+  const codingsByFile = new Map<string, unknown[]>()
+  const textByFile = new Map<string, string>()
+  for (const s of sources) {
+    if (s.sourceType && s.sourceType !== 'text') continue
+    const file = textFileByGuid.get(s.guid)
+    if (!file || !transcriptTextFiles.has(file)) continue
+    codingsByFile.set(file, [...(codingsByFile.get(file) ?? []), ...(s.selections ?? [])])
+    if (sourceContents[s.guid]) textByFile.set(file, sourceContents[s.guid])
+    removed.add(s.guid)
+  }
+
+  const byMedia = new Map<string, T[]>()
+  for (const s of sources) {
+    if (s.sourceType !== 'audio' && s.sourceType !== 'video') continue
+    if (removed.has(s.guid)) continue
+    const path = mediaPathByGuid.get(s.guid)
+    if (!path) continue
+    byMedia.set(path, [...(byMedia.get(path) ?? []), s])
+  }
+  for (const group of byMedia.values()) {
+    const file = group.map((s) => transcriptFileByGuid.get(s.guid)).find(Boolean)
+    if (!file) continue // no transcript linked to this media → leave as-is
+    const canonical = group.find((s) => !/transcript/i.test(s.name ?? '')) ?? group[0]
+    const text = textByFile.get(file)
+    if (text != null) sourceContents[canonical.guid] = text
+    const codings = codingsByFile.get(file) ?? []
+    if (codings.length > 0) canonical.selections = [...(canonical.selections ?? []), ...codings]
+    for (const s of group) if (s !== canonical) removed.add(s.guid)
+  }
+
+  if (removed.size === 0) return sources
+  for (const g of removed) delete sourceContents[g]
+  return sources.filter((s) => !removed.has(s.guid))
+}
+
 /**
  * Inverse of buildTranscript's coding pass: turn a parsed transcript's
  * <TranscriptSelection>s back into char-offset codings by resolving each

@@ -5,7 +5,7 @@ import { deserializeProject } from './xml-deserializer'
 import type { RawPdfSelection, RawPictureSelection, RawVideoSelection, RawNote, RawNoteAnchor } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
 import { graphToMap, type RefiGraph, type RefiLink, type GraphEntity } from './graph-refi'
-import { reconstructLineTimes, reconstructTranscriptSelections, type RefiTranscript } from './transcript-refi'
+import { reconstructLineTimes, reconstructTranscriptSelections, reconcileMediaTranscripts, type RefiTranscript } from './transcript-refi'
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
@@ -216,10 +216,25 @@ export async function readQdpx(
   // the source guid, so both the runtime handle and the missing-binary
   // detection below must use this reference, not `<guid>.<ext>`.
   const binaryRefByGuid = new Map<string, string>()
+  // Captured here (before the source loop clears paths / the transcript pass
+  // deletes _refiTranscript) for the video/audio transcript reconciliation
+  // below: a media source's raw media `path`, the internal text file its
+  // <Transcript> references, and each text source's own internal text file.
+  const mediaPathByGuid = new Map<string, string>()
+  const transcriptFileByGuid = new Map<string, string>()
+  const textFileByGuid = new Map<string, string>()
   for (const s of project.sources as any[]) {
     if (['pdf', 'image', 'audio', 'video'].includes(s.sourceType)) {
       const m = (s.plainTextPath || '').match(/internal:\/\/(.+)/)
       if (m) binaryRefByGuid.set(s.guid, m[1])
+    }
+    if (s.sourceType === 'audio' || s.sourceType === 'video') {
+      if (s.plainTextPath) mediaPathByGuid.set(s.guid, s.plainTextPath)
+      const tp = (s._refiTranscript?.plainTextPath || '').match(/internal:\/\/(.+)/)
+      if (tp) transcriptFileByGuid.set(s.guid, tp[1])
+    } else if (!s.sourceType || s.sourceType === 'text') {
+      const tp = (s.plainTextPath || '').match(/internal:\/\/(.+)/)
+      if (tp) textFileByGuid.set(s.guid, tp[1])
     }
   }
 
@@ -817,6 +832,22 @@ export async function readQdpx(
     }
     delete source._refiTranscript
   }
+
+  // ── Media-transcript reconciliation (foreign files, e.g. Atlas) ──
+  // Atlas splits ONE coded video/audio into up to three sources: the media
+  // <VideoSource>/<AudioSource>, a standalone transcript <TextSource> that
+  // carries the codings, and a second media source whose <Transcript> child
+  // re-references the same transcript text. Imported naively that's two or
+  // three duplicate, unlinked documents. Collapse them: fold the standalone
+  // transcript (text + codings) into the media source, and merge media
+  // sources that share one media file into a single document. Magnolia's own
+  // files have a single media source with its <Transcript> inline, so this is
+  // a no-op for them.
+  project.sources = reconcileMediaTranscripts(project.sources as any[], sourceContents, {
+    mediaPathByGuid,
+    transcriptFileByGuid,
+    textFileByGuid
+  }) as typeof project.sources
 
   // ── Survey REFI reconciliation ──
   // The standards-native survey representation is <Variables>/<Cases>
