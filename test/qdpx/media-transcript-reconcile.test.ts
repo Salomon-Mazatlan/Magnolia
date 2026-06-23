@@ -35,8 +35,15 @@ describe('reconcileMediaTranscripts', () => {
     expect(v.name).toBe('Video.mp4') // the non-transcript name wins
     expect(sourceContents[v.guid]).toBe('This is a video transcript.\nIt has a code here.')
     expect(v.selections).toHaveLength(1)
-    expect(v.selections[0].startPosition).toBe(42)
-    expect(v.selections[0].codings[0].codeGuid).toBe('CODE')
+    // The char-offset coding [42,46] ("here", on line 1) is converted to the
+    // video model: line-anchored, manuallyAnchored, with a timeRange so it
+    // renders on the transcript.
+    const sel = v.selections[0]
+    expect(sel.startPosition).toBe(1) // content line index, not char offset
+    expect(sel.endPosition).toBe(1)
+    expect(sel.manuallyAnchored).toBe(true)
+    expect(sel.timeRange).toBeDefined()
+    expect(sel.codings[0].codeGuid).toBe('CODE')
     // The folded/duplicate sources' content is dropped from the map.
     expect(sourceContents.TXT1).toBeUndefined()
     expect(sourceContents.VID2).toBeUndefined()

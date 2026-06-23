@@ -243,6 +243,52 @@ interface ReconcilableSource {
 }
 
 /**
+ * Convert a char-offset transcript coding into Magnolia's VIDEO coding
+ * model. Video codings render only when they carry a `timeRange`, and they
+ * anchor to transcript LINES (startPosition/endPosition are content-line
+ * indexes, used when `manuallyAnchored`) rather than character offsets. So
+ * map the coded character span to the line(s) it falls on, anchor the
+ * bracket there, and give it a timeRange (from the source's lineTimes when
+ * known, otherwise a synthetic per-line range so the bracket still draws on
+ * an un-timed transcript). Audio codings stay char-offset and aren't
+ * converted — they render directly in the text view.
+ */
+function toVideoLineCoding(
+  sel: any,
+  text: string,
+  lineTimes: Record<string, number> | undefined
+): any {
+  const lines = text.split('\n')
+  const starts: number[] = []
+  let cp = 0
+  for (const line of lines) {
+    starts.push(cp)
+    cp += [...line].length + 1
+  }
+  const lineOf = (pos: number): number => {
+    let ln = 0
+    for (let i = 0; i < starts.length; i++) {
+      if (pos >= starts[i]) ln = i
+      else break
+    }
+    return ln
+  }
+  const startLine = lineOf(sel.startPosition ?? 0)
+  const endLine = lineOf(Math.max((sel.endPosition ?? 0) - 1, sel.startPosition ?? 0))
+  const t = (line: number, fallback: number): number => {
+    const v = lineTimes?.[String(line)]
+    return typeof v === 'number' ? v : fallback
+  }
+  return {
+    ...sel,
+    startPosition: startLine,
+    endPosition: endLine,
+    manuallyAnchored: true,
+    timeRange: { startTime: t(startLine, startLine), endTime: t(endLine, endLine) + (lineTimes ? 0 : 1) }
+  }
+}
+
+/**
  * Collapse the multiple sources another tool (Atlas) emits for ONE coded
  * video/audio into a single media document.
  *
@@ -297,7 +343,13 @@ export function reconcileMediaTranscripts<T extends ReconcilableSource>(
     const canonical = group.find((s) => !/transcript/i.test(s.name ?? '')) ?? group[0]
     const text = textByFile.get(file)
     if (text != null) sourceContents[canonical.guid] = text
-    const codings = codingsByFile.get(file) ?? []
+    let codings = codingsByFile.get(file) ?? []
+    // A video's transcript codings must be line-anchored + time-ranged to
+    // render; an audio's stay char-offset. (See toVideoLineCoding.)
+    if (canonical.sourceType === 'video' && text != null) {
+      const lineTimes = (canonical as any).formatData?.lineTimes as Record<string, number> | undefined
+      codings = codings.map((sel) => toVideoLineCoding(sel, text, lineTimes))
+    }
     if (codings.length > 0) canonical.selections = [...(canonical.selections ?? []), ...codings]
     for (const s of group) if (s !== canonical) removed.add(s.guid)
   }
