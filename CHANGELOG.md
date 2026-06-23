@@ -2,6 +2,24 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.6.0]
+
+### Added
+- **Relationship Maps work with other QDA software.** Relationship Maps are now saved in the shared REFI-QDA format, so they open as networks in Atlas.ti, and networks made in other tools open in Magnolia — with their nodes, links, and link labels intact and sized to Magnolia's own layout.
+- **Audio and video transcripts work with other QDA software.** A media file's synced transcript is now saved in the shared REFI-QDA format, so the transcript — and the codes applied to its text — open in Atlas.ti and come back into Magnolia.
+- **Project description.** Project Info now has a Description field that accepts the same Markdown as memos, saved in the shared REFI-QDA format.
+
+### Changed
+- **Video transcript coding is now character-precise.** You can code an exact word or phrase in a video's transcript — as you already could with audio and text — instead of a whole line; the code also appears on the video timeline for the span it's spoken.
+
+### Fixed
+- **Transcript codes survive a round-trip through Atlas.ti.** A code applied to a video or audio transcript is now written the way Atlas.ti itself stores transcript codes, so it's kept when a project is opened in Atlas, coded further, and brought back — previously the original codes were dropped.
+- **Imported transcripts no longer show garbled characters.** Transcript text written in Windows-1252 (as Atlas.ti produces) — curly quotes, apostrophes, dashes, ellipses — is now decoded correctly instead of appearing as "�".
+- **Re-importing a transcript's missing media works.** When a project's video or audio file isn't present, the file picker now lets you select it, and re-attaching it keeps the transcript and its codes.
+- **PDF area codings work with other QDA software.** Rectangular (box) codings on PDFs are saved as, and imported from, REFI-QDA box selections, so they round-trip with Atlas.ti instead of being turned into text selections or dropped.
+- **Standalone codebooks import reliably.** Codes from a `.qdc` codebook are matched correctly regardless of the letter case used in their identifiers.
+- **Projects validate against the REFI-QDA schema.** Set membership is written in the order the format requires, so files Magnolia exports are no longer rejected by stricter tools.
+
 ## [1.5.1]
 
 ### Fixed
