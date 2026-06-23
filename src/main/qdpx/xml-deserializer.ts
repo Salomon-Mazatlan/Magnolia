@@ -9,7 +9,7 @@ import type {
   QDASet
 } from '../../renderer/models/types'
 import type { RefiVariable, RefiCase, RefiVariableValue, RefiVariableType } from './survey-refi'
-import type { RefiGraph, RefiVertex, RefiEdge, RefiEdgeDirection, RefiLineStyle } from './graph-refi'
+import type { RefiGraph, RefiVertex, RefiEdge, RefiEdgeDirection, RefiLineStyle, RefiLink } from './graph-refi'
 import type { RefiTranscript, RefiSyncPoint } from './transcript-refi'
 
 const parser = new XMLParser({
@@ -436,6 +436,17 @@ function parseGraph(xmlG: any): RefiGraph {
   }
 }
 
+function parseLink(xmlL: any): RefiLink {
+  return {
+    guid: normalizeGuid(xmlL['@_guid']),
+    name: xmlL['@_name'],
+    direction: xmlL['@_direction'] as RefiEdgeDirection | undefined,
+    color: xmlL['@_color'],
+    originGuid: xmlL['@_originGUID'] ? normalizeGuid(xmlL['@_originGUID']) : undefined,
+    targetGuid: xmlL['@_targetGUID'] ? normalizeGuid(xmlL['@_targetGUID']) : undefined
+  }
+}
+
 export function deserializeProject(xml: string): Project {
   const parsed = parser.parse(xml)
   const proj = parsed.Project
@@ -479,6 +490,11 @@ export function deserializeProject(xml: string): Project {
   // into relationship-map saved analyses when the file has no
   // magnolia-analyses.json side table (i.e. it came from another tool).
   const refiGraphs: RefiGraph[] = ensureArray(proj.Graphs?.Graph).map(parseGraph)
+
+  // REFI-QDA <Links> (the relations a graph's edges represent). Transient:
+  // reader.ts uses them to recover an imported edge's label/direction, which
+  // other tools (Atlas) store on the <Link>, not the <Edge>.
+  const refiLinks: RefiLink[] = ensureArray(proj.Links?.Link).map(parseLink)
 
   // REFI-QDA project-level <Note>s (memos). Transient: reader.ts loads each
   // note's text from its plainTextPath and builds Magnolia memos when the
@@ -536,6 +552,7 @@ export function deserializeProject(xml: string): Project {
     ...(refiCases.length > 0 ? { _refiCases: refiCases } : {}),
     ...(refiNotes.length > 0 ? { _refiNotes: refiNotes } : {}),
     ...(Object.keys(refiNoteAnchors).length > 0 ? { _refiNoteAnchors: refiNoteAnchors } : {}),
-    ...(refiGraphs.length > 0 ? { _refiGraphs: refiGraphs } : {})
+    ...(refiGraphs.length > 0 ? { _refiGraphs: refiGraphs } : {}),
+    ...(refiLinks.length > 0 ? { _refiLinks: refiLinks } : {})
   } as Project
 }

@@ -4,7 +4,7 @@ import { randomUUID } from 'crypto'
 import { deserializeProject } from './xml-deserializer'
 import type { RawPdfSelection, RawPictureSelection, RawVideoSelection, RawNote, RawNoteAnchor } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
-import { graphToMap, type RefiGraph } from './graph-refi'
+import { graphToMap, type RefiGraph, type RefiLink, type GraphEntity } from './graph-refi'
 import { reconstructLineTimes } from './transcript-refi'
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions, type PdfTextItem } from '../pdf-extract'
@@ -596,7 +596,37 @@ export async function readQdpx(
   const refiGraphs = (project as any)._refiGraphs as RefiGraph[] | undefined
   if (refiGraphs && refiGraphs.length > 0) {
     const existing = new Set((project.savedAnalyses ?? []).map((a) => a.guid))
-    const rebuilt = refiGraphs.filter((g) => !existing.has(g.guid)).map(graphToMap)
+    // Resolve a vertex's representedGUID to the project entity it shows so
+    // imported vertices come back as proper code/document/tag/memo cards
+    // rather than bare free-text. Codes are a tree → flatten first.
+    const codeByGuid = new Map<string, { name: string; color?: string }>()
+    const walkCodes = (codes: typeof project.codes): void => {
+      for (const c of codes) {
+        codeByGuid.set(c.guid, { name: c.name, color: c.color })
+        walkCodes(c.children)
+      }
+    }
+    walkCodes(project.codes)
+    const sourceByGuid = new Map((project.sources as any[]).map((s) => [s.guid, s]))
+    const setByGuid = new Map((project.sets ?? []).map((s) => [s.guid, s]))
+    const memoByGuid = new Map((project.memos ?? []).map((m) => [m.guid, m]))
+    const resolveEntity = (guid: string): GraphEntity | null => {
+      const c = codeByGuid.get(guid)
+      if (c) return { kind: 'code', label: c.name, codeColor: c.color }
+      const s = sourceByGuid.get(guid)
+      if (s) return { kind: 'document', label: s.name, sourceType: s.sourceType }
+      const t = setByGuid.get(guid)
+      if (t) return { kind: 'tag', label: t.name }
+      const m = memoByGuid.get(guid)
+      if (m) return { kind: 'memo', label: m.title }
+      return null
+    }
+    const linkMap = new Map(
+      (((project as any)._refiLinks as RefiLink[] | undefined) ?? []).map((l) => [l.guid, l])
+    )
+    const rebuilt = refiGraphs
+      .filter((g) => !existing.has(g.guid))
+      .map((g) => graphToMap(g, { resolveEntity, links: linkMap }))
     if (rebuilt.length > 0) {
       project.savedAnalyses = [...(project.savedAnalyses ?? []), ...rebuilt]
     }
@@ -905,11 +935,12 @@ export async function readQdpx(
     .map((s) => ({ guid: s.guid, name: s.name, sourceType: s.sourceType }))
 
   // Drop the transient REFI fields so they don't leak into renderer state.
-  const { _refiVariables, _refiCases, _refiNotes, _refiNoteAnchors, _refiGraphs, ...cleanProject } = project as any
+  const { _refiVariables, _refiCases, _refiNotes, _refiNoteAnchors, _refiGraphs, _refiLinks, ...cleanProject } = project as any
   void _refiVariables
   void _refiCases
   void _refiNotes
   void _refiNoteAnchors
   void _refiGraphs
+  void _refiLinks
   return { ...cleanProject, sourceContents, missingBinaries }
 }

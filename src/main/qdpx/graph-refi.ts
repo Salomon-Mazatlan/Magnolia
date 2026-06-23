@@ -43,6 +43,7 @@ interface MapElement {
   label: string
   entityGuid?: string
   codeColor?: string
+  sourceType?: string
   x: number
   y: number
   width: number
@@ -305,33 +306,70 @@ export function collectGraphs(savedAnalyses: SavedAnalysis[] | undefined): Graph
   return out
 }
 
+/** A project entity a vertex's representedGUID resolves to, supplied by the
+ *  reader so imported vertices become proper Magnolia node cards instead of
+ *  bare free-text. */
+export interface GraphEntity {
+  kind: 'code' | 'document' | 'tag' | 'memo'
+  label: string
+  codeColor?: string
+  sourceType?: string
+}
+
+/** Context the reader passes into graphToMap to rebuild a faithful map. */
+export interface GraphImportContext {
+  /** Resolve a vertex's representedGUID to the project entity it shows. */
+  resolveEntity?: (representedGuid: string) => GraphEntity | null
+  /** The project's <Link>s by guid, so an edge can recover its label and
+   *  direction from the relation it represents (Atlas puts the link name on
+   *  the <Link>, not the <Edge>). */
+  links?: Map<string, RefiLink>
+}
+
 /**
- * Rebuild a best-effort relationship-map SavedAnalysis from a REFI-QDA
- * <Graph>. Used only for files that arrive without Magnolia's side-table
- * (foreign-authored, or a Magnolia project that lost its analyses JSON in
- * a round-trip through another tool). Every vertex becomes a free-text
- * box — the standard Graph carries no Magnolia node-kind, so we don't
- * fabricate one — preserving the map's layout and connections.
+ * Rebuild a relationship-map SavedAnalysis from a REFI-QDA <Graph>. Used
+ * only for files that arrive without Magnolia's side-table (foreign-
+ * authored, or a Magnolia project that lost its analyses JSON in a round-
+ * trip through another tool).
+ *
+ * Each vertex is resolved through `ctx.resolveEntity` to a real project
+ * entity so it comes back as a proper code/document/tag/memo card; a
+ * vertex that resolves to nothing (a free-text box, or an entity not in
+ * this project) falls back to a free-text box carrying its label. Each
+ * edge recovers its label/direction from the <Link> it represents when the
+ * edge itself doesn't carry them.
  */
-export function graphToMap(graph: RefiGraph): SavedAnalysis {
-  const freeTexts: FreeTextElement[] = graph.vertices.map((v) => ({
-    id: v.guid,
-    kind: 'freetext',
-    x: v.firstX,
-    y: v.firstY,
-    width: v.secondX != null ? Math.max(40, v.secondX - v.firstX) : 160,
-    height: v.secondY != null ? Math.max(24, v.secondY - v.firstY) : 28,
-    content: v.name ?? ''
-  }))
-  const connections: MapConnection[] = graph.edges.map((e) => ({
-    id: e.guid,
-    fromId: e.sourceVertex,
-    toId: e.targetVertex,
-    arrowFrom: e.direction === 'Bidirectional',
-    arrowTo: e.direction === 'OneWay' || e.direction === 'Bidirectional',
-    label: e.name ?? ''
-  }))
-  const config: RelationshipMapConfig = { elements: [], freeTexts, connections, pan: { x: 0, y: 0 } }
+export function graphToMap(graph: RefiGraph, ctx: GraphImportContext = {}): SavedAnalysis {
+  const elements: MapElement[] = []
+  const freeTexts: FreeTextElement[] = []
+  for (const v of graph.vertices) {
+    const x = v.firstX
+    const y = v.firstY
+    const width = v.secondX != null ? Math.max(40, v.secondX - v.firstX) : 160
+    const height = v.secondY != null ? Math.max(24, v.secondY - v.firstY) : 28
+    const entity = v.representedGuid ? ctx.resolveEntity?.(v.representedGuid) ?? null : null
+    if (entity) {
+      const el: MapElement = { id: v.guid, kind: entity.kind, label: entity.label, entityGuid: v.representedGuid, x, y, width, height }
+      if (entity.codeColor) el.codeColor = entity.codeColor
+      if (entity.sourceType) el.sourceType = entity.sourceType
+      elements.push(el)
+    } else {
+      freeTexts.push({ id: v.guid, kind: 'freetext', x, y, width, height, content: v.name ?? '' })
+    }
+  }
+  const connections: MapConnection[] = graph.edges.map((e) => {
+    const link = e.representedGuid ? ctx.links?.get(e.representedGuid) : undefined
+    const direction = e.direction ?? link?.direction
+    return {
+      id: e.guid,
+      fromId: e.sourceVertex,
+      toId: e.targetVertex,
+      arrowFrom: direction === 'Bidirectional',
+      arrowTo: direction === 'OneWay' || direction === 'Bidirectional',
+      label: e.name || link?.name || ''
+    }
+  })
+  const config: RelationshipMapConfig = { elements, freeTexts, connections, pan: { x: 0, y: 0 } }
   return {
     guid: graph.guid,
     toolType: 'relationship-map',

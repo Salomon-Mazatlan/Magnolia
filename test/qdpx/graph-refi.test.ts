@@ -120,7 +120,7 @@ describe('Relationship Map → REFI-QDA <Graphs> + <Links> (Atlas interop)', () 
     expect(bundle.graphs).toHaveLength(1)
   })
 
-  it('graphToMap rebuilds a foreign graph as free-text boxes + connections', () => {
+  it('graphToMap (no context) falls back to free-text boxes + connections', () => {
     const { graphs } = mapToGraph(mapAnalysis())
     const analysis = graphToMap(graphs[0])
     expect(analysis.toolType).toBe('relationship-map')
@@ -129,6 +129,51 @@ describe('Relationship Map → REFI-QDA <Graphs> + <Links> (Atlas interop)', () 
     const conn = analysis.config.connections[0]
     expect(conn.fromId).toBe(ELDOC)
     expect(conn.toId).toBe(ELCODE)
+    expect(conn.arrowTo).toBe(true)
+  })
+
+  it('graphToMap resolves vertices to entities and recovers the edge label from the <Link> (Atlas import)', () => {
+    // Mirror an Atlas-authored graph: vertices bound to a document + two
+    // codes, an edge whose label lives on the <Link> it represents.
+    const V_DOC = '00C89D15-E069-4CEB-8948-9F3FB5A0CD4B'
+    const V_IMG = 'A5B41962-05BF-4362-BBC4-8EE6D5321FD8'
+    const V_ANO = 'B13D707F-019E-4D1B-857C-C8B670029955'
+    const LINK = '9FD0FA13-196E-4A0C-9D8C-CC779CA24766'
+    const graph = {
+      guid: 'G0000000-0000-4000-8000-000000000001',
+      name: 'Relationship Map',
+      vertices: [
+        { guid: V_DOC, representedGuid: DOC_GUID, name: 'magnoliasolid.png', firstX: 231, firstY: 97, secondX: 391, secondY: 194, shape: 'Rectangle' },
+        { guid: V_IMG, representedGuid: '2A08BDDF-4C35-4250-BF77-7DE37B50C930', name: 'image', firstX: 31, firstY: 239, secondX: 191, secondY: 302, shape: 'Rectangle' },
+        { guid: V_ANO, representedGuid: '2D969AF8-C875-4FAE-BCD8-F0162BC27396', name: 'another', firstX: 378, firstY: 240, secondX: 538, secondY: 303, shape: 'Rectangle' }
+      ],
+      edges: [
+        { guid: 'AFFE2E91-FF08-4DF9-98E5-41E42CC300A3', representedGuid: LINK, sourceVertex: V_ANO, targetVertex: V_IMG, direction: 'Bidirectional' as const, lineStyle: 'solid' as const }
+      ]
+    }
+    const links = new Map([[LINK, { guid: LINK, name: 'contradicts', direction: 'Bidirectional' as const, originGuid: '2D969AF8-C875-4FAE-BCD8-F0162BC27396', targetGuid: '2A08BDDF-4C35-4250-BF77-7DE37B50C930' }]])
+    const entities: Record<string, any> = {
+      [DOC_GUID]: { kind: 'document', label: 'magnoliasolid.png', sourceType: 'image' },
+      '2A08BDDF-4C35-4250-BF77-7DE37B50C930': { kind: 'code', label: 'image', codeColor: '#E05050' },
+      '2D969AF8-C875-4FAE-BCD8-F0162BC27396': { kind: 'code', label: 'another', codeColor: '#E08050' }
+    }
+    const analysis = graphToMap(graph, { resolveEntity: (g) => entities[g] ?? null, links })
+
+    // All three vertices come back as proper entity elements, not free-text.
+    expect(analysis.config.elements).toHaveLength(3)
+    expect(analysis.config.freeTexts).toHaveLength(0)
+    const doc = analysis.config.elements.find((e) => e.entityGuid === DOC_GUID)!
+    expect(doc.kind).toBe('document')
+    expect(doc.sourceType).toBe('image')
+    const code = analysis.config.elements.find((e) => e.label === 'image')!
+    expect(code.kind).toBe('code')
+    expect(code.codeColor).toBe('#E05050')
+
+    // The edge recovers its label + bidirectional arrows from the <Link>.
+    expect(analysis.config.connections).toHaveLength(1)
+    const conn = analysis.config.connections[0]
+    expect(conn.label).toBe('contradicts')
+    expect(conn.arrowFrom).toBe(true)
     expect(conn.arrowTo).toBe(true)
   })
 })
