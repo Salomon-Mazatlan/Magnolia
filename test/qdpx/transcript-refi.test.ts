@@ -136,12 +136,15 @@ describe('Audio/Video transcripts → REFI-QDA <Transcript>/<SyncPoint>', () => 
     expect(reconstructLineTimes(TEXT, t.syncPoints)).toEqual(LINE_TIMES)
   })
 
-  it('does not emit a TranscriptSelection for a video time-range coding', () => {
-    // Video codings carry timeRange → they belong in <VideoSelection>, not
-    // <TranscriptSelection>; buildTranscript must skip them.
+  it('emits a TranscriptSelection for a video coding even when it carries a timeRange', () => {
+    // A video coding is character-precise AND time-ranged: it must round-trip
+    // as a <TranscriptSelection> (the transcript text coding) in addition to
+    // its <VideoSelection> (the timeline coding), so the text coding survives
+    // export to other tools.
     const t = buildTranscript(VIDEO, TEXT, LINE_TIMES, [
-      { guid: 'V0000000-0000-4000-8000-000000000001', startPosition: 0, endPosition: 0, timeRange: { startTime: 1, endTime: 2 }, codings: [{ guid: 'X', codeGuid: CODE }] }
+      { guid: 'V0000000-0000-4000-8000-000000000001', startPosition: 12, endPosition: 23, timeRange: { startTime: 2.5, endTime: 5 }, codings: [{ guid: 'X', codeGuid: CODE }] }
     ])!
-    expect(t.selections).toHaveLength(0)
+    expect(t.selections).toHaveLength(1)
+    expect(t.selections[0].guid).toBe('V0000000-0000-4000-8000-000000000001')
   })
 })

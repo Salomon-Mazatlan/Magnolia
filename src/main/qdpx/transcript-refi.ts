@@ -142,15 +142,18 @@ function lineStartOffsets(text: string): number[] {
   return starts
 }
 
-/** True for a plain char-offset transcript coding (what we map to a
- *  <TranscriptSelection>) — excludes video time-ranges, PDF/image regions,
- *  and survey cells, which have their own representations. */
+/** True for a character-offset transcript coding (what we map to a
+ *  <TranscriptSelection>). A video coding carries BOTH a character span and
+ *  a time range, so it's emitted as a <TranscriptSelection> (the transcript
+ *  text coding) AND a <VideoSelection> (the timeline coding) — a time range
+ *  is therefore allowed here. Only PDF/image regions and survey cells, which
+ *  have their own representations, are excluded. */
 function isTranscriptCoding(sel: TranscriptCodingInput): boolean {
   return (
     Array.isArray(sel.codings) && sel.codings.length > 0 &&
     typeof sel.startPosition === 'number' && typeof sel.endPosition === 'number' &&
     sel.endPosition > sel.startPosition &&
-    !sel.timeRange && !sel.pdfRegion && !sel.surveyCell
+    !sel.pdfRegion && !sel.surveyCell
   )
 }
 
