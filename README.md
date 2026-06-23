@@ -55,6 +55,10 @@ Magnolia's quote feature also allows you to easily save quotes for later, so you
 
 Magnolia's rich suite of analytical tools allow you to interrogate your data. You can selectively apply these tools to specific documents, types of documents, documents in specific folders, and/or documents with specific tags.  
 
+<p align="center">
+  <img src="screenshot3.png" alt="Magnolia" width="750">
+</p>
+
 - **Relationships:** Map anything and everything. Just drag it to the canvas! Everything on your canvas is interactive; just double-click and you will be taken there. You can even export your map as an SVG file.
 
 - **Codes in Documents:** Easily see which codes exist in which documents.
@@ -84,6 +88,10 @@ Qualitative researchers know that videos capture more than just words. The pictu
 This means that when you code a transcript, your codes also appear in the video timeline. If you code in the video timeline, your codes also appear in the transcript. The transcript and the video are linked!
 
 ## Support for survey data
+
+<p align="center">
+  <img src="screenshot2.png" alt="Magnolia" width="750">
+</p>
 
 Other QDA software breaks your survey responses into individual documents. Magnolia doesn't!
 
