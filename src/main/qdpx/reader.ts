@@ -5,7 +5,7 @@ import { deserializeProject } from './xml-deserializer'
 import type { RawPdfSelection, RawPictureSelection, RawVideoSelection, RawNote, RawNoteAnchor } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
 import { graphToMap, type RefiGraph, type RefiLink, type GraphEntity } from './graph-refi'
-import { reconstructLineTimes, reconstructTranscriptSelections, reconcileMediaTranscripts, type RefiTranscript } from './transcript-refi'
+import { reconstructLineTimes, reconstructTranscriptSelections, reconcileMediaTranscripts, lineStartOffsetsWithEnd, type RefiTranscript } from './transcript-refi'
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
@@ -689,16 +689,28 @@ export async function readQdpx(
           if (meta.surveyCellSelections) {
             source.selections.push(...(meta.surveyCellSelections as PlainTextSelection[]))
           }
-          // Reattach video-selection transcript anchors + manuallyAnchored.
+          // Reattach video-transcript codings' text anchors. Video codings
+          // are character-precise (startPosition/endPosition = codepoint
+          // offsets), like audio/text. New files store startChar/endChar;
+          // legacy files stored startLine/endLine (whole-line codings) — map
+          // those to the line's character range so they keep rendering.
           if (meta.videoSelectionAnchors) {
-            const anchorByGuid = new Map<string, { startLine: number; endLine: number; manuallyAnchored: boolean }>(
+            const anchorByGuid = new Map<string, any>(
               (meta.videoSelectionAnchors as any[]).map((a) => [a.guid, a])
             )
+            const lineOffsets = lineStartOffsetsWithEnd(sourceContents[source.guid] ?? '')
             for (const sel of source.selections) {
               const anchor = anchorByGuid.get(sel.guid)
               if (anchor) {
-                sel.startPosition = anchor.startLine
-                sel.endPosition = anchor.endLine
+                if (anchor.startChar != null) {
+                  sel.startPosition = anchor.startChar
+                  sel.endPosition = anchor.endChar ?? anchor.startChar
+                } else {
+                  const sLine = anchor.startLine ?? 0
+                  const eLine = anchor.endLine ?? sLine
+                  sel.startPosition = lineOffsets[sLine] ?? 0
+                  sel.endPosition = Math.max((lineOffsets[eLine + 1] ?? lineOffsets[lineOffsets.length - 1] ?? 0) - 1, sel.startPosition)
+                }
                 ;(sel as any).manuallyAnchored = anchor.manuallyAnchored
               }
             }

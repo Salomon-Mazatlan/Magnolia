@@ -12,7 +12,6 @@
  */
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { CodedTextView, type CodingRightClickContext } from './CodedTextView'
-import { VideoTranscriptView } from './VideoTranscriptView'
 import { useDocumentStore } from '../../stores/document-store'
 import { useCodeStore } from '../../stores/code-store'
 import { useMemoStore } from '../../stores/memo-store'
@@ -432,28 +431,13 @@ export function TranscriptEditor({
           onContentChange={(newContent) => updateSourceContent(sourceGuid, newContent)}
           onLineTimesChange={(newLineTimes) => updateLineTimes(sourceGuid, newLineTimes)}
         />
-      ) : videoMode ? (
-        /* Video coding: render VideoTranscriptView (its own drop handler,
-           bracket rendering, line-anchor drag, and click-to-seek). */
-        <div style={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
-          <VideoTranscriptView
-            sourceGuid={sourceGuid}
-            sourceName={sourceName}
-            content={content}
-            selections={selections}
-            currentPlaybackTime={currentPlaybackTime}
-            videoDuration={videoDuration}
-            lineTimes={lineTimes}
-            onTimestampClick={onTimestampClick}
-            activeTimestampLine={activeTimestampLine}
-            externalHighlightRange={
-              externalHighlight
-                ? { startCp: externalHighlight.startCp, endCp: externalHighlight.endCp }
-                : null
-            }
-          />
-        </div>
       ) : (
+        /* Coding mode — audio AND video both use the character-precise
+           CodedTextView so a code highlights the exact coded text. The
+           per-line timestamp gutter (lineTimestampMap) gives video the same
+           time context VideoTranscriptView used to; the CodeTrack timeline
+           (rendered by VideoDocumentViewer) projects codings that carry a
+           time range. */
         /* Coding mode: read-only highlighted text with full coding.
            Class hook so theme CSS can match this transcript's margins
            to the video transcript's container padding. */
