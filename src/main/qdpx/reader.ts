@@ -5,7 +5,7 @@ import { deserializeProject } from './xml-deserializer'
 import type { RawPdfSelection, RawPictureSelection, RawVideoSelection, RawNote, RawNoteAnchor } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
 import { graphToMap, type RefiGraph, type RefiLink, type GraphEntity } from './graph-refi'
-import { reconstructLineTimes, reconstructTranscriptSelections, reconcileMediaTranscripts, lineStartOffsetsWithEnd, transcriptTwinGuidFor, type RefiTranscript } from './transcript-refi'
+import { reconstructLineTimes, reconstructTranscriptSelections, reconcileMediaTranscripts, lineStartOffsetsWithEnd, deriveLineTimeRange, transcriptTwinGuidFor, type RefiTranscript } from './transcript-refi'
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
@@ -881,6 +881,30 @@ export async function readQdpx(
     transcriptFileByGuid,
     textFileByGuid
   }) as typeof project.sources
+
+  // ── Re-derive video coding timeRanges from line times ──
+  // A video transcript coding is character-precise text + a line-granular
+  // timeRange. The timeRange is NOT stored in the XML (it's redundant with the
+  // SyncPoints, and emitting a <VideoSelection> twin breaks the Atlas
+  // round-trip — see serializeVideoSelection). So reconstruct it here from the
+  // coding's char span and the source's line times, mirroring the renderer's
+  // deriveVideoTimeRange. Only fills codings that have a char span but no
+  // timeRange yet, so any time already present (e.g. a pure-timeline
+  // VideoSelection) is left untouched.
+  for (const source of project.sources as any[]) {
+    if (source.sourceType !== 'video') continue
+    const lineTimes = source.formatData?.lineTimes
+    if (!lineTimes || Object.keys(lineTimes).length === 0) continue
+    const text = sourceContents[source.guid] ?? ''
+    for (const sel of (source.selections ?? []) as any[]) {
+      if (sel.timeRange) continue
+      if (typeof sel.startPosition !== 'number' || typeof sel.endPosition !== 'number') continue
+      if (!(sel.endPosition > sel.startPosition)) continue
+      if (sel.pdfRegion || sel.surveyCell) continue
+      const tr = deriveLineTimeRange(text, sel.startPosition, sel.endPosition, lineTimes)
+      if (tr) sel.timeRange = tr
+    }
+  }
 
   // ── Survey REFI reconciliation ──
   // The standards-native survey representation is <Variables>/<Cases>

@@ -165,7 +165,7 @@ function lineStartOffsets(text: string): number[] {
  *  text coding) AND a <VideoSelection> (the timeline coding) — a time range
  *  is therefore allowed here. Only PDF/image regions and survey cells, which
  *  have their own representations, are excluded. */
-function isTranscriptCoding(sel: TranscriptCodingInput): boolean {
+export function isTranscriptCoding(sel: TranscriptCodingInput): boolean {
   return (
     Array.isArray(sel.codings) && sel.codings.length > 0 &&
     typeof sel.startPosition === 'number' && typeof sel.endPosition === 'number' &&
@@ -223,26 +223,24 @@ export function buildTranscript(
     .map((sp) => ({ pos: sp.position ?? 0, time: sp.timeStamp! }))
     .sort((a, b) => a.pos - b.pos)
 
-  const transcriptSelections: RefiTranscriptSelection[] = codings.map((sel) => {
-    // A video coding (one with a timeRange) is also written as a twin
-    // <VideoSelection> that keeps sel.guid, so this <TranscriptSelection>
-    // must take a distinct, deterministically-derived guid or a conformant
-    // reader collapses the duplicate and drops the text coding. An audio
-    // coding has no twin, so it keeps its own guid (transcriptTwinGuidFor is
-    // an involution — deriving it here would oscillate the guid across saves).
-    const hasTwin = (sel as any).timeRange != null
-    return {
-      guid: hasTwin ? transcriptTwinGuidFor(sel.guid) : sel.guid,
-      name: sel.name,
-      fromSyncPoint: syncAt(sel.startPosition, interpolateTime(sel.startPosition, timedAnchors)).guid,
-      toSyncPoint: syncAt(sel.endPosition, interpolateTime(sel.endPosition, timedAnchors)).guid,
-      creatingUser: sel.creatingUser,
-      creationDateTime: sel.creationDateTime,
-      codings: hasTwin
-        ? sel.codings.map((c) => ({ ...c, guid: transcriptTwinGuidFor(c.guid) }))
-        : sel.codings
-    }
-  })
+  // A transcript-text coding is written ONLY as this <TranscriptSelection>
+  // (carrying its code) — NOT also as a twin <VideoSelection>. Emitting both
+  // makes Atlas merge the two same-code anchors into one quotation and keep
+  // the code only on the video anchor, stripping it from the transcript text
+  // so the text coding is lost on round-trip. Atlas's own transcript codings
+  // are text-only (a coded selection + SyncPoints for the time link), so we
+  // match that; the serializer skips the VideoSelection for these (see
+  // serializeVideoSelection) and the reader re-derives the timeline timeRange
+  // from line times on import. With no twin, the guid stays the coding's own.
+  const transcriptSelections: RefiTranscriptSelection[] = codings.map((sel) => ({
+    guid: sel.guid,
+    name: sel.name,
+    fromSyncPoint: syncAt(sel.startPosition, interpolateTime(sel.startPosition, timedAnchors)).guid,
+    toSyncPoint: syncAt(sel.endPosition, interpolateTime(sel.endPosition, timedAnchors)).guid,
+    creatingUser: sel.creatingUser,
+    creationDateTime: sel.creationDateTime,
+    codings: sel.codings
+  }))
 
   const syncPoints = [...byPos.values()].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
 

@@ -14,7 +14,7 @@ import {
   type RefiRespondentDoc
 } from './survey-refi'
 import { collectGraphs, type RefiGraph, type RefiVertex, type RefiEdge, type RefiLink } from './graph-refi'
-import type { RefiTranscript, RefiTranscriptSelection } from './transcript-refi'
+import { isTranscriptCoding, type RefiTranscript, type RefiTranscriptSelection } from './transcript-refi'
 
 // XML special-char escaping. Order matters: replace & first so the
 // subsequent replacements don't re-escape the ampersand we just emitted
@@ -176,9 +176,16 @@ function serializePictureSelection(sel: PlainTextSelection): any | null {
 }
 
 /** Serialize a single video time-range selection as REFI-QDA <VideoSelection>.
- *  begin/end are stored in milliseconds per the spec. */
+ *  begin/end are stored in milliseconds per the spec. Transcript-text codings
+ *  are NOT emitted here — they ride solely in their <TranscriptSelection> (see
+ *  buildTranscript). Emitting both a VideoSelection and a TranscriptSelection
+ *  for one coding makes Atlas merge them and drop the code from the transcript
+ *  text on round-trip; Atlas itself codes transcript text with no separate
+ *  VideoSelection (the SyncPoints carry the time link). So only a pure
+ *  timeline coding (no transcript-text anchor) becomes a <VideoSelection>. */
 function serializeVideoSelection(sel: PlainTextSelection): any | null {
   if (!sel.timeRange) return null
+  if (isTranscriptCoding(sel as any)) return null
   const obj: any = {
     '@_guid': sel.guid,
     '@_begin': Math.round(sel.timeRange.startTime * 1000).toString(),
