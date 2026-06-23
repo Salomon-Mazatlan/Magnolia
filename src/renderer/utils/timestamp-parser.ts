@@ -155,6 +155,94 @@ export function migrateInlineTimestamps(
   return { content: cleaned.join('\n'), lineTimes }
 }
 
+/** Parse a subtitle clock time to seconds (fractional preserved). Accepts
+ *  `HH:MM:SS.mmm`, `MM:SS.mmm`, SRT's comma decimal (`HH:MM:SS,mmm`), and a
+ *  non-standard / truncated fraction (e.g. noScribe's `00:00:10.01`) — the
+ *  fraction is read as a literal decimal, so `.01` → 0.01s. Returns null when
+ *  the string isn't a clock time. */
+function parseClockTime(s: string): number | null {
+  const m = s.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})(?:[.,](\d+))?$/)
+  if (!m) return null
+  const h = m[1] ? parseInt(m[1], 10) : 0
+  const min = parseInt(m[2], 10)
+  const sec = parseInt(m[3], 10)
+  const frac = m[4] ? parseInt(m[4], 10) / Math.pow(10, m[4].length) : 0
+  return h * 3600 + min * 60 + sec + frac
+}
+
+/** Strip WebVTT/SRT cue payload markup: voice/class/formatting tags
+ *  (`<v Speaker>`, `<c>`, `<i>`, inline `<00:00:01.000>` timestamps) and the
+ *  handful of HTML entities the formats use. */
+function stripCueMarkup(s: string): string {
+  return s
+    .replace(/<[^>]*>/g, '')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lrm;|&rlm;/g, '')
+    .trim()
+}
+
+/**
+ * Parse a WebVTT or SRT subtitle file into Magnolia's transcript model: clean
+ * text (one line per cue) plus a `lineTimes` map (line index → start seconds,
+ * fractional preserved). Returns null when the text isn't a subtitle file, so
+ * the caller can fall back to the inline-timestamp path.
+ *
+ * Handles real-world VTT (e.g. noScribe): a `WEBVTT <title>` header, `NOTE` /
+ * `STYLE` / `REGION` blocks, cue identifier lines, voice tags, multi-line cue
+ * payloads (joined into one line), and malformed millisecond fields.
+ *
+ * `notes` collects the text of any `NOTE` comment blocks (transcription tool,
+ * source media path, language settings, …) so the caller can preserve that
+ * provenance — e.g. as a document memo — instead of discarding it.
+ */
+export function parseSubtitleTranscript(
+  raw: string
+): { content: string; lineTimes: Record<string, number>; notes: string[] } | null {
+  const text = raw.replace(/^﻿/, '').replace(/\r\n?/g, '\n')
+  const firstLine = (text.split('\n').find((l) => l.trim() !== '') ?? '').trim()
+  const isVtt = /^WEBVTT(\s|$)/.test(firstLine)
+  const isSrt = /\d{1,2}:\d{2}:\d{2}[.,]\d+\s*-->\s*\d{1,2}:\d{2}:\d{2}/.test(text)
+  if (!isVtt && !isSrt) return null
+
+  // Cues are separated by one or more blank lines.
+  const blocks = text.split(/\n[ \t]*\n+/)
+  const lines: string[] = []
+  const lineTimes: Record<string, number> = {}
+  const notes: string[] = []
+  for (const block of blocks) {
+    const blockLines = block.split('\n')
+    const head = (blockLines.find((l) => l.trim() !== '') ?? '').trim()
+    if (head === '') continue
+    // Skip the file header and style/region blocks.
+    if (/^WEBVTT(\s|$)/.test(head)) continue
+    if (/^(STYLE|REGION)(\s|$)/.test(head)) continue
+    // Keep NOTE comment text (provenance) rather than discarding it.
+    if (/^NOTE(\s|$)/.test(head)) {
+      const note = block.replace(/^[ \t]*NOTE[ \t]?/, '').trim()
+      if (note) notes.push(note)
+      continue
+    }
+    // The timing line carries the cue's start/end; lines after it are payload.
+    const ti = blockLines.findIndex((l) => l.includes('-->'))
+    if (ti === -1) continue
+    const start = parseClockTime(blockLines[ti].split('-->')[0])
+    if (start == null) continue
+    const payload = blockLines
+      .slice(ti + 1)
+      .map(stripCueMarkup)
+      .filter((l) => l !== '')
+      .join(' ')
+    if (payload === '') continue
+    lineTimes[String(lines.length)] = start
+    lines.push(payload)
+  }
+  if (lines.length === 0) return null
+  return { content: lines.join('\n'), lineTimes, notes }
+}
+
 /**
  * Detect various timestamp formats in imported text and convert to canonical HH:MM:SS.
  * Handles SRT, VTT, and plain timestamp formats.

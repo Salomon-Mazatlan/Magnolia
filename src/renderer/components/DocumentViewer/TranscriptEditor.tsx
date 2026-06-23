@@ -17,7 +17,7 @@ import { useCodeStore } from '../../stores/code-store'
 import { useMemoStore } from '../../stores/memo-store'
 import { useQuoteStore } from '../../stores/quote-store'
 import { Icon, faPenLine } from '../Icon'
-import { detectAndConvertTimestamps, migrateInlineTimestamps, formatTimestamp } from '../../utils/timestamp-parser'
+import { detectAndConvertTimestamps, migrateInlineTimestamps, formatTimestamp, parseSubtitleTranscript } from '../../utils/timestamp-parser'
 import type { Code, Memo, MemoEditInitData, PlainTextSelection } from '../../models/types'
 import { useNewCodeTriggerStore } from '../../stores/new-code-trigger-store'
 import { exportPdfWithHeader, buildPdfDocument, escHtml } from '../../utils/pdf-export'
@@ -365,8 +365,26 @@ export function TranscriptEditor({
           onClick={async () => {
             const result = await window.api.importTranscript()
             if (!result) return
-            const converted = detectAndConvertTimestamps(result.content)
-            updateSourceContent(sourceGuid, converted)
+            // WebVTT / SRT parse straight to clean text + per-line times (ms
+            // precision, voice tags and NOTE/header blocks stripped). Other
+            // formats fall back to the inline-timestamp path, which the
+            // migrate-on-open effect turns into lineTimes.
+            const subtitle = parseSubtitleTranscript(result.content)
+            if (subtitle) {
+              updateSourceContent(sourceGuid, subtitle.content)
+              updateLineTimes(sourceGuid, subtitle.lineTimes)
+              // Keep the file's NOTE blocks (transcription tool, source media,
+              // language settings, …) as a document memo so the provenance
+              // isn't lost when the markup is stripped out.
+              if (subtitle.notes.length > 0) {
+                addMemo('document', 'Imported transcript notes', {
+                  content: subtitle.notes.join('\n\n'),
+                  sourceGuids: [sourceGuid]
+                })
+              }
+            } else {
+              updateSourceContent(sourceGuid, detectAndConvertTimestamps(result.content))
+            }
           }}
           title="Import a transcript file (.txt, .md, .srt, .vtt)"
         >
