@@ -237,14 +237,21 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   reattachSourceBinary: (guid, formatData, content) => {
     const now = new Date().toISOString()
     const userGuid = useProjectStore.getState().creatingUserGUID
-    set((state) => ({
-      sources: state.sources.map((s) =>
-        s.guid === guid
-          ? { ...s, formatData: formatData || undefined, modifyingUser: userGuid, modifiedDateTime: now }
-          : s
-      ),
-      sourceContents: { ...state.sourceContents, [guid]: content }
-    }))
+    set((state) => {
+      // Re-attaching audio/video media carries no text of its own, so never
+      // let an empty re-import wipe an existing transcript — keep the current
+      // content when the re-imported file brings none. (PDFs etc. bring their
+      // extracted text and legitimately replace it.)
+      const nextContent = content && content.length > 0 ? content : (state.sourceContents[guid] ?? '')
+      return {
+        sources: state.sources.map((s) =>
+          s.guid === guid
+            ? { ...s, formatData: formatData || undefined, modifyingUser: userGuid, modifiedDateTime: now }
+            : s
+        ),
+        sourceContents: { ...state.sourceContents, [guid]: nextContent }
+      }
+    })
     useProjectStore.getState().markDirty()
   },
 

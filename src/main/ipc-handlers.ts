@@ -408,8 +408,11 @@ export function registerIpcHandlers(): void {
     const extsFor = (t: string): string[] => {
       if (t === 'pdf') return ['pdf', 'docx', 'rtf', 'odt']
       if (t === 'image') return [...IMAGE_EXTENSIONS, ...DECODED_IMAGE_EXTENSIONS]
-      if (t === 'audio') return [...AUDIO_EXTENSIONS]
-      if (t === 'video') return [...VIDEO_EXTENSIONS]
+      // Audio and video share container formats (e.g. Atlas references media
+      // as .m4a even for video), so accept any media file for either — the
+      // user is re-attaching the same media regardless of how the source was
+      // typed. Otherwise a video stored as .m4a (or vice-versa) gets greyed.
+      if (t === 'audio' || t === 'video') return [...new Set([...AUDIO_EXTENSIONS, ...VIDEO_EXTENSIONS])]
       return SUPPORTED_EXTENSIONS
     }
     const result = await dialog.showOpenDialog({
