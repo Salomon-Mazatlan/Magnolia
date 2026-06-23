@@ -774,6 +774,13 @@ export function serializeProject(project: Project): string {
     p.Graphs = { Graph: graphBundle.graphs.map(serializeGraph) }
   }
 
+  // Project-level <Description> — free-text (markdown) describing the whole
+  // project. Last in the ProjectType sequence we emit (…Graphs, Description,
+  // NoteRef); object-key insertion order is what fast-xml-parser emits.
+  if (project.description) {
+    p.Description = project.description
+  }
+
   return uppercaseGuids(builder.build(proj))
 }
 

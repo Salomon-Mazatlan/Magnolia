@@ -43,6 +43,7 @@ function comprehensiveProject(): Project {
   return {
     name: 'Comprehensive Test Project',
     origin: 'Magnolia test',
+    description: 'A **markdown** project description with <special> & "chars".',
     creatingUserGUID: U,
     creationDateTime: DT,
     users: [{ guid: U, name: 'Tester', id: 'u1' }],
@@ -244,6 +245,8 @@ describe('REFI-QDA Project.xsd compliance', () => {
     const restored = deserializeProject(serializeProject(original))
 
     expect(restored.name).toBe(original.name)
+    // Project <Description> (markdown, with special chars) round-trips.
+    expect(restored.description).toBe(original.description)
     expect(restored.codes).toHaveLength(1)
     expect(restored.codes[0].children).toHaveLength(1)
     expect(restored.sources).toHaveLength(original.sources.length)

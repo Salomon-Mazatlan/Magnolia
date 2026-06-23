@@ -12,6 +12,8 @@ function deriveNameFromPath(filePath: string): string {
 interface ProjectState {
   name: string
   origin: string
+  /** Free-text project description (markdown). */
+  description?: string
   users: User[]
   creatingUserGUID?: string
   creationDateTime?: string
@@ -25,6 +27,7 @@ interface ProjectState {
   loadProject: (data: {
     name: string
     origin: string
+    description?: string
     users: User[]
     creatingUserGUID?: string
     creationDateTime?: string
@@ -37,6 +40,7 @@ interface ProjectState {
   markDirty: () => void
   markClean: () => void
   setName: (name: string) => void
+  setDescription: (description: string) => void
   setSavedAnalyses: (analyses: SavedAnalysis[]) => void
 }
 
@@ -45,6 +49,7 @@ const defaultUserGuid = generateGuid()
 export const useProjectStore = create<ProjectState>((set) => ({
   name: 'Untitled Project',
   origin: `Magnolia ${__APP_VERSION__}`,
+  description: undefined,
   users: [{ guid: defaultUserGuid, name: 'User' }],
   creatingUserGUID: defaultUserGuid,
   creationDateTime: new Date().toISOString(),
@@ -57,6 +62,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set({
       name: 'Untitled Project',
       origin: `Magnolia ${__APP_VERSION__}`,
+      description: undefined,
       users: [{ guid: userGuid, name: 'User' }],
       creatingUserGUID: userGuid,
       creationDateTime: new Date().toISOString(),
@@ -72,6 +78,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
     set({
       name: data.name && data.name.trim() ? data.name : (data.filePath ? deriveNameFromPath(data.filePath) : 'Untitled Project'),
       origin: data.origin,
+      description: data.description,
       users: data.users,
       creatingUserGUID: data.creatingUserGUID,
       creationDateTime: data.creationDateTime,
@@ -90,6 +97,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
   markDirty: () => set({ isDirty: true }),
   markClean: () => set({ isDirty: false }),
   setName: (name) => set({ name, isDirty: true }),
+  setDescription: (description) => set({ description, isDirty: true }),
   setSavedAnalyses: (analyses) => set({ savedAnalyses: analyses, isDirty: true })
 }))
 

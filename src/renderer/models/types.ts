@@ -10,6 +10,9 @@ export interface DocumentFolder {
 export interface Project {
   name: string
   origin: string
+  /** Free-text project description (markdown). Maps to the REFI-QDA
+   *  Project/<Description> element; edited in the Project Details dialog. */
+  description?: string
   creatingUserGUID?: string
   creationDateTime?: string
   modifyingUserGUID?: string

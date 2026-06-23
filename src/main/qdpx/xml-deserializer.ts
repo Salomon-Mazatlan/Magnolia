@@ -549,6 +549,8 @@ export function deserializeProject(xml: string): Project {
   return {
     name: proj['@_name'] ?? 'Untitled',
     origin: proj['@_origin'] ?? '',
+    // Coerce in case the parser turned an all-numeric description into a number.
+    ...(proj.Description != null ? { description: String(proj.Description) } : {}),
     creatingUserGUID: normalizeGuid(proj['@_creatingUserGUID']),
     creationDateTime: proj['@_creationDateTime'],
     modifyingUserGUID: normalizeGuid(proj['@_modifyingUserGUID']),

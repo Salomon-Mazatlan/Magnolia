@@ -491,6 +491,7 @@ function App() {
     return {
       name: projectStore.name,
       origin: projectStore.origin,
+      description: projectStore.description,
       creatingUserGUID: projectStore.creatingUserGUID,
       creationDateTime: projectStore.creationDateTime,
       modifyingUserGUID: projectStore.modifyingUserGUID,
@@ -680,6 +681,7 @@ function App() {
             projectStore.loadProject({
               name: project.name,
               origin: project.origin,
+              description: project.description,
               users: project.users,
               creatingUserGUID: project.creatingUserGUID,
               creationDateTime: project.creationDateTime,
@@ -1602,6 +1604,7 @@ function App() {
               useProjectStore.getState().loadProject({
                 name: project.name,
                 origin: project.origin,
+                description: project.description,
                 users: project.users,
                 creatingUserGUID: project.creatingUserGUID,
                 creationDateTime: project.creationDateTime,

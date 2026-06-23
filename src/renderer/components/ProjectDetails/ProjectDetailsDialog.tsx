@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useProjectStore } from '../../stores/project-store'
 import { useDocumentStore } from '../../stores/document-store'
 import { useCodeStore } from '../../stores/code-store'
+import { MarkdownEditor } from '../MarkdownEditor'
 
 interface Props {
   open: boolean
@@ -19,17 +20,23 @@ function formatBytes(n: number): string {
 
 export function ProjectDetailsDialog({ open, onClose }: Props) {
   const name = useProjectStore((s) => s.name)
+  const description = useProjectStore((s) => s.description)
   const filePath = useProjectStore((s) => s.filePath)
   const setName = useProjectStore((s) => s.setName)
+  const setDescription = useProjectStore((s) => s.setDescription)
   const docCount = useDocumentStore((s) => s.sources.length)
   const codeCount = useCodeStore((s) => s.flatCodes().length)
 
   const [draftName, setDraftName] = useState(name)
+  const [draftDescription, setDraftDescription] = useState(description ?? '')
   const [fileSize, setFileSize] = useState<number | null>(null)
 
   useEffect(() => {
-    if (open) setDraftName(name)
-  }, [open, name])
+    if (open) {
+      setDraftName(name)
+      setDraftDescription(description ?? '')
+    }
+  }, [open, name, description])
 
   useEffect(() => {
     if (!open || !filePath) {
@@ -44,6 +51,7 @@ export function ProjectDetailsDialog({ open, onClose }: Props) {
   const commit = (): void => {
     const trimmed = draftName.trim()
     if (trimmed && trimmed !== name) setName(trimmed)
+    if (draftDescription !== (description ?? '')) setDescription(draftDescription)
     onClose()
   }
 
@@ -71,6 +79,22 @@ export function ProjectDetailsDialog({ open, onClose }: Props) {
           autoFocus
           style={{ width: '100%', marginBottom: 16 }}
         />
+
+        <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+          Description
+        </label>
+        <div
+          style={{
+            border: '1px solid var(--border-color)',
+            borderRadius: 6,
+            padding: '8px 10px',
+            marginBottom: 16,
+            maxHeight: 200,
+            overflow: 'auto'
+          }}
+        >
+          <MarkdownEditor value={draftDescription} onChange={setDraftDescription} />
+        </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', fontSize: 13, marginBottom: 20 }}>
           <span style={{ color: 'var(--text-secondary)' }}>File:</span>
