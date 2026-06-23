@@ -119,6 +119,29 @@ export function deriveLineAnchorsFromTimeRange(
  * Adjusting the selection within a single line leaves the time range
  * unchanged; extending it onto another line moves the in/out.
  */
+/** Codepoint offset of each transcript line start, plus a trailing total —
+ *  line i spans [offsets[i], offsets[i+1]). */
+export function lineStartOffsets(text: string): number[] {
+  const offsets: number[] = []
+  let cp = 0
+  for (const line of (text || '').split('\n')) {
+    offsets.push(cp)
+    cp += [...line].length + 1
+  }
+  offsets.push(cp)
+  return offsets
+}
+
+/** The transcript line a character offset falls on, given line offsets. */
+export function lineForChar(offsets: number[], pos: number): number {
+  let ln = 0
+  for (let i = 0; i < offsets.length - 1; i++) {
+    if (pos >= offsets[i]) ln = i
+    else break
+  }
+  return ln
+}
+
 export function deriveVideoTimeRange(
   text: string,
   startCp: number,
@@ -126,24 +149,9 @@ export function deriveVideoTimeRange(
   lineTimes: Record<string, number> | undefined
 ): { startTime: number; endTime: number } | undefined {
   if (!lineTimes || Object.keys(lineTimes).length === 0) return undefined
-  // Codepoint offset of each line start (+ trailing total).
-  const offsets: number[] = []
-  let cp = 0
-  for (const line of text.split('\n')) {
-    offsets.push(cp)
-    cp += [...line].length + 1
-  }
-  offsets.push(cp)
-  const lineOf = (pos: number): number => {
-    let ln = 0
-    for (let i = 0; i < offsets.length - 1; i++) {
-      if (pos >= offsets[i]) ln = i
-      else break
-    }
-    return ln
-  }
-  const startLine = lineOf(startCp)
-  const endLine = lineOf(Math.max(endCp - 1, startCp))
+  const offsets = lineStartOffsets(text)
+  const startLine = lineForChar(offsets, startCp)
+  const endLine = lineForChar(offsets, Math.max(endCp - 1, startCp))
   const at = (line: number): number | undefined => {
     const v = lineTimes[String(line)]
     return typeof v === 'number' ? v : undefined

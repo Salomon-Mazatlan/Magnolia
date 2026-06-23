@@ -4,7 +4,7 @@ import { generateGuid } from '../utils/guid'
 import { useProjectStore } from './project-store'
 import { useMemoStore } from './memo-store'
 import { useQuoteStore } from './quote-store'
-import { deriveLineAnchorsFromTimeRange, deriveVideoTimeRange } from '../components/DocumentViewer/video-time-utils'
+import { deriveLineAnchorsFromTimeRange, deriveVideoTimeRange, lineStartOffsets, lineForChar } from '../components/DocumentViewer/video-time-utils'
 import { isToolTab } from '../utils/tab-ids'
 import { makeHmrSafe } from './hmr-preserve'
 
@@ -507,22 +507,47 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   updateSelectionTimeRange: (sourceGuid, selectionGuid, range, options) => {
     const preserveAnchor = options?.preserveAnchor === true
-    set((state) => ({
-      sources: state.sources.map((s) =>
-        s.guid === sourceGuid
-          ? {
-              ...s,
-              selections: s.selections.map((sel) =>
-                sel.guid === selectionGuid
-                  ? preserveAnchor
-                    ? { ...sel, timeRange: range }
-                    : { ...sel, timeRange: range, manuallyAnchored: false }
-                  : sel
-              )
-            }
-          : s
-      )
-    }))
+    set((state) => {
+      const source = state.sources.find((s) => s.guid === sourceGuid)
+      const text = state.sourceContents[sourceGuid] ?? ''
+      const lineTimes = source?.formatData?.lineTimes as Record<string, number> | undefined
+      // Time → text coupling: when a video coding's time range is dragged on
+      // the CodeTrack, the coded text follows it onto the lines the new range
+      // covers. Sub-line precision is kept while the in/out stays on the same
+      // line; crossing onto another line snaps that end to the line boundary.
+      const offsets = lineStartOffsets(text)
+      const span = !preserveAnchor && lineTimes && offsets.length > 1
+        ? deriveLineAnchorsFromTimeRange(range.startTime, range.endTime, lineTimes)
+        : null
+      return {
+        sources: state.sources.map((s) =>
+          s.guid === sourceGuid
+            ? {
+                ...s,
+                selections: s.selections.map((sel) => {
+                  if (sel.guid !== selectionGuid) return sel
+                  const next: any = { ...sel, timeRange: range }
+                  if (!preserveAnchor) next.manuallyAnchored = false
+                  if (span) {
+                    const curStart = sel.startPosition ?? 0
+                    const curEnd = sel.endPosition ?? curStart
+                    if (lineForChar(offsets, curStart) !== span.startLine) {
+                      next.startPosition = offsets[span.startLine] ?? 0
+                    }
+                    if (lineForChar(offsets, Math.max(curEnd - 1, curStart)) !== span.endLine) {
+                      next.endPosition = Math.max(
+                        (offsets[span.endLine + 1] ?? offsets[offsets.length - 1] ?? 0) - 1,
+                        next.startPosition ?? curStart
+                      )
+                    }
+                  }
+                  return next
+                })
+              }
+            : s
+        )
+      }
+    })
     useProjectStore.getState().markDirty()
   },
 
