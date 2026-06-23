@@ -4,6 +4,7 @@ import { randomUUID } from 'crypto'
 import { deserializeProject } from './xml-deserializer'
 import type { RawPdfSelection, RawPictureSelection, RawVideoSelection, RawNote, RawNoteAnchor } from './xml-deserializer'
 import { refiToSurvey, type RefiVariable, type RefiCase } from './survey-refi'
+import { graphToMap, type RefiGraph } from './graph-refi'
 import type { Project, PlainTextSelection, Memo } from '../../renderer/models/types'
 import { extractPdfTextWithPositions, type PdfTextItem } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
@@ -574,6 +575,21 @@ export async function readQdpx(
     }
   }
 
+  // Reconstruct relationship maps from REFI-QDA <Graphs> for files that
+  // arrive without (or whose round-trip dropped) magnolia-analyses.json.
+  // Magnolia's own files carry full-fidelity maps in that side-table, so
+  // we only adopt a <Graph> when no saved analysis already has its guid —
+  // otherwise the rich side-table map wins and the lossy graphToMap()
+  // fallback is skipped. Mirrors the memo Notes / survey Cases pattern.
+  const refiGraphs = (project as any)._refiGraphs as RefiGraph[] | undefined
+  if (refiGraphs && refiGraphs.length > 0) {
+    const existing = new Set((project.savedAnalyses ?? []).map((a) => a.guid))
+    const rebuilt = refiGraphs.filter((g) => !existing.has(g.guid)).map(graphToMap)
+    if (rebuilt.length > 0) {
+      project.savedAnalyses = [...(project.savedAnalyses ?? []), ...rebuilt]
+    }
+  }
+
   // Load Document Viewer tab state (app-specific JSON)
   const tabsFile = zip.file('magnolia-tabs.json')
   if (tabsFile) {
@@ -847,10 +863,11 @@ export async function readQdpx(
     .map((s) => ({ guid: s.guid, name: s.name, sourceType: s.sourceType }))
 
   // Drop the transient REFI fields so they don't leak into renderer state.
-  const { _refiVariables, _refiCases, _refiNotes, _refiNoteAnchors, ...cleanProject } = project as any
+  const { _refiVariables, _refiCases, _refiNotes, _refiNoteAnchors, _refiGraphs, ...cleanProject } = project as any
   void _refiVariables
   void _refiCases
   void _refiNotes
   void _refiNoteAnchors
+  void _refiGraphs
   return { ...cleanProject, sourceContents, missingBinaries }
 }

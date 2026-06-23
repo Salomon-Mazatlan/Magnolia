@@ -9,6 +9,7 @@ import type {
   QDASet
 } from '../../renderer/models/types'
 import type { RefiVariable, RefiCase, RefiVariableValue, RefiVariableType } from './survey-refi'
+import type { RefiGraph, RefiVertex, RefiEdge, RefiEdgeDirection, RefiLineStyle } from './graph-refi'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -20,7 +21,8 @@ const parser = new XMLParser({
       'AudioSource', 'VideoSource', 'PlainTextSelection', 'PDFSelection',
       'PictureSelection', 'VideoSelection',
       'Coding', 'CodeRef', 'NoteRef', 'Set', 'MemberSource', 'MemberCode',
-      'Note', 'Link', 'VariableValue', 'Variable', 'Case', 'SourceRef'
+      'Note', 'Link', 'VariableValue', 'Variable', 'Case', 'SourceRef',
+      'Graph', 'Vertex', 'Edge'
     ].includes(name)
   }
 })
@@ -359,6 +361,45 @@ function parseCase(xmlCase: any): RefiCase {
   }
 }
 
+function parseVertex(xmlV: any): RefiVertex {
+  const num = (v: any): number | undefined => {
+    const n = parseFloat(v)
+    return Number.isFinite(n) ? n : undefined
+  }
+  return {
+    guid: normalizeGuid(xmlV['@_guid']),
+    representedGuid: xmlV['@_representedGUID'] ? normalizeGuid(xmlV['@_representedGUID']) : undefined,
+    name: xmlV['@_name'],
+    firstX: num(xmlV['@_firstX']) ?? 0,
+    firstY: num(xmlV['@_firstY']) ?? 0,
+    secondX: num(xmlV['@_secondX']),
+    secondY: num(xmlV['@_secondY']),
+    shape: xmlV['@_shape'],
+    color: xmlV['@_color']
+  }
+}
+
+function parseEdge(xmlE: any): RefiEdge {
+  return {
+    guid: normalizeGuid(xmlE['@_guid']),
+    name: xmlE['@_name'],
+    sourceVertex: normalizeGuid(xmlE['@_sourceVertex']),
+    targetVertex: normalizeGuid(xmlE['@_targetVertex']),
+    color: xmlE['@_color'],
+    direction: xmlE['@_direction'] as RefiEdgeDirection | undefined,
+    lineStyle: xmlE['@_lineStyle'] as RefiLineStyle | undefined
+  }
+}
+
+function parseGraph(xmlG: any): RefiGraph {
+  return {
+    guid: normalizeGuid(xmlG['@_guid']),
+    name: xmlG['@_name'],
+    vertices: ensureArray(xmlG.Vertex).map(parseVertex),
+    edges: ensureArray(xmlG.Edge).map(parseEdge)
+  }
+}
+
 export function deserializeProject(xml: string): Project {
   const parsed = parser.parse(xml)
   const proj = parsed.Project
@@ -397,6 +438,11 @@ export function deserializeProject(xml: string): Project {
   // reconstructing surveys that arrived without Magnolia's side-table.
   const refiVariables: RefiVariable[] = ensureArray(proj.Variables?.Variable).map(parseVariable)
   const refiCases: RefiCase[] = ensureArray(proj.Cases?.Case).map(parseCase)
+
+  // REFI-QDA <Graphs> (relationship maps). Transient: reader.ts turns these
+  // into relationship-map saved analyses when the file has no
+  // magnolia-analyses.json side table (i.e. it came from another tool).
+  const refiGraphs: RefiGraph[] = ensureArray(proj.Graphs?.Graph).map(parseGraph)
 
   // REFI-QDA project-level <Note>s (memos). Transient: reader.ts loads each
   // note's text from its plainTextPath and builds Magnolia memos when the
@@ -453,6 +499,7 @@ export function deserializeProject(xml: string): Project {
     ...(refiVariables.length > 0 ? { _refiVariables: refiVariables } : {}),
     ...(refiCases.length > 0 ? { _refiCases: refiCases } : {}),
     ...(refiNotes.length > 0 ? { _refiNotes: refiNotes } : {}),
-    ...(Object.keys(refiNoteAnchors).length > 0 ? { _refiNoteAnchors: refiNoteAnchors } : {})
+    ...(Object.keys(refiNoteAnchors).length > 0 ? { _refiNoteAnchors: refiNoteAnchors } : {}),
+    ...(refiGraphs.length > 0 ? { _refiGraphs: refiGraphs } : {})
   } as Project
 }

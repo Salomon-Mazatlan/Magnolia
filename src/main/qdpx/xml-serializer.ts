@@ -13,6 +13,7 @@ import {
   type RefiCase,
   type RefiRespondentDoc
 } from './survey-refi'
+import { collectGraphs, type RefiGraph, type RefiVertex, type RefiEdge } from './graph-refi'
 
 // XML special-char escaping. Order matters: replace & first so the
 // subsequent replacements don't re-escape the ampersand we just emitted
@@ -407,6 +408,48 @@ function collectSurveyRefi(
   return { variables, cases, respondentDocs, respondentDocGuid }
 }
 
+/** Serialize one REFI-QDA <Vertex>. firstX/firstY are required xs:integer,
+ *  so all coordinates are rounded to whole pixels. */
+function serializeVertex(v: RefiVertex): any {
+  const obj: any = {
+    '@_guid': v.guid,
+    '@_firstX': Math.round(v.firstX).toString(),
+    '@_firstY': Math.round(v.firstY).toString()
+  }
+  if (v.representedGuid) obj['@_representedGUID'] = v.representedGuid
+  if (v.name) obj['@_name'] = v.name
+  if (v.secondX != null) obj['@_secondX'] = Math.round(v.secondX).toString()
+  if (v.secondY != null) obj['@_secondY'] = Math.round(v.secondY).toString()
+  if (v.shape) obj['@_shape'] = v.shape
+  if (v.color) obj['@_color'] = v.color
+  return obj
+}
+
+/** Serialize one REFI-QDA <Edge>. */
+function serializeEdge(e: RefiEdge): any {
+  const obj: any = {
+    '@_guid': e.guid,
+    '@_sourceVertex': e.sourceVertex,
+    '@_targetVertex': e.targetVertex
+  }
+  if (e.name) obj['@_name'] = e.name
+  if (e.color) obj['@_color'] = e.color
+  if (e.direction) obj['@_direction'] = e.direction
+  if (e.lineStyle) obj['@_lineStyle'] = e.lineStyle
+  return obj
+}
+
+/** Serialize one REFI-QDA <Graph>. GraphType's child sequence is fixed:
+ *  Vertex*, Edge* — Vertex MUST be assigned before Edge (fast-xml-parser
+ *  emits in object-key insertion order). */
+function serializeGraph(g: RefiGraph): any {
+  const obj: any = { '@_guid': g.guid }
+  if (g.name) obj['@_name'] = g.name
+  if (g.vertices.length > 0) obj.Vertex = g.vertices.map(serializeVertex)
+  if (g.edges.length > 0) obj.Edge = g.edges.map(serializeEdge)
+  return obj
+}
+
 export function serializeProject(project: Project): string {
   const proj: any = {
     '?xml': { '@_version': '1.0', '@_encoding': 'utf-8', '@_standalone': 'yes' },
@@ -578,6 +621,18 @@ export function serializeProject(project: Project): string {
     }
   }
 
+  // Graphs (relationship maps) — emitted from the project's relationship-map
+  // saved analyses so the maps survive a round-trip through other tools.
+  // Must sit AFTER <Sets> in the QDA-XML 1.0 element sequence (Users,
+  // CodeBook, Variables, Cases, Sources, Notes, Links, Sets, Graphs, …);
+  // object-key insertion order is what fast-xml-parser emits. The rich
+  // Magnolia node kinds / pan / zoom keep round-tripping in full via
+  // magnolia-analyses.json — this is the interop-portable view.
+  const graphs = collectGraphs(project.savedAnalyses)
+  if (graphs.length > 0) {
+    p.Graphs = { Graph: graphs.map(serializeGraph) }
+  }
+
   return uppercaseGuids(builder.build(proj))
 }
 
@@ -588,11 +643,12 @@ export function serializeProject(project: Project): string {
  *  before it reaches the XML, this guarantees the on-disk format still
  *  satisfies the QDA-XML 1.0 schema (Atlas.ti / MAXQDA reject lowercase
  *  GUIDs as schema-invalid). Targets attributes named guid, targetGUID,
- *  creatingUser(GUID), modifyingUser(GUID). */
+ *  creatingUser(GUID), modifyingUser(GUID), and the graph references
+ *  representedGUID / sourceVertex / targetVertex. */
 function uppercaseGuids(xml: string): string {
   const guidPattern = /\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b/g
   return xml.replace(
-    /\b(guid|targetGUID|creatingUser(?:GUID)?|modifyingUser(?:GUID)?)="([^"]+)"/g,
+    /\b(guid|targetGUID|representedGUID|sourceVertex|targetVertex|creatingUser(?:GUID)?|modifyingUser(?:GUID)?)="([^"]+)"/g,
     (_m, attr, val) => {
       const upped = val.replace(guidPattern, (g: string) => g.toUpperCase())
       return `${attr}="${upped}"`
