@@ -108,3 +108,49 @@ export function deriveLineAnchorsFromTimeRange(
   return { startLine: 0, endLine: 0 }
 }
 
+/**
+ * Forward of the above: derive a video coding's time range from the
+ * CHARACTER span it covers in the transcript. A video transcript coding is
+ * character-precise but also projects onto the CodeTrack — its in/out times
+ * come from the line times of the first and last lines its text spans
+ * (line-granular timing). Returns undefined when there are no line times
+ * (the coding still highlights its text; it just isn't on the timeline).
+ *
+ * Adjusting the selection within a single line leaves the time range
+ * unchanged; extending it onto another line moves the in/out.
+ */
+export function deriveVideoTimeRange(
+  text: string,
+  startCp: number,
+  endCp: number,
+  lineTimes: Record<string, number> | undefined
+): { startTime: number; endTime: number } | undefined {
+  if (!lineTimes || Object.keys(lineTimes).length === 0) return undefined
+  // Codepoint offset of each line start (+ trailing total).
+  const offsets: number[] = []
+  let cp = 0
+  for (const line of text.split('\n')) {
+    offsets.push(cp)
+    cp += [...line].length + 1
+  }
+  offsets.push(cp)
+  const lineOf = (pos: number): number => {
+    let ln = 0
+    for (let i = 0; i < offsets.length - 1; i++) {
+      if (pos >= offsets[i]) ln = i
+      else break
+    }
+    return ln
+  }
+  const startLine = lineOf(startCp)
+  const endLine = lineOf(Math.max(endCp - 1, startCp))
+  const at = (line: number): number | undefined => {
+    const v = lineTimes[String(line)]
+    return typeof v === 'number' ? v : undefined
+  }
+  const startTime = at(startLine)
+  if (startTime == null) return undefined
+  const endTime = at(endLine + 1) ?? at(endLine) ?? startTime
+  return { startTime, endTime: Math.max(endTime, startTime) }
+}
+

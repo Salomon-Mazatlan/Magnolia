@@ -4,7 +4,7 @@ import { generateGuid } from '../utils/guid'
 import { useProjectStore } from './project-store'
 import { useMemoStore } from './memo-store'
 import { useQuoteStore } from './quote-store'
-import { deriveLineAnchorsFromTimeRange } from '../components/DocumentViewer/video-time-utils'
+import { deriveLineAnchorsFromTimeRange, deriveVideoTimeRange } from '../components/DocumentViewer/video-time-utils'
 import { isToolTab } from '../utils/tab-ids'
 import { makeHmrSafe } from './hmr-preserve'
 
@@ -394,13 +394,28 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       creationDateTime: now,
       codings: []
     }
-    set((state) => ({
-      sources: state.sources.map((s) =>
-        s.guid === sourceGuid
-          ? { ...s, selections: [...s.selections, selection] }
-          : s
-      )
-    }))
+    set((state) => {
+      // Video transcript codings are character-precise but also project onto
+      // the CodeTrack timeline: derive a time range from the transcript lines
+      // the selected text spans (line-granular timing — adjusting the text
+      // within a line leaves the time range; crossing onto another line
+      // moves it). Audio/text/pdf codings carry no time range.
+      const source = state.sources.find((s) => s.guid === sourceGuid)
+      if (source?.sourceType === 'video' && !pdfRegion && !surveyCell) {
+        const tr = deriveVideoTimeRange(
+          state.sourceContents[sourceGuid] ?? '',
+          startPosition,
+          endPosition,
+          source.formatData?.lineTimes
+        )
+        if (tr) selection.timeRange = tr
+      }
+      return {
+        sources: state.sources.map((s) =>
+          s.guid === sourceGuid ? { ...s, selections: [...s.selections, selection] } : s
+        )
+      }
+    })
     useProjectStore.getState().markDirty()
     return selGuid
   },
