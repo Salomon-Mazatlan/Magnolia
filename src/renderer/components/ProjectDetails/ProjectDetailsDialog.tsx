@@ -62,7 +62,7 @@ export function ProjectDetailsDialog({ open, onClose }: Props) {
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 420 }}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 480, maxWidth: '90vw' }}>
         <h2 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 600 }}>Project Details</h2>
 
         <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
@@ -83,18 +83,14 @@ export function ProjectDetailsDialog({ open, onClose }: Props) {
         <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
           Description
         </label>
-        <div
-          style={{
-            border: '1px solid var(--border-color)',
-            borderRadius: 6,
-            padding: '8px 10px',
-            marginBottom: 16,
-            maxHeight: 200,
-            overflow: 'auto'
-          }}
-        >
-          <MarkdownEditor value={draftDescription} onChange={setDraftDescription} />
-        </div>
+        {/* The editor carries its own border/background; constrain it to the
+            dialog width and give it a fixed max height with internal scroll
+            so a long description never grows the dialog. */}
+        <MarkdownEditor
+          value={draftDescription}
+          onChange={setDraftDescription}
+          style={{ width: '100%', maxHeight: 200, overflowY: 'auto', marginBottom: 16 }}
+        />
 
         <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', fontSize: 13, marginBottom: 20 }}>
           <span style={{ color: 'var(--text-secondary)' }}>File:</span>
