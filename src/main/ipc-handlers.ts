@@ -157,9 +157,12 @@ export function registerIpcHandlers(): void {
         }
         throw e
       }
-      // The archive is now the live source path and holds every binary; the
-      // renderer keeps it active via set-active-project-path on load/save.
-      setActiveProjectPath(filePath)
+      // The archive is now the live source path and holds every binary. Use
+      // note (not set) so we DON'T clear the import overlay: writeQdpx just
+      // recorded token→guid mappings for the binaries it embedded, and a
+      // freshly-imported binary's still-overlay handle must keep resolving
+      // (from this archive) until the renderer promotes it to an archive handle.
+      noteActiveProjectPath(filePath)
       return filePath
     }
   )
@@ -205,8 +208,10 @@ export function registerIpcHandlers(): void {
       }
       throw e
     }
-    // The new file is now the live archive holding every binary.
-    setActiveProjectPath(result.filePath)
+    // The new file is now the live archive holding every binary. Note (not
+    // set) so the just-recorded token→guid mappings for embedded imports
+    // survive until the renderer promotes those handles to archive handles.
+    noteActiveProjectPath(result.filePath)
     return result.filePath
   })
 

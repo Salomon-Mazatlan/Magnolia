@@ -6,6 +6,7 @@ import { useMemoStore } from './memo-store'
 import { useQuoteStore } from './quote-store'
 import { deriveLineAnchorsFromTimeRange, deriveVideoTimeRange, lineStartOffsets, lineForChar } from '../components/DocumentViewer/video-time-utils'
 import { isToolTab } from '../utils/tab-ids'
+import { promotedArchiveHandle, mediaPathField } from '../utils/binary-handles'
 import { makeHmrSafe } from './hmr-preserve'
 
 // Re-export so callers that already imported from this store don't break.
@@ -151,6 +152,11 @@ interface DocumentState {
   moveFolderToFolder: (folderGuid: string, newParentGuid: string | null) => void
   updateSourceContent: (guid: string, content: string) => void
   updateSourceFormatData: (guid: string, formatData: any) => void
+  /** After a save embeds freshly-imported binaries into the .qdpx, swap each
+   *  source's transient `overlay://` media handle for the durable
+   *  `archive://<guid>.<ext>` handle. Idempotent; does not mark the project
+   *  dirty (it's a handle-representation change, the saved file is unchanged). */
+  promoteImportedBinariesToArchive: () => void
   /** Open a source in the viewer and pulse a coded range. Consumed by
    *  saved-pane clicks / query-result jumps to spotlight a selection. */
   viewDocumentAt: (
@@ -790,6 +796,22 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       )
     }))
     useProjectStore.getState().markDirty()
+  },
+
+  promoteImportedBinariesToArchive: () => {
+    set((state) => {
+      let changed = false
+      const sources = state.sources.map((s) => {
+        const archiveHandle = promotedArchiveHandle(s)
+        if (!archiveHandle) return s
+        changed = true
+        const field = mediaPathField((s as any).sourceType)!
+        return { ...s, formatData: { ...(s as any).formatData, [field]: archiveHandle } }
+      })
+      return changed ? { sources } : {}
+    })
+    // Deliberately no markDirty: the binary is already on disk; we've only
+    // upgraded the in-memory handle that points at it.
   },
 
   clearAll: () =>

@@ -795,6 +795,10 @@ function App() {
     if (typeof result === 'string') {
       projectStore.setFilePath(result)
       projectStore.markClean()
+      // Freshly-imported binaries are now embedded in the .qdpx: graduate their
+      // transient overlay handles to durable archive handles so playback no
+      // longer depends on the in-memory import overlay surviving.
+      documentStore.promoteImportedBinariesToArchive()
       window.api.trackRecentProject(projectStore.name, result)
     }
   }, [collectProject, documentStore, projectStore, isProjectPayloadEmpty])
@@ -813,6 +817,7 @@ function App() {
     if (typeof result === 'string') {
       projectStore.setFilePath(result)
       projectStore.markClean()
+      documentStore.promoteImportedBinariesToArchive()
       window.api.trackRecentProject(projectStore.name, result)
     }
   }, [collectProject, documentStore, projectStore])

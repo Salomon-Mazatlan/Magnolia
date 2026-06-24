@@ -37,10 +37,19 @@ const overlay = new Map<string, { buffer: Buffer; ext: string }>()
 const tokenToGuid = new Map<string, string>()
 
 export function setActiveProjectPath(filePath: string | null): void {
-  // Switching projects invalidates any not-yet-saved imports from the old
-  // one — they belonged to a different archive.
-  if (filePath !== activeProjectPath) clearOverlay()
-  activeProjectPath = filePath || null
+  const next = filePath || null
+  // Only a switch to a DIFFERENT real project invalidates the import overlay —
+  // those imports belonged to the previous archive. A null (project closing /
+  // loading / unknown) is NOT a switch, so it must never drop a live overlay;
+  // and re-asserting the SAME path (e.g. the renderer's path effect re-firing
+  // after a save) must preserve the token→guid mappings that save recorded, or
+  // a freshly-imported binary's handle stops resolving until reload.
+  if (next && next !== activeProjectPath) {
+    clearOverlay()
+    activeProjectPath = next
+  } else if (next) {
+    activeProjectPath = next
+  }
 }
 
 export function getActiveProjectPath(): string | null {

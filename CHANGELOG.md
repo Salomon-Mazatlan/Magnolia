@@ -7,6 +7,9 @@ All notable changes to Magnolia are documented here. The format follows [Keep a 
 ### Added
 - **Import WebVTT and SRT transcripts.** The transcript Import button now reads `.vtt` and `.srt` subtitle files directly — keeping millisecond-accurate timings and stripping the speaker and formatting markup — so a file from a tool like noScribe comes in as clean, timed transcript lines. Any `NOTE` information in the file (such as the transcription tool, the source recording, and the language settings) is kept as a document memo so that context isn't lost.
 
+### Fixed
+- **Freshly imported audio and video play reliably after saving.** A media file imported into a project (such as an `.m4a` recording) could fail to play with a "binary not available" error after the project was saved, until the project was closed and reopened. Magnolia now plays imported media straight from the saved project file, so it works immediately.
+
 ## [1.6.0]
 
 ### Added
