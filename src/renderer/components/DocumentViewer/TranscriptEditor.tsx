@@ -115,6 +115,7 @@ export function TranscriptEditor({
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [speakerDialog, setSpeakerDialog] = useState<{ speakers: DetectedSpeaker[]; source: any } | null>(null)
   const updateSourceContent = useDocumentStore((s) => s.updateSourceContent)
+  const applyTranscriptEdit = useDocumentStore((s) => s.applyTranscriptEdit)
   const updateLineTimes = useDocumentStore((s) => s.updateLineTimes)
 
   // One-shot migration: legacy audio transcripts stored timestamps inline
@@ -474,7 +475,7 @@ export function TranscriptEditor({
           currentPlaybackTime={currentPlaybackTime}
           lineTimes={lineTimes}
           mediaKind={videoMode ? 'video' : 'audio'}
-          onContentChange={(newContent) => updateSourceContent(sourceGuid, newContent)}
+          onContentChange={(newContent) => applyTranscriptEdit(sourceGuid, newContent)}
           onLineTimesChange={(newLineTimes) => updateLineTimes(sourceGuid, newLineTimes)}
         />
       ) : (

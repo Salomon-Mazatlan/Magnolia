@@ -6,6 +6,7 @@ import { useMemoStore } from './memo-store'
 import { useQuoteStore } from './quote-store'
 import { deriveLineAnchorsFromTimeRange, deriveVideoTimeRange, lineStartOffsets, lineForChar } from '../components/DocumentViewer/video-time-utils'
 import { isToolTab } from '../utils/tab-ids'
+import { computeTextEdit, adjustRange } from '../utils/text-edit-offsets'
 import { promotedArchiveHandle, mediaPathField } from '../utils/binary-handles'
 import { makeHmrSafe } from './hmr-preserve'
 
@@ -151,6 +152,13 @@ interface DocumentState {
   moveSourceNear: (sourceGuid: string, siblingGuid: string, position: 'before' | 'after') => void
   moveFolderToFolder: (folderGuid: string, newParentGuid: string | null) => void
   updateSourceContent: (guid: string, content: string) => void
+  /** Apply an in-place transcript edit (a single contiguous change from the
+   *  transcription textarea): replace the source text AND shift every
+   *  codepoint anchor — codes, quotes and content memos — so they keep
+   *  pointing at the same words instead of drifting onto whatever text now
+   *  sits at their old offsets. Time-range (video) codings are left to
+   *  updateLineTimes; only character-anchored selections move here. */
+  applyTranscriptEdit: (guid: string, content: string) => void
   updateSourceFormatData: (guid: string, formatData: any) => void
   /** After a save embeds freshly-imported binaries into the .qdpx, swap each
    *  source's transient `overlay://` media handle for the durable
@@ -786,6 +794,48 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     set((state) => ({
       sourceContents: { ...state.sourceContents, [guid]: content }
     }))
+    useProjectStore.getState().markDirty()
+  },
+
+  applyTranscriptEdit: (guid, content) => {
+    const oldContent = get().sourceContents[guid]
+    const edit = oldContent === undefined ? null : computeTextEdit(oldContent, content)
+    // No diffable change (identical, or content not loaded yet): fall back to a
+    // plain content write so anchors are never shifted against an unknown base.
+    if (!edit) {
+      set((state) => ({ sourceContents: { ...state.sourceContents, [guid]: content } }))
+      useProjectStore.getState().markDirty()
+      return
+    }
+
+    set((state) => ({
+      sourceContents: { ...state.sourceContents, [guid]: content },
+      sources: state.sources.map((s) => {
+        if (s.guid !== guid) return s
+        const selections = s.selections.flatMap((sel) => {
+          // Every transcript coding — audio AND video — is rendered
+          // character-precise from startPosition/endPosition (CodedTextView),
+          // so those offsets must follow the text edit. Video codings also
+          // carry a `timeRange` for the CodeTrack: we keep that untouched (a
+          // within-line edit doesn't change when the line was spoken; a
+          // line-count change re-derives it via updateLineTimes). Only
+          // PDF-region and survey-cell selections aren't anchored to this
+          // text at all.
+          if (sel.pdfRegion || sel.surveyCell) return [sel]
+          const next = adjustRange(sel.startPosition, sel.endPosition, edit)
+          // Range wholly deleted — drop the now-empty coding.
+          if (!next) return []
+          if (next.start === sel.startPosition && next.end === sel.endPosition) return [sel]
+          return [{ ...sel, startPosition: next.start, endPosition: next.end }]
+        })
+        return { ...s, selections }
+      })
+    }))
+
+    // Quotes and content memos anchor to the same codepoint offsets — shift
+    // them too so they don't drift out from under the edit.
+    useQuoteStore.getState().adjustQuotesForEdit(guid, edit)
+    useMemoStore.getState().adjustContentMemosForEdit(guid, edit)
     useProjectStore.getState().markDirty()
   },
 
