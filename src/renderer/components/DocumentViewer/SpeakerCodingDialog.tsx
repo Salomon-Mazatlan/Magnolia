@@ -10,6 +10,23 @@ const PRESET_COLORS = [
 /** Seconds of audio the play button previews. */
 const CLIP_SECONDS = 5
 
+/** An SVG path covering the whole viewport with a rounded-rect hole over the
+ *  given box — used as an evenodd `clip-path` so a single dimming overlay hugs
+ *  the Code Browser's actual shape (including its themed rounded corners). */
+function spotlightHolePath(vw: number, vh: number, rect: DOMRect, radius: number): string {
+  const n = (v: number) => Math.round(v * 100) / 100
+  const x = rect.left, y = rect.top, w = rect.width, h = rect.height
+  const r = Math.max(0, Math.min(radius, w / 2, h / 2))
+  const outer = `M0 0H${n(vw)}V${n(vh)}H0Z`
+  const hole = r > 0
+    ? `M${n(x + r)} ${n(y)}H${n(x + w - r)}A${n(r)} ${n(r)} 0 0 1 ${n(x + w)} ${n(y + r)}` +
+      `V${n(y + h - r)}A${n(r)} ${n(r)} 0 0 1 ${n(x + w - r)} ${n(y + h)}` +
+      `H${n(x + r)}A${n(r)} ${n(r)} 0 0 1 ${n(x)} ${n(y + h - r)}` +
+      `V${n(y + r)}A${n(r)} ${n(r)} 0 0 1 ${n(x + r)} ${n(y)}Z`
+    : `M${n(x)} ${n(y)}H${n(x + w)}V${n(y + h)}H${n(x)}Z`
+  return `${outer} ${hole}`
+}
+
 /** A speaker's chosen code: an existing one (dragged in) or a new one to be
  *  created on Apply. */
 type Assignment =
@@ -50,14 +67,22 @@ export function SpeakerCodingDialog({ open, speakers, source, onApply, onClose }
     }
   }, [open, speakers])
 
-  // Track the Code Browser's on-screen box so we can dim EVERYTHING ELSE while
-  // leaving it interactive — the user drags codes out of it onto the speakers.
+  // Track the Code Browser's on-screen box (and its corner radius) so we can
+  // dim EVERYTHING ELSE while leaving it interactive — the user drags codes out
+  // of it onto the speakers.
   const [cbRect, setCbRect] = useState<DOMRect | null>(null)
+  const [cbRadius, setCbRadius] = useState(0)
   useLayoutEffect(() => {
     if (!open) return
     const measure = () => {
       const el = document.querySelector('[data-spotlight="code-browser"]') as HTMLElement | null
-      setCbRect(el ? el.getBoundingClientRect() : null)
+      if (el) {
+        setCbRect(el.getBoundingClientRect())
+        setCbRadius(parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0)
+      } else {
+        setCbRect(null)
+        setCbRadius(0)
+      }
     }
     measure()
     const raf = requestAnimationFrame(measure) // catch post-layout position
@@ -180,20 +205,15 @@ export function SpeakerCodingDialog({ open, speakers, source, onApply, onClose }
 
   if (!open) return null
 
-  // Dim everything except the Code Browser: four panels around its box (or one
-  // full-screen panel when it isn't on screen). Clicking a dimmed area skips.
+  // Dim everything except the Code Browser with a single overlay clipped to a
+  // rounded-rect hole over its box (full-screen dim when it isn't on screen).
+  // Clicking a dimmed area skips. The hole receives no pointer events, so the
+  // Code Browser under it stays fully interactive.
   const DIALOG_W = 560
   const vw = window.innerWidth
   const vh = window.innerHeight
   const dim = 'rgba(0,0,0,0.45)'
-  const greyRects: React.CSSProperties[] = cbRect
-    ? [
-        { left: 0, top: 0, width: vw, height: Math.max(0, cbRect.top) },
-        { left: 0, top: cbRect.bottom, width: vw, height: Math.max(0, vh - cbRect.bottom) },
-        { left: 0, top: cbRect.top, width: Math.max(0, cbRect.left), height: cbRect.height },
-        { left: cbRect.right, top: cbRect.top, width: Math.max(0, vw - cbRect.right), height: cbRect.height }
-      ]
-    : [{ left: 0, top: 0, width: '100vw', height: '100vh' }]
+  const clipPath = cbRect ? `path(evenodd, "${spotlightHolePath(vw, vh, cbRect, cbRadius)}")` : undefined
 
   // Sit the dialog in the larger free band beside the Code Browser so it
   // doesn't cover the codes the user needs to drag.
@@ -209,9 +229,7 @@ export function SpeakerCodingDialog({ open, speakers, source, onApply, onClose }
 
   return (
     <>
-      {greyRects.map((r, i) => (
-        <div key={i} onClick={onClose} style={{ position: 'fixed', background: dim, zIndex: 1000, ...r }} />
-      ))}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: dim, zIndex: 1000, clipPath }} />
       <div
         style={{ position: 'fixed', left: dialogLeft, top: '50%', transform: 'translateY(-50%)', width: DIALOG_W, maxWidth: '92vw', maxHeight: '86vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md, 8px)', boxShadow: '0 10px 40px rgba(0,0,0,0.35)', zIndex: 1001 }}
       >
