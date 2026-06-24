@@ -17,6 +17,10 @@
 
 Magnolia is free and open-source qualitative data analysis software released under the European Union Public Licence (EUPL).
 
+::: danger
+Magnolia is **experimental.** It was coded by Claude over several months. It may break unexpectedly and you should use it at your own risk.
+:::
+
 <p align="center">
   <img src="screenshot.png" alt="Magnolia" width="750">
 </p>
