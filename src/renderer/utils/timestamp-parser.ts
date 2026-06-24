@@ -243,6 +243,72 @@ export function parseSubtitleTranscript(
   return { content: lines.join('\n'), lineTimes, notes }
 }
 
+/** Decode the handful of HTML entities a noScribe export uses. */
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#0*39;|&apos;/g, "'")
+    .replace(/&amp;/g, '&') // last, so we don't double-decode
+}
+
+/**
+ * Parse a noScribe HTML transcript export into Magnolia's transcript model —
+ * the same `{ content, lineTimes, notes }` shape as parseSubtitleTranscript,
+ * so the importer treats it uniformly. Returns null when the text isn't a
+ * noScribe HTML file.
+ *
+ * Each segment is an anchor `<a name="ts_<startMs>_<endMs>_<speaker>">…</a>`
+ * whose name carries millisecond-precise timing (the visible `[HH:MM:SS]` is
+ * only a rounded display, so it's dropped). The speaker label (e.g. `S00:`)
+ * is kept — it's meaningful turn-taking content in a multi-speaker transcript.
+ * The gray provenance block (transcription tool, source audio, language
+ * settings) is returned as a note for the caller to keep as a document memo.
+ */
+export function parseNoScribeHtmlTranscript(
+  raw: string
+): { content: string; lineTimes: Record<string, number>; notes: string[] } | null {
+  // The defining feature of a noScribe HTML export is its timed segment anchors.
+  if (!/<a\s+name="ts_\d+_\d+/i.test(raw)) return null
+
+  const anchorRe = /<a\s+name="ts_(\d+)_(\d+)(?:_[^"]*)?"\s*>([\s\S]*?)<\/a>/gi
+  const lines: string[] = []
+  const lineTimes: Record<string, number> = {}
+  let m: RegExpExecArray | null
+  while ((m = anchorRe.exec(raw)) !== null) {
+    const startSec = parseInt(m[1], 10) / 1000
+    const text = decodeHtmlEntities(
+      m[3]
+        .replace(/<br\s*\/?>/gi, ' ')
+        .replace(/<[^>]+>/g, '') // strip the [HH:MM:SS] span and any other tags
+    )
+      .replace(/\[\d{1,2}:\d{2}:\d{2}\]/g, ' ') // drop the redundant visible timestamp
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (text === '') continue
+    lineTimes[String(lines.length)] = startSec
+    lines.push(text)
+  }
+  if (lines.length === 0) return null
+
+  // Provenance: the gray metadata block, else the audio_source meta tag.
+  const notes: string[] = []
+  const meta = raw.match(/<span\b[^>]*>([\s\S]*?Transcribed with noScribe[\s\S]*?)<\/span>/i)
+  if (meta) {
+    const note = decodeHtmlEntities(
+      meta[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')
+    ).trim()
+    if (note) notes.push(note)
+  } else {
+    const audio = raw.match(/<meta\s+name="audio_source"\s+content="([^"]*)"/i)
+    if (audio && audio[1]) notes.push(`Audio file: ${audio[1]}`)
+  }
+
+  return { content: lines.join('\n'), lineTimes, notes }
+}
+
 /**
  * Detect various timestamp formats in imported text and convert to canonical HH:MM:SS.
  * Handles SRT, VTT, and plain timestamp formats.

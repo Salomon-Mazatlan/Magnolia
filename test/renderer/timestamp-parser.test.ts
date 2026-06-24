@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseSubtitleTranscript } from '../../src/renderer/utils/timestamp-parser'
+import { parseSubtitleTranscript, parseNoScribeHtmlTranscript } from '../../src/renderer/utils/timestamp-parser'
 
 // The actual noScribe 0.7 export (transcript.vtt): a `WEBVTT <title>` header,
 // two NOTE metadata blocks, numeric cue identifiers, empty `<v >` voice tags,
@@ -133,5 +133,68 @@ describe('parseSubtitleTranscript — non-subtitle input', () => {
 
   it('returns null for an empty string', () => {
     expect(parseSubtitleTranscript('')).toBeNull()
+  })
+
+  it('returns null for noScribe HTML (handled by the HTML parser instead)', () => {
+    expect(parseSubtitleTranscript(NOSCRIBE_HTML)).toBeNull()
+  })
+})
+
+// The actual noScribe 0.7 HTML export (noscribe.html / New Recording 11.html):
+// a qrichtext header, an audio_source meta tag, a gray provenance paragraph,
+// and timed segment anchors `ts_<startMs>_<endMs>_<speaker>`.
+const NOSCRIBE_HTML = `<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0//EN" "http://www.w3.org/TR/REC-html40/strict.dtd">
+<html >
+<head >
+<meta charset="UTF-8" />
+<meta name="qrichtext" content="1" />
+<meta name="audio_source" content="/Users/caledavis/Downloads/New Recording 10.m4a" /></head>
+<body style="font-family: 'Arial'" >
+<div class="WordSection1" ><p style="font-weight: 600" >New Recording 10</p><p ><span style="color: #909090; font-size: 0.8em" >Transcribed with noScribe vers. 0.7<br />Audio file: /Users/caledavis/Downloads/New Recording 10.m4a<br />(Language: Auto (auto) | Speaker detection: auto | Overlapping speech: 1 | Timestamps: 1 | Disfluencies: 1 | Mark pause: 1)</span></p><p ></p><p ><a name="ts_690_2070_S00" >S00: <span style="color: #78909C" >[00:00:00]</span> Testing, one, two, three.</a></p></div></body>
+</html>`
+
+describe('parseNoScribeHtmlTranscript', () => {
+  it('extracts timed segments, dropping the visible timestamp but keeping the speaker label', () => {
+    const r = parseNoScribeHtmlTranscript(NOSCRIBE_HTML)!
+    expect(r).not.toBeNull()
+    expect(r.content).toBe('S00: Testing, one, two, three.')
+    // Start time comes from the anchor name (690 ms) at full precision.
+    expect(r.lineTimes['0']).toBeCloseTo(0.69, 5)
+    // The redundant [HH:MM:SS] display and HTML markup are gone.
+    expect(r.content).not.toContain('[00:00:00]')
+    expect(r.content).not.toContain('<')
+  })
+
+  it('captures the gray provenance block as a note', () => {
+    const r = parseNoScribeHtmlTranscript(NOSCRIBE_HTML)!
+    expect(r.notes).toHaveLength(1)
+    expect(r.notes[0]).toContain('Transcribed with noScribe vers. 0.7')
+    expect(r.notes[0]).toContain('Audio file: /Users/caledavis/Downloads/New Recording 10.m4a')
+    expect(r.notes[0]).toContain('Speaker detection: auto')
+    // <br /> became line breaks; no markup leaks through.
+    expect(r.notes[0]).not.toContain('<br')
+  })
+
+  it('handles multiple segments and speakers in order', () => {
+    const html = `<html><body><div>
+<p><a name="ts_500_1500_S00" >S00: <span>[00:00:00]</span> Hello there.</a></p>
+<p><a name="ts_1600_2400_S01" >S01: <span>[00:00:01]</span> Hi back.</a></p>
+<p><a name="ts_2500_3000_S00" >S00: <span>[00:00:02]</span> Great &amp; good.</a></p>
+</div></body></html>`
+    const r = parseNoScribeHtmlTranscript(html)!
+    expect(r.content.split('\n')).toEqual(['S00: Hello there.', 'S01: Hi back.', 'S00: Great & good.'])
+    expect(r.lineTimes).toEqual({ '0': 0.5, '1': 1.6, '2': 2.5 })
+  })
+
+  it('falls back to the audio_source meta when there is no gray provenance block', () => {
+    const html = `<html><head><meta name="audio_source" content="/x/clip.m4a" /></head><body>
+<p><a name="ts_0_1000_S00" >Hello</a></p></body></html>`
+    const r = parseNoScribeHtmlTranscript(html)!
+    expect(r.notes).toEqual(['Audio file: /x/clip.m4a'])
+  })
+
+  it('returns null for HTML without noScribe segment anchors', () => {
+    expect(parseNoScribeHtmlTranscript('<html><body><p>Just a web page</p></body></html>')).toBeNull()
+    expect(parseNoScribeHtmlTranscript('plain text')).toBeNull()
   })
 })

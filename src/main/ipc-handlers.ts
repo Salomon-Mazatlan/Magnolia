@@ -479,7 +479,7 @@ export function registerIpcHandlers(): void {
     const result = await dialog.showOpenDialog({
       title: 'Import Transcript',
       filters: [
-        { name: 'Text Files', extensions: ['txt', 'md', 'markdown', 'srt', 'vtt'] }
+        { name: 'Text Files', extensions: ['txt', 'md', 'markdown', 'srt', 'vtt', 'html', 'htm'] }
       ],
       properties: ['openFile']
     })
