@@ -849,6 +849,9 @@ export function CodeBrowser({ onNewCode, onClose, onPopOut, isPoppedOut }: Props
   return (
     <div
       className="panel"
+      // Marks this panel so a modal (e.g. the speaker-coding dialog) can leave
+      // it interactive — and un-greyed — while dimming the rest of the window.
+      data-spotlight="code-browser"
       onDragOver={(e) => {
         // Allow dropping codes on the empty area to move them to top level
         if (e.dataTransfer.types.includes('application/x-magnolia-code-reorder')) {

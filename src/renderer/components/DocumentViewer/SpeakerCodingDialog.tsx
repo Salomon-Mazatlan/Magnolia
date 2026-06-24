@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Icon, faPlay, faPause } from '../Icon'
 import type { DetectedSpeaker } from '../../utils/transcript-speakers'
 
 const PRESET_COLORS = [
@@ -48,6 +49,24 @@ export function SpeakerCodingDialog({ open, speakers, source, onApply, onClose }
       setPlayingId(null)
     }
   }, [open, speakers])
+
+  // Track the Code Browser's on-screen box so we can dim EVERYTHING ELSE while
+  // leaving it interactive — the user drags codes out of it onto the speakers.
+  const [cbRect, setCbRect] = useState<DOMRect | null>(null)
+  useLayoutEffect(() => {
+    if (!open) return
+    const measure = () => {
+      const el = document.querySelector('[data-spotlight="code-browser"]') as HTMLElement | null
+      setCbRect(el ? el.getBoundingClientRect() : null)
+    }
+    measure()
+    const raf = requestAnimationFrame(measure) // catch post-layout position
+    window.addEventListener('resize', measure)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', measure)
+    }
+  }, [open])
 
   // ── Media for the preview clips ───────────────────────────────────────────
   const mediaHandle: string | undefined =
@@ -161,20 +180,45 @@ export function SpeakerCodingDialog({ open, speakers, source, onApply, onClose }
 
   if (!open) return null
 
+  // Dim everything except the Code Browser: four panels around its box (or one
+  // full-screen panel when it isn't on screen). Clicking a dimmed area skips.
+  const DIALOG_W = 560
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const dim = 'rgba(0,0,0,0.45)'
+  const greyRects: React.CSSProperties[] = cbRect
+    ? [
+        { left: 0, top: 0, width: vw, height: Math.max(0, cbRect.top) },
+        { left: 0, top: cbRect.bottom, width: vw, height: Math.max(0, vh - cbRect.bottom) },
+        { left: 0, top: cbRect.top, width: Math.max(0, cbRect.left), height: cbRect.height },
+        { left: cbRect.right, top: cbRect.top, width: Math.max(0, vw - cbRect.right), height: cbRect.height }
+      ]
+    : [{ left: 0, top: 0, width: '100vw', height: '100vh' }]
+
+  // Sit the dialog in the larger free band beside the Code Browser so it
+  // doesn't cover the codes the user needs to drag.
+  let dialogLeft = (vw - DIALOG_W) / 2
+  if (cbRect) {
+    const freeLeft = cbRect.left
+    const freeRight = vw - cbRect.right
+    dialogLeft = freeLeft >= freeRight
+      ? (cbRect.left - DIALOG_W) / 2
+      : cbRect.right + (freeRight - DIALOG_W) / 2
+  }
+  dialogLeft = Math.max(8, Math.min(dialogLeft, vw - DIALOG_W - 8))
+
   return (
-    <div
-      style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
-      onClick={onClose}
-    >
+    <>
+      {greyRects.map((r, i) => (
+        <div key={i} onClick={onClose} style={{ position: 'fixed', background: dim, zIndex: 1000, ...r }} />
+      ))}
       <div
-        style={{ width: 560, maxWidth: '92vw', maxHeight: '86vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md, 8px)', boxShadow: '0 10px 40px rgba(0,0,0,0.35)' }}
-        onClick={(e) => e.stopPropagation()}
+        style={{ position: 'fixed', left: dialogLeft, top: '50%', transform: 'translateY(-50%)', width: DIALOG_W, maxWidth: '92vw', maxHeight: '86vh', display: 'flex', flexDirection: 'column', background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md, 8px)', boxShadow: '0 10px 40px rgba(0,0,0,0.35)', zIndex: 1001 }}
       >
         <div style={{ padding: '16px 20px 8px' }}>
           <h2 style={{ margin: 0, fontSize: 16 }}>{title}</h2>
           <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
-            Optionally code each speaker's lines. Drag a code from the Code Browser onto a speaker, or create a new one.
-            Use ▶ to hear a {CLIP_SECONDS}-second sample and check who it is.
+            Optionally code each speaker's lines.
           </p>
         </div>
 
@@ -191,10 +235,10 @@ export function SpeakerCodingDialog({ open, speakers, source, onApply, onClose }
                 <button
                   onClick={() => playPreview(sp)}
                   disabled={!mediaUrl}
-                  title={mediaUrl ? 'Play a sample of this speaker' : 'No media attached to preview'}
-                  style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: mediaUrl ? 'pointer' : 'not-allowed', flexShrink: 0, opacity: mediaUrl ? 1 : 0.5 }}
+                  title={mediaUrl ? (playingId === sp.id ? 'Pause' : 'Play a sample of this speaker') : 'No media attached to preview'}
+                  style={{ width: 30, height: 30, borderRadius: '50%', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', cursor: mediaUrl ? 'pointer' : 'not-allowed', flexShrink: 0, opacity: mediaUrl ? 1 : 0.5, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                 >
-                  {playingId === sp.id ? '◼' : '▶'}
+                  <Icon icon={playingId === sp.id ? faPause : faPlay} />
                 </button>
 
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -250,6 +294,6 @@ export function SpeakerCodingDialog({ open, speakers, source, onApply, onClose }
           <audio ref={audioRef} src={mediaUrl} onTimeUpdate={onTimeUpdate} onPause={() => setPlayingId(null)} onEnded={() => setPlayingId(null)} style={{ display: 'none' }} />
         )}
       </div>
-    </div>
+    </>
   )
 }
