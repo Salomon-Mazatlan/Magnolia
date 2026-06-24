@@ -202,7 +202,8 @@ export function WelcomeScreen() {
           </span>
           <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', textAlign: 'center' }}>
             Magnolia is experimental software.<br />
-            Use at your own risk
+            It may break unexpectedly.<br />
+            Use at your own risk.
           </span>
         </div>
       </div>
