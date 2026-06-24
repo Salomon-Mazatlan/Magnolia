@@ -180,7 +180,7 @@ export function WelcomeScreen() {
             bottom of the window via this flex:1 region (paired with the top
             spacer). Routed through the 'sponsor' welcome action so it opens in
             the default browser (the welcome window has no setWindowOpenHandler). */}
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
           <span
             role="button"
             tabIndex={0}
@@ -199,6 +199,10 @@ export function WelcomeScreen() {
           >
             <span aria-hidden>♥</span>
             Sponsor Magnolia's development
+          </span>
+          <span style={{ fontSize: 11.5, color: 'var(--text-secondary)', textAlign: 'center' }}>
+            Magnolia is experimental software.<br />
+            Use at your own risk
           </span>
         </div>
       </div>
