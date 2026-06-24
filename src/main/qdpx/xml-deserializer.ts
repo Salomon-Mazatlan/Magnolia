@@ -37,6 +37,16 @@ function normalizeGuid(guid: string | undefined): string {
   return guid.replace(/[{}]/g, '').toUpperCase()
 }
 
+/** Media extensions that are audio-only. MAXQDA (and some other tools) store
+ *  audio recordings as <VideoSource>, so we trust the file extension over the
+ *  element name and route these to Magnolia's audio viewer. Mirrors the audio
+ *  format-registry extension list. */
+const AUDIO_EXTENSIONS = new Set(['wav', 'mp3', 'ogg', 'flac', 'm4a', 'aac'])
+
+function extensionOf(path: string | undefined): string {
+  return (String(path || '').split('.').pop() || '').toLowerCase()
+}
+
 function ensureArray<T>(val: T | T[] | undefined): T[] {
   if (!val) return []
   return Array.isArray(val) ? val : [val]
@@ -248,13 +258,17 @@ function parseVideoSelection(xmlSel: any): RawVideoSelection {
  * temp file.
  */
 function parseVideoSource(xmlSource: any): TextSource {
+  // Trust the media file's extension: an audio-only file (.m4a, .mp3, …)
+  // exported as a <VideoSource> is really audio and should open in the audio
+  // viewer, not a black-box video player.
+  const isAudio = AUDIO_EXTENSIONS.has(extensionOf(xmlSource['@_path']))
   const source: TextSource & {
     _rawVideoSelections?: RawVideoSelection[]
     _refiTranscript?: RefiTranscript
   } = {
     guid: normalizeGuid(xmlSource['@_guid']),
     name: xmlSource['@_name'] ?? '',
-    sourceType: 'video',
+    sourceType: isAudio ? 'audio' : 'video',
     plainTextPath: xmlSource['@_path'],
     creatingUser: normalizeGuid(xmlSource['@_creatingUser']),
     creationDateTime: xmlSource['@_creationDateTime'],

@@ -12,11 +12,15 @@ import { useSurveyViewStore } from '../../stores/survey-view-store'
 import { buildCellText } from '../../utils/survey/cell-text'
 import { RESPONDENTS_GROUP_MIME } from '../Analysis/group-by'
 
-function iconForSource(filename: string) {
-  const st: string = sourceTypeFromFilename(filename)
+function iconForSource(source: { name: string; sourceType?: string }) {
+  // Prefer the source's declared type (set on import for audio/video/image/
+  // pdf). Only fall back to sniffing the filename for sources whose type is
+  // unset or whose name carries a telling extension. Foreign QDPX imports
+  // (e.g. MAXQDA) name sources WITHOUT extensions — "New Recording 11",
+  // "magnoliasolid" — so a filename-only sniff mis-icons every media file as
+  // a generic document; trusting sourceType fixes that.
+  const st: string = (source.sourceType as string) || sourceTypeFromFilename(source.name)
   if (st === 'audio') return faHeadphones
-  // SourceType doesn't yet include 'video'/'image'; once added to the union,
-  // the format-registry will return these and the icons here pick them up.
   if (st === 'video') return faVideo
   if (st === 'image') return faImage
   return faFile
@@ -530,7 +534,7 @@ function DocItem({
           }}
         />
       )}
-      <Icon icon={iconForSource(source.name)} style={{ fontSize: 11, opacity: 0.75, flexShrink: 0, width: 14, textAlign: 'center', color: 'var(--text-muted)' }} />
+      <Icon icon={iconForSource(source)} style={{ fontSize: 11, opacity: 0.75, flexShrink: 0, width: 14, textAlign: 'center', color: 'var(--text-muted)' }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         {editing ? (
           <input

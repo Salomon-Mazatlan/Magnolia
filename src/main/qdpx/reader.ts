@@ -35,6 +35,15 @@ const VIDEO_MIME_BY_EXT: Record<string, string> = {
   avi: 'video/x-msvideo'
 }
 
+const AUDIO_MIME_BY_EXT: Record<string, string> = {
+  mp3: 'audio/mpeg',
+  m4a: 'audio/mp4',
+  aac: 'audio/aac',
+  wav: 'audio/wav',
+  ogg: 'audio/ogg',
+  flac: 'audio/flac'
+}
+
 /** Convert a raw <VideoSelection> (milliseconds per REFI-QDA) into a
  *  Magnolia time-range PlainTextSelection. */
 function convertVideoSelection(raw: RawVideoSelection): PlainTextSelection {
@@ -268,6 +277,34 @@ export async function readQdpx(
     // not the transcript) so the plain-text fall-through doesn't try
     // to read the binary as a string.
     if ((source as any).sourceType === 'audio') {
+      // Foreign imports (e.g. an <AudioSource>, or a MAXQDA <VideoSource>
+      // carrying an .m4a) arrive with the binary referenced by plainTextPath
+      // and NO magnolia-sources.json side table to wire it up. Advertise the
+      // archive handle here so the audio actually plays; for native Magnolia
+      // files the side table later overwrites this formatData with the richer
+      // recorded metadata (duration, channels, lineTimes).
+      const match = (source.plainTextPath || '').match(/internal:\/\/(.+)/)
+      if (match) {
+        const internalName = match[1]
+        if (zip.file(`sources/${internalName}`)) {
+          const ext = (internalName.split('.').pop() || 'm4a').toLowerCase()
+          // A <VideoSource> reclassified as audio still carries its
+          // time-range codings on _rawVideoSelections — convert them so they
+          // survive the import.
+          const rawVideoSelections: RawVideoSelection[] =
+            (source as any)._rawVideoSelections || []
+          if (rawVideoSelections.length > 0) {
+            source.selections = rawVideoSelections.map(convertVideoSelection)
+          }
+          ;(source as any).formatData = {
+            audioFilePath: archiveHandleForFile(internalName),
+            mimeType: AUDIO_MIME_BY_EXT[ext] || 'audio/mpeg',
+            audioExt: ext,
+            duration: 0
+          }
+        }
+      }
+      delete (source as any)._rawVideoSelections
       const transcriptFile = zip.file(`sources/${source.guid}.txt`)
       sourceContents[source.guid] = transcriptFile
         ? await readZipText(transcriptFile)

@@ -107,7 +107,10 @@ export function TabBar({ openTabs, activeTab, sources, onSelectTab, onCloseTab, 
     const source = sourceMap.get(tabId)
     if (!source) return null
     if (source.sourceType === 'survey') return SURVEY_ICON
-    const st = sourceTypeFromFilename(source.name) as string
+    // Prefer the declared sourceType; only sniff the name when it's unset.
+    // Foreign QDPX imports name sources without extensions, so a name-only
+    // sniff would mis-icon every media tab as a generic document.
+    const st = ((source as { sourceType?: string }).sourceType || sourceTypeFromFilename(source.name)) as string
     if (st === 'audio') return faHeadphones
     if (st === 'video') return faVideo
     if (st === 'image') return faImage
