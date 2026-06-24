@@ -184,6 +184,25 @@ function stripCueMarkup(s: string): string {
     .trim()
 }
 
+/** One transcript line's timing + speaker, as recovered from the source file.
+ *  `segments[i]` describes content line `i`. */
+export interface TranscriptSegment {
+  /** The speaker label/name (e.g. "S00", "Roger Bingham"), or null when the
+   *  format doesn't identify one. */
+  speaker: string | null
+  startTime: number
+  endTime: number
+}
+
+/** The result of parsing a structured transcript (subtitles or noScribe HTML).
+ *  `segments` runs parallel to the content's lines. */
+export interface ParsedTranscript {
+  content: string
+  lineTimes: Record<string, number>
+  notes: string[]
+  segments: TranscriptSegment[]
+}
+
 /**
  * Parse a WebVTT or SRT subtitle file into Magnolia's transcript model: clean
  * text (one line per cue) plus a `lineTimes` map (line index → start seconds,
@@ -196,11 +215,10 @@ function stripCueMarkup(s: string): string {
  *
  * `notes` collects the text of any `NOTE` comment blocks (transcription tool,
  * source media path, language settings, …) so the caller can preserve that
- * provenance — e.g. as a document memo — instead of discarding it.
+ * provenance — e.g. as a document memo — instead of discarding it. `segments`
+ * carries each cue's speaker (from a `<v Speaker>` tag) and time range.
  */
-export function parseSubtitleTranscript(
-  raw: string
-): { content: string; lineTimes: Record<string, number>; notes: string[] } | null {
+export function parseSubtitleTranscript(raw: string): ParsedTranscript | null {
   const text = raw.replace(/^﻿/, '').replace(/\r\n?/g, '\n')
   const firstLine = (text.split('\n').find((l) => l.trim() !== '') ?? '').trim()
   const isVtt = /^WEBVTT(\s|$)/.test(firstLine)
@@ -212,6 +230,7 @@ export function parseSubtitleTranscript(
   const lines: string[] = []
   const lineTimes: Record<string, number> = {}
   const notes: string[] = []
+  const segments: TranscriptSegment[] = []
   for (const block of blocks) {
     const blockLines = block.split('\n')
     const head = (blockLines.find((l) => l.trim() !== '') ?? '').trim()
@@ -228,8 +247,15 @@ export function parseSubtitleTranscript(
     // The timing line carries the cue's start/end; lines after it are payload.
     const ti = blockLines.findIndex((l) => l.includes('-->'))
     if (ti === -1) continue
-    const start = parseClockTime(blockLines[ti].split('-->')[0])
+    const halves = blockLines[ti].split('-->')
+    const start = parseClockTime(halves[0])
     if (start == null) continue
+    // End may be followed by cue settings (e.g. "align:start"); take the first
+    // token after the arrow.
+    const end = parseClockTime((halves[1] ?? '').trim().split(/\s+/)[0] ?? '')
+    const rawPayload = blockLines.slice(ti + 1).join('\n')
+    const voice = rawPayload.match(/<v\s+([^>]*)>/i)
+    const speaker = voice && voice[1].trim() !== '' ? voice[1].trim() : null
     const payload = blockLines
       .slice(ti + 1)
       .map(stripCueMarkup)
@@ -237,10 +263,11 @@ export function parseSubtitleTranscript(
       .join(' ')
     if (payload === '') continue
     lineTimes[String(lines.length)] = start
+    segments.push({ speaker, startTime: start, endTime: end ?? start })
     lines.push(payload)
   }
   if (lines.length === 0) return null
-  return { content: lines.join('\n'), lineTimes, notes }
+  return { content: lines.join('\n'), lineTimes, notes, segments }
 }
 
 /** Decode the handful of HTML entities a noScribe export uses. */
@@ -267,20 +294,21 @@ function decodeHtmlEntities(s: string): string {
  * The gray provenance block (transcription tool, source audio, language
  * settings) is returned as a note for the caller to keep as a document memo.
  */
-export function parseNoScribeHtmlTranscript(
-  raw: string
-): { content: string; lineTimes: Record<string, number>; notes: string[] } | null {
+export function parseNoScribeHtmlTranscript(raw: string): ParsedTranscript | null {
   // The defining feature of a noScribe HTML export is its timed segment anchors.
   if (!/<a\s+name="ts_\d+_\d+/i.test(raw)) return null
 
-  const anchorRe = /<a\s+name="ts_(\d+)_(\d+)(?:_[^"]*)?"\s*>([\s\S]*?)<\/a>/gi
+  const anchorRe = /<a\s+name="ts_(\d+)_(\d+)(?:_([^"]*))?"\s*>([\s\S]*?)<\/a>/gi
   const lines: string[] = []
   const lineTimes: Record<string, number> = {}
+  const segments: TranscriptSegment[] = []
   let m: RegExpExecArray | null
   while ((m = anchorRe.exec(raw)) !== null) {
     const startSec = parseInt(m[1], 10) / 1000
+    const endSec = parseInt(m[2], 10) / 1000
+    const speaker = m[3] && m[3].trim() !== '' ? m[3].trim() : null
     const text = decodeHtmlEntities(
-      m[3]
+      m[4]
         .replace(/<br\s*\/?>/gi, ' ')
         .replace(/<[^>]+>/g, '') // strip the [HH:MM:SS] span and any other tags
     )
@@ -289,6 +317,7 @@ export function parseNoScribeHtmlTranscript(
       .trim()
     if (text === '') continue
     lineTimes[String(lines.length)] = startSec
+    segments.push({ speaker, startTime: startSec, endTime: endSec })
     lines.push(text)
   }
   if (lines.length === 0) return null
@@ -306,7 +335,7 @@ export function parseNoScribeHtmlTranscript(
     if (audio && audio[1]) notes.push(`Audio file: ${audio[1]}`)
   }
 
-  return { content: lines.join('\n'), lineTimes, notes }
+  return { content: lines.join('\n'), lineTimes, notes, segments }
 }
 
 /**

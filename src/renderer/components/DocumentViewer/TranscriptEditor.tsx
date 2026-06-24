@@ -18,6 +18,8 @@ import { useMemoStore } from '../../stores/memo-store'
 import { useQuoteStore } from '../../stores/quote-store'
 import { Icon, faPenLine } from '../Icon'
 import { detectAndConvertTimestamps, migrateInlineTimestamps, formatTimestamp, parseSubtitleTranscript, parseNoScribeHtmlTranscript } from '../../utils/timestamp-parser'
+import { detectSpeakers, type DetectedSpeaker } from '../../utils/transcript-speakers'
+import { SpeakerCodingDialog, type SpeakerAssignment } from './SpeakerCodingDialog'
 import type { Code, Memo, MemoEditInitData, PlainTextSelection } from '../../models/types'
 import { useNewCodeTriggerStore } from '../../stores/new-code-trigger-store'
 import { exportPdfWithHeader, buildPdfDocument, escHtml } from '../../utils/pdf-export'
@@ -111,6 +113,7 @@ export function TranscriptEditor({
 }: Props) {
   const [exportMenu, setExportMenu] = useState<{ x: number; y: number } | null>(null)
   const [isTranscribing, setIsTranscribing] = useState(false)
+  const [speakerDialog, setSpeakerDialog] = useState<{ speakers: DetectedSpeaker[]; source: any } | null>(null)
   const updateSourceContent = useDocumentStore((s) => s.updateSourceContent)
   const updateLineTimes = useDocumentStore((s) => s.updateLineTimes)
 
@@ -164,6 +167,7 @@ export function TranscriptEditor({
   const removeSelection = useDocumentStore((s) => s.removeSelection)
   const codes = useCodeStore((s) => s.codes)
   const findCode = useCodeStore((s) => s.findCode)
+  const addCode = useCodeStore((s) => s.addCode)
   const addMemo = useMemoStore((s) => s.addMemo)
   const removeMemo = useMemoStore((s) => s.removeMemo)
   const contentMemos = useMemoStore((s) => s.getContentMemosForSource(sourceGuid))
@@ -172,6 +176,21 @@ export function TranscriptEditor({
     sourceQuotes.map((q) => ({ guid: q.guid, startCp: q.startPosition, endCp: q.endPosition })),
     [sourceQuotes]
   )
+
+  // Apply the speaker-coding dialog: create any new codes, then code every one
+  // of each assigned speaker's lines with its code.
+  const handleSpeakerApply = useCallback((assignments: SpeakerAssignment[]) => {
+    for (const asn of assignments) {
+      const codeGuid = asn.codeGuid ?? (asn.newCode ? addCode(asn.newCode.name, asn.newCode.color) : null)
+      if (!codeGuid) continue
+      for (const r of asn.ranges) {
+        if (r.endChar <= r.startChar) continue
+        const selGuid = addSelection(sourceGuid, r.startChar, r.endChar, asn.newCode?.name ?? '')
+        addCodingToSelection(sourceGuid, selGuid, codeGuid)
+      }
+    }
+    setSpeakerDialog(null)
+  }, [addCode, addSelection, addCodingToSelection, sourceGuid])
 
   // Coding mode state
   const [pendingSelection, setPendingSelection] = useState<{ startCp: number; endCp: number; selectedText: string } | null>(null)
@@ -384,6 +403,12 @@ export function TranscriptEditor({
                   content: parsed.notes.join('\n\n'),
                   sourceGuids: [sourceGuid]
                 })
+              }
+              // Offer to auto-code each detected speaker's lines.
+              const speakers = detectSpeakers(parsed)
+              if (speakers.length > 0) {
+                const src = useDocumentStore.getState().sources.find((s) => s.guid === sourceGuid)
+                setSpeakerDialog({ speakers, source: src })
               }
             } else {
               updateSourceContent(sourceGuid, detectAndConvertTimestamps(result.content))
@@ -629,6 +654,16 @@ export function TranscriptEditor({
             </>
           )}
         </div>
+      )}
+
+      {speakerDialog && (
+        <SpeakerCodingDialog
+          open
+          speakers={speakerDialog.speakers}
+          source={speakerDialog.source}
+          onApply={handleSpeakerApply}
+          onClose={() => setSpeakerDialog(null)}
+        />
       )}
     </div>
   )
