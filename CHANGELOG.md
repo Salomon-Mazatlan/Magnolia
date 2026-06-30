@@ -2,6 +2,12 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.6.2]
+
+### Fixed
+- **Codes stay put when you edit transcript text.** Editing a line of a transcript in place no longer shifts the codes, quotes, and selection memos anchored further down — every anchor now follows the edit instead of drifting onto the wrong words, and a code's end no longer slips. Video timeline codings keep their timing, since editing a line's words doesn't change when it was spoken.
+- **Audio and video imported from MAXQDA open in the right viewer.** MAXQDA names its sources without file extensions and stores audio inside a video source, so Magnolia used to show every imported media file with a generic document icon and open an `.m4a` recording in a black video player. Imported media is now classified by its real type — audio files open in the audio viewer and play correctly.
+
 ## [1.6.1]
 
 ### Added
