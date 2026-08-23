@@ -146,8 +146,20 @@ export function MapElement({ element, selected, onHeaderMouseDown, onBodyMouseDo
     if (!divRef.current) return
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const h = Math.ceil(entry.contentRect.height + 2)
-        if (h !== element.height) onRenderedHeight(element.id, h)
+        // Measure the border-box height directly — that's what `minHeight`
+        // controls (global `* { box-sizing: border-box }`) and what the
+        // connection ports are positioned against. Fall back to
+        // contentRect + 2px borders on engines without borderBoxSize.
+        const measured =
+          entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height + 2
+        const h = Math.round(measured)
+        // Dead-band: only sync when the height genuinely changed (>1px).
+        // Fractional display scaling (common on Windows at 125/150%) snaps
+        // the box to the device-pixel grid, so `measured` lands a sub-pixel
+        // off the integer `minHeight` every frame. Without this tolerance
+        // the ResizeObserver → setHeight → minHeight → ResizeObserver cycle
+        // ratchets the node ~1px taller each frame indefinitely.
+        if (Math.abs(h - element.height) > 1) onRenderedHeight(element.id, h)
       }
     })
     observer.observe(divRef.current)
