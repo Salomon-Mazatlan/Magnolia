@@ -379,6 +379,16 @@ ipcMain.on('theme-changed', (_event, theme: string) => {
   }
 })
 
+// IPC: broadcast interface-scale (zoom factor) changes to all child windows
+ipcMain.on('zoom-factor-changed', (_event, factor: number) => {
+  const windows = BrowserWindow.getAllWindows()
+  for (const win of windows) {
+    if (!win.isDestroyed() && win.webContents.id !== _event.sender.id) {
+      win.webContents.send('zoom-factor-changed', factor)
+    }
+  }
+})
+
 // Query Builder IPCs — round-trip through main back to mainWindow.
 // The builder runs in a main-window tab now, so the renderer that
 // sends here is the same one that receives the broadcast. Wasteful

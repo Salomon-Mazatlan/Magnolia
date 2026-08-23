@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import type { ElectronAPI } from '../renderer/models/types'
 
 // The open project's .qdpx path, cached renderer-side. The renderer sets it
@@ -90,6 +90,18 @@ const api: ElectronAPI = {
     ipcRenderer.on('theme-changed', handler)
     return () => {
       ipcRenderer.removeListener('theme-changed', handler)
+    }
+  },
+  // Interface scale — applied locally via Electron's native page zoom
+  // (same mechanism as Cmd/Ctrl+Plus), so it scales fonts, icons, and
+  // layout uniformly with no per-component changes needed.
+  setZoomFactor: (factor: number) => webFrame.setZoomFactor(factor),
+  broadcastZoomFactor: (factor: number) => ipcRenderer.send('zoom-factor-changed', factor),
+  onZoomFactorChanged: (callback: (factor: number) => void) => {
+    const handler = (_event: any, factor: number) => callback(factor)
+    ipcRenderer.on('zoom-factor-changed', handler)
+    return () => {
+      ipcRenderer.removeListener('zoom-factor-changed', handler)
     }
   },
   // Codebook window

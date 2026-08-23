@@ -27,6 +27,8 @@ export interface Preferences {
   defaultPlaybackSpeed: number
   theme: ThemeId
   paperSize: PaperSize
+  /** Interface scale, applied as a native page zoom factor (1 = 100%). */
+  interfaceScale: number
 }
 
 const DEFAULT_PREFERENCES: Preferences = {
@@ -39,7 +41,8 @@ const DEFAULT_PREFERENCES: Preferences = {
   },
   defaultPlaybackSpeed: 1.0,
   theme: 'magnolia',
-  paperSize: 'A4'
+  paperSize: 'A4',
+  interfaceScale: 1
 }
 
 interface PreferencesState extends Preferences {
@@ -49,6 +52,7 @@ interface PreferencesState extends Preferences {
   updateMapping: (key: keyof FootPedalMappings, value: string | number) => void
   setDefaultPlaybackSpeed: (speed: number) => void
   setTheme: (theme: ThemeId) => void
+  setInterfaceScale: (scale: number) => void
 }
 
 export const usePreferencesStore = create<PreferencesState>((set, get) => ({
@@ -64,6 +68,7 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
           defaultPlaybackSpeed: prefs.defaultPlaybackSpeed ?? DEFAULT_PREFERENCES.defaultPlaybackSpeed,
           theme: (prefs.theme ?? DEFAULT_PREFERENCES.theme) as ThemeId,
           paperSize: (prefs.paperSize ?? DEFAULT_PREFERENCES.paperSize) as PaperSize,
+          interfaceScale: typeof prefs.interfaceScale === 'number' ? prefs.interfaceScale : DEFAULT_PREFERENCES.interfaceScale,
           loaded: true
         })
       } else {
@@ -75,9 +80,9 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
   },
 
   save: async () => {
-    const { footPedalMappings, defaultPlaybackSpeed, theme, paperSize } = get()
+    const { footPedalMappings, defaultPlaybackSpeed, theme, paperSize, interfaceScale } = get()
     try {
-      await window.api.savePreferences({ footPedalMappings, defaultPlaybackSpeed, theme, paperSize })
+      await window.api.savePreferences({ footPedalMappings, defaultPlaybackSpeed, theme, paperSize, interfaceScale })
     } catch { /* ignore */ }
   },
 
@@ -96,6 +101,11 @@ export const usePreferencesStore = create<PreferencesState>((set, get) => ({
 
   setTheme: (theme) => {
     set({ theme })
+    setTimeout(() => get().save(), 0)
+  },
+
+  setInterfaceScale: (interfaceScale) => {
+    set({ interfaceScale })
     setTimeout(() => get().save(), 0)
   }
 }))
@@ -121,6 +131,7 @@ if (typeof window !== 'undefined' && window.api?.onPreferencesUpdate) {
       defaultPlaybackSpeed: prefs.defaultPlaybackSpeed ?? DEFAULT_PREFERENCES.defaultPlaybackSpeed,
       theme: (prefs.theme ?? DEFAULT_PREFERENCES.theme) as ThemeId,
       paperSize: (prefs.paperSize ?? DEFAULT_PREFERENCES.paperSize) as PaperSize,
+      interfaceScale: typeof prefs.interfaceScale === 'number' ? prefs.interfaceScale : DEFAULT_PREFERENCES.interfaceScale,
       loaded: true
     })
   })

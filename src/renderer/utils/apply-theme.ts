@@ -1,6 +1,6 @@
 /**
- * Apply the user's saved appearance settings (currently just theme) to
- * the current document. Called from each renderer entry point so
+ * Apply the user's saved appearance settings (theme + interface scale) to
+ * the current document/window. Called from each renderer entry point so
  * popped-out windows render in the right look on first paint, before
  * the main window's broadcast (if any) arrives.
  *
@@ -14,6 +14,7 @@
 export async function applyStoredAppearance(): Promise<void> {
   let theme = 'magnolia'
   let hadSavedTheme = false
+  let interfaceScale = 1
   try {
     const prefs = await window.api.loadPreferences()
     if (prefs && typeof prefs === 'object') {
@@ -21,9 +22,18 @@ export async function applyStoredAppearance(): Promise<void> {
         theme = (prefs as { theme: string }).theme
         hadSavedTheme = true
       }
+      if ('interfaceScale' in prefs && typeof (prefs as { interfaceScale: unknown }).interfaceScale === 'number') {
+        interfaceScale = (prefs as { interfaceScale: number }).interfaceScale
+      }
     }
   } catch {
     /* fall through to defaults */
+  }
+
+  try {
+    window.api.setZoomFactor(interfaceScale)
+  } catch {
+    /* zoom API unavailable — leave window at its default scale */
   }
 
   // First-launch OS preference hints — only consulted when nothing's
@@ -53,6 +63,9 @@ export const applyStoredTheme = applyStoredAppearance
 export function installAppearanceListeners(): void {
   window.api.onThemeChanged((theme) => {
     document.documentElement.setAttribute('data-theme', theme)
+  })
+  window.api.onZoomFactorChanged((factor) => {
+    window.api.setZoomFactor(factor)
   })
   // Lazy-imported to avoid pulling DOM-observer code into entries that
   // never paint a context menu. Once any entry runs the listeners

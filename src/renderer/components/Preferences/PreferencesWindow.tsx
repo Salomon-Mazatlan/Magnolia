@@ -30,6 +30,8 @@ interface Preferences {
   defaultPlaybackSpeed: number
   theme: ThemeId
   paperSize: PaperSize
+  /** Interface scale, applied as a native page zoom factor (1 = 100%). */
+  interfaceScale: number
 }
 
 const DEFAULT_PREFS: Preferences = {
@@ -46,12 +48,15 @@ const DEFAULT_PREFS: Preferences = {
   // on first paint). Existing pref files that already carry a saved
   // theme (including the legacy '' for Clean) override this.
   theme: 'magnolia',
-  paperSize: 'A4'
+  paperSize: 'A4',
+  interfaceScale: 1
 }
 
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
 const PAPER_SIZE_OPTIONS: PaperSize[] = ['A4', 'A3', 'A5', 'Letter', 'Legal', 'Tabloid']
+
+const INTERFACE_SCALE_OPTIONS = [1, 1.25, 1.5, 2]
 
 interface ThemeOption {
   id: ThemeId
@@ -172,7 +177,17 @@ function KeyCaptureInput({ value, onChange, label }: { value: string; onChange: 
   )
 }
 
-function AppearanceSettings({ value, onChange }: { value: ThemeId; onChange: (v: ThemeId) => void }) {
+function AppearanceSettings({
+  value,
+  onChange,
+  scale,
+  onScaleChange
+}: {
+  value: ThemeId
+  onChange: (v: ThemeId) => void
+  scale: number
+  onScaleChange: (v: number) => void
+}) {
   return (
     <div style={{ marginBottom: 24 }}>
       <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 14, color: 'var(--text-secondary)' }}>Theme</h3>
@@ -224,6 +239,21 @@ function AppearanceSettings({ value, onChange }: { value: ThemeId; onChange: (v:
           )
         })}
       </div>
+
+      <h3 style={{ fontSize: 13, fontWeight: 600, marginTop: 24, marginBottom: 10, color: 'var(--text-secondary)' }}>Interface Scale</h3>
+      <select
+        value={scale}
+        onChange={(e) => onScaleChange(parseFloat(e.target.value))}
+        style={{
+          padding: '4px 8px', fontSize: 12,
+          border: '1px solid var(--border-color)', borderRadius: 'var(--radius-sm)',
+          background: 'var(--bg-input)', color: 'var(--text-primary)', cursor: 'pointer'
+        }}
+      >
+        {INTERFACE_SCALE_OPTIONS.map((s) => (
+          <option key={s} value={s}>{Math.round(s * 100)}%</option>
+        ))}
+      </select>
     </div>
   )
 }
@@ -582,6 +612,7 @@ export function PreferencesWindow({ onClose }: PreferencesWindowProps = {}) {
           ...DEFAULT_PREFS,
           ...data,
           theme: (data.theme ?? DEFAULT_PREFS.theme) as ThemeId,
+          interfaceScale: typeof data.interfaceScale === 'number' ? data.interfaceScale : DEFAULT_PREFS.interfaceScale,
           footPedalMappings: { ...DEFAULT_PREFS.footPedalMappings, ...(data.footPedalMappings || {}) }
         })
       }
@@ -610,6 +641,14 @@ export function PreferencesWindow({ onClose }: PreferencesWindowProps = {}) {
     // Apply locally and broadcast so every other open window updates too.
     document.documentElement.setAttribute('data-theme', theme)
     window.api.broadcastTheme(theme)
+  }, [prefs, save])
+
+  const setInterfaceScale = useCallback((interfaceScale: number) => {
+    const updated = { ...prefs, interfaceScale }
+    save(updated)
+    // Apply locally and broadcast so every other open window rezooms too.
+    window.api.setZoomFactor(interfaceScale)
+    window.api.broadcastZoomFactor(interfaceScale)
   }, [prefs, save])
 
   if (!loaded) return <div style={{ padding: 20, color: 'var(--text-muted)' }}>Loading...</div>
@@ -684,7 +723,12 @@ export function PreferencesWindow({ onClose }: PreferencesWindowProps = {}) {
         {/* Selected category's settings */}
         <div style={{ flex: 1, padding: '14px 20px', overflow: 'auto' }}>
           {selected.id === 'appearance' && (
-            <AppearanceSettings value={prefs.theme} onChange={setTheme} />
+            <AppearanceSettings
+              value={prefs.theme}
+              onChange={setTheme}
+              scale={prefs.interfaceScale}
+              onScaleChange={setInterfaceScale}
+            />
           )}
           {selected.id === 'media-playback' && (
             <MediaPlaybackSettings prefs={prefs} updateMapping={updateMapping} save={save} />

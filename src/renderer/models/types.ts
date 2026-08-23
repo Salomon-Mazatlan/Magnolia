@@ -545,6 +545,9 @@ export interface ElectronAPI {
   onMenuAction: (callback: (action: string) => void) => () => void
   broadcastTheme: (theme: string) => void
   onThemeChanged: (callback: (theme: string) => void) => () => void
+  setZoomFactor: (factor: number) => void
+  broadcastZoomFactor: (factor: number) => void
+  onZoomFactorChanged: (callback: (factor: number) => void) => () => void
   // Codebook window
   openCodebookWindow: (data: CodebookInitData) => void
   getCodebookData: () => Promise<CodebookInitData>
