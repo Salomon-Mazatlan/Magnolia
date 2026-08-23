@@ -646,6 +646,18 @@ export function DocumentViewer() {
               >
                 Apply Code
               </div>
+              <div
+                style={{
+                  padding: '0 14px 6px',
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                  lineHeight: 1.4,
+                  maxWidth: 220,
+                  userSelect: 'none'
+                }}
+              >
+                To apply any code, select content and drag the code from the Code Browser to the selection.
+              </div>
               {hotkeyCodes.map(({ code }) => (
                 <div
                   key={code.guid}

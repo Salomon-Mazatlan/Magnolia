@@ -878,6 +878,9 @@ export function PdfDocumentViewer({ source, content }: Props) {
           {contextMenu.context.pendingSelection && (
             <>
               <div style={{ padding: '4px 14px', fontSize: 11, color: 'var(--text-muted)', fontWeight: 600, userSelect: 'none' }}>Apply Code</div>
+              <div style={{ padding: '0 14px 6px', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4, maxWidth: 220, userSelect: 'none' }}>
+                To apply any code, select content and drag the code from the Code Browser to the selection.
+              </div>
               {hotkeyCodes.map(({ code }) => (
                 <div key={code.guid} className="context-menu-item" onClick={() => handleApplyCode(code.guid)}>
                   <span className="color-pip" style={{ background: code.color || '#888' }} />

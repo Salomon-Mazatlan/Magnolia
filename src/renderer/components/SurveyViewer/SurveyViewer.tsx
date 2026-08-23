@@ -2857,6 +2857,9 @@ export function SurveyViewer({ source }: Props) {
           {showApply && (
             <>
               <div style={menuSectionLabelStyle}>Apply Code</div>
+              <div style={menuHintStyle}>
+                To apply any code, select content and drag the code from the Code Browser to the selection.
+              </div>
               {hotkeyCodes.map(({ code }) => (
                 <div
                   key={code.guid}
@@ -3008,5 +3011,14 @@ const menuSectionLabelStyle: React.CSSProperties = {
   fontSize: 11,
   color: 'var(--text-muted)',
   fontWeight: 600,
+  userSelect: 'none'
+}
+
+const menuHintStyle: React.CSSProperties = {
+  padding: '0 14px 6px',
+  fontSize: 11,
+  color: 'var(--text-muted)',
+  lineHeight: 1.4,
+  maxWidth: 220,
   userSelect: 'none'
 }
