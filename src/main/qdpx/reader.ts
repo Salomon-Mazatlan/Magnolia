@@ -10,6 +10,7 @@ import type { Project, PlainTextSelection, Memo } from '../../renderer/models/ty
 import { extractPdfTextWithPositions } from '../pdf-extract'
 import { archiveHandle, archiveHandleForFile } from '../binary-store'
 import { decodeMaybeWindows1252 } from './text-encoding'
+import { detectSourcesDir } from './zip-sources-dir'
 
 /**
  * Read a text file from the archive, tolerating non-UTF-8 transcripts.
@@ -211,6 +212,11 @@ export async function readQdpx(
   onProgress?.('Unpacking archive', 0, 0)
   const zip = await JSZip.loadAsync(buffer)
 
+  // NVivo exports this folder as "Sources" rather than Magnolia's
+  // lowercase "sources" — resolve the real casing once so every
+  // `${sourcesDir}/...` lookup below finds NVivo's files too.
+  const sourcesDir = detectSourcesDir(zip)
+
   // Find the .qde XML at the root of the zip. Magnolia's writer used
   // to hardcode "project.qde", but the REFI-QDA spec doesn't pin the
   // filename — Atlas.ti and others name it after the project (e.g.
@@ -286,7 +292,7 @@ export async function readQdpx(
       const match = (source.plainTextPath || '').match(/internal:\/\/(.+)/)
       if (match) {
         const internalName = match[1]
-        if (zip.file(`sources/${internalName}`)) {
+        if (zip.file(`${sourcesDir}/${internalName}`)) {
           const ext = (internalName.split('.').pop() || 'm4a').toLowerCase()
           // A <VideoSource> reclassified as audio still carries its
           // time-range codings on _rawVideoSelections — convert them so they
@@ -305,7 +311,7 @@ export async function readQdpx(
         }
       }
       delete (source as any)._rawVideoSelections
-      const transcriptFile = zip.file(`sources/${source.guid}.txt`)
+      const transcriptFile = zip.file(`${sourcesDir}/${source.guid}.txt`)
       sourceContents[source.guid] = transcriptFile
         ? await readZipText(transcriptFile)
         : ''
@@ -323,7 +329,7 @@ export async function readQdpx(
     if ((source as any).sourceType === 'pdf' && source.plainTextPath) {
       const match = source.plainTextPath.match(/internal:\/\/(.+)/)
       if (match) {
-        const pdfFile = zip.file(`sources/${match[1]}`)
+        const pdfFile = zip.file(`${sourcesDir}/${match[1]}`)
         if (pdfFile) {
           // Bytes are read only to extract searchable text + positions; the
           // viewer fetches the PDF itself through the magnolia-bin:// handle
@@ -393,7 +399,7 @@ export async function readQdpx(
       const match = source.plainTextPath.match(/internal:\/\/(.+)/)
       if (match) {
         const internalName = match[1]
-        const vidFile = zip.file(`sources/${internalName}`)
+        const vidFile = zip.file(`${sourcesDir}/${internalName}`)
         if (vidFile) {
           const ext = (internalName.split('.').pop() || 'mp4').toLowerCase()
 
@@ -417,7 +423,7 @@ export async function readQdpx(
       // binary as sources/${guid}.txt — without this load, every save/open
       // cycle would erase whatever the user typed in the transcript.
       if (sourceContents[source.guid] === undefined) {
-        const transcriptFile = zip.file(`sources/${source.guid}.txt`)
+        const transcriptFile = zip.file(`${sourcesDir}/${source.guid}.txt`)
         if (transcriptFile) {
           sourceContents[source.guid] = await readZipText(transcriptFile)
         } else {
@@ -437,7 +443,7 @@ export async function readQdpx(
       const match = source.plainTextPath.match(/internal:\/\/(.+)/)
       if (match) {
         const internalName = match[1]
-        const imgFile = zip.file(`sources/${internalName}`)
+        const imgFile = zip.file(`${sourcesDir}/${internalName}`)
         if (imgFile) {
           const ext = (internalName.split('.').pop() || 'png').toLowerCase()
 
@@ -467,7 +473,7 @@ export async function readQdpx(
       const match = source.plainTextPath.match(/internal:\/\/(.+)/)
       if (match) {
         const filename = match[1]
-        const file = zip.file(`sources/${filename}`)
+        const file = zip.file(`${sourcesDir}/${filename}`)
         if (file) {
           sourceContents[source.guid] = await readZipText(file)
         }
@@ -557,7 +563,7 @@ export async function readQdpx(
       let content = ''
       const match = (n.plainTextPath || '').match(/internal:\/\/(.+)/)
       if (match) {
-        const noteFile = zip.file(`sources/${match[1]}`)
+        const noteFile = zip.file(`${sourcesDir}/${match[1]}`)
         if (noteFile) content = await readZipText(noteFile)
       }
       const base: Memo = {
@@ -769,7 +775,7 @@ export async function readQdpx(
             // — no temp file is written. We only confirm the bytes are
             // present in the archive before advertising the handle.
             if (meta.formatData.hasPdfBinary) {
-              const pdfFile = zip.file(`sources/${meta.guid}.pdf`)
+              const pdfFile = zip.file(`${sourcesDir}/${meta.guid}.pdf`)
               if (pdfFile) {
                 ;(source as any).formatData = {
                   pdfFilePath: archiveHandle(meta.guid, 'pdf'),
@@ -782,10 +788,10 @@ export async function readQdpx(
               // "audio" extension — try the recorded ext first and fall
               // back to ".audio" for those projects.
               const audioExt = (meta.formatData.audioExt as string | undefined) || 'audio'
-              let audioFile = zip.file(`sources/${meta.guid}.${audioExt}`)
+              let audioFile = zip.file(`${sourcesDir}/${meta.guid}.${audioExt}`)
               let resolvedExt = audioExt
               if (!audioFile && audioExt !== 'audio') {
-                audioFile = zip.file(`sources/${meta.guid}.audio`)
+                audioFile = zip.file(`${sourcesDir}/${meta.guid}.audio`)
                 resolvedExt = 'audio'
               }
               if (audioFile) {
@@ -801,7 +807,7 @@ export async function readQdpx(
               }
             } else if (meta.formatData.hasVideoBinary) {
               const ext = meta.formatData.videoExt || 'mp4'
-              const vidFile = zip.file(`sources/${meta.guid}.${ext}`)
+              const vidFile = zip.file(`${sourcesDir}/${meta.guid}.${ext}`)
               const existing = (source as any).formatData || {}
               if (vidFile) {
                 ;(source as any).formatData = {
@@ -825,7 +831,7 @@ export async function readQdpx(
               }
             } else if (meta.formatData.hasImageBinary) {
               const ext = meta.formatData.imageExt || 'png'
-              const imgFile = zip.file(`sources/${meta.guid}.${ext}`)
+              const imgFile = zip.file(`${sourcesDir}/${meta.guid}.${ext}`)
               if (imgFile) {
                 ;(source as any).formatData = {
                   imageFilePath: archiveHandle(meta.guid, ext),
@@ -860,7 +866,7 @@ export async function readQdpx(
     if (!sourceContents[source.guid]) {
       const m = (transcript.plainTextPath || '').match(/internal:\/\/(.+)/)
       if (m && m[1] !== `${source.guid}.txt`) {
-        const f = zip.file(`sources/${m[1]}`)
+        const f = zip.file(`${sourcesDir}/${m[1]}`)
         if (f) sourceContents[source.guid] = await readZipText(f)
       }
     }
@@ -1031,7 +1037,7 @@ export async function readQdpx(
   }
 
   // Detect documents whose binary content is missing from the archive.
-  // A pdf/image/audio/video source should have a non-text `sources/<guid>.*`
+  // A pdf/image/audio/video source should have a non-text `${sourcesDir}/<guid>.*`
   // entry; if none exists, the bytes were never saved (or an older Magnolia
   // dropped them), so the viewer would be blank. We surface these so the
   // renderer can prompt the user to re-import — the only way to recover
@@ -1047,8 +1053,8 @@ export async function readQdpx(
       // the filename differs from the guid) OR any non-text `<guid>.*`
       // entry (Magnolia's own naming).
       const ref = binaryRefByGuid.get(s.guid)
-      if (ref && isFile(`sources/${ref}`)) return false
-      const prefix = `sources/${s.guid}.`
+      if (ref && isFile(`${sourcesDir}/${ref}`)) return false
+      const prefix = `${sourcesDir}/${s.guid}.`
       const hasGuidNamed = zipNames.some(
         (n) => n.startsWith(prefix) && !zip.files[n].dir && !n.toLowerCase().endsWith('.txt')
       )
