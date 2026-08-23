@@ -6,6 +6,7 @@ import { MarkdownEditor } from '../MarkdownEditor'
 import { Icon, faChevronDown, faChevronRight, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faPlus } from '../Icon'
 import type { Code } from '../../models/types'
 import { useClampedMenuPosition } from '../../utils/use-clamped-menu-position'
+import { isMac, modKey } from '../../utils/platform'
 
 interface Props {
   onNewCode: () => void
@@ -416,8 +417,8 @@ function CodeTreeItem({
                 Merge
               </span>
             )}
-            <span style={{ width: 24, minWidth: 24, flexShrink: 0, fontSize: 10, color: 'var(--text-muted)', textAlign: 'right' }}>
-              {code.hotkey !== undefined ? `\u2318${code.hotkey}` : ''}
+            <span style={{ width: isMac ? 24 : 40, minWidth: isMac ? 24 : 40, flexShrink: 0, fontSize: 10, color: 'var(--text-muted)', textAlign: 'right' }}>
+              {code.hotkey !== undefined ? modKey(code.hotkey) : ''}
             </span>
             <span style={{ width: 28, minWidth: 28, flexShrink: 0, fontSize: 10, color: 'var(--text-muted)', textAlign: 'right' }}>
               {count > 0 ? count : ''}
@@ -714,7 +715,7 @@ export function CodeEditDialog({
         {/* Hotkey */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <label style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-            {'\u2318'}
+            {modKey('')}
           </label>
           <input
             type="text"

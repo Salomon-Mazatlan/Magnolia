@@ -17,6 +17,7 @@ import type { Code, Memo, MemoEditInitData, TextSource, PdfRegionSelection } fro
 import 'pdfjs-dist/web/pdf_viewer.css'
 import { usePendingSelectionStore } from '../../stores/pending-selection-store'
 import { useNewCodeTriggerStore } from '../../stores/new-code-trigger-store'
+import { modKey } from '../../utils/platform'
 
 function flattenCodes(codes: Code[], depth = 0): { code: Code; depth: number }[] {
   const result: { code: Code; depth: number }[] = []
@@ -885,7 +886,7 @@ export function PdfDocumentViewer({ source, content }: Props) {
                 <div key={code.guid} className="context-menu-item" onClick={() => handleApplyCode(code.guid)}>
                   <span className="color-pip" style={{ background: code.color || '#888' }} />
                   <span style={{ flex: 1 }}>{code.name}</span>
-                  <span style={{ fontSize: 10, color: 'var(--menu-fg-muted)', marginLeft: 12 }}>{'\u2318'}{code.hotkey}</span>
+                  <span style={{ fontSize: 10, color: 'var(--menu-fg-muted)', marginLeft: 12 }}>{modKey(code.hotkey)}</span>
                 </div>
               ))}
               {hotkeyCodes.length === 0 && (

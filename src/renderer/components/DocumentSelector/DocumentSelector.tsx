@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { Icon, faXmark } from '../Icon'
 import { PaletteGroup, PaletteDivider, PaletteButton } from '../NodePalette'
+import { modKey } from '../../utils/platform'
 import {
   resolveDocGraph,
   type DocGraphData,
@@ -1898,7 +1899,7 @@ export function DocumentSelector({
       {/* ── Status bar ── */}
       <div style={{ marginTop: 6, fontSize: 10, color: 'var(--text-muted)' }}>
         {selNodes.size > 1
-          ? `${selNodes.size} selected — ⌘C copy · ⌘V paste · Delete to remove`
+          ? `${selNodes.size} selected — ${modKey('C')} copy · ${modKey('V')} paste · Delete to remove`
           : 'Drag documents & tags onto canvas · Connect nodes to Result'}
       </div>
     </div>

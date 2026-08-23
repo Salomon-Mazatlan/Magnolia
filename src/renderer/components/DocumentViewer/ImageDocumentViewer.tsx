@@ -24,6 +24,7 @@ import type { CodingRightClickContext } from './CodedTextView'
 import type { Code, Memo, MemoEditInitData, TextSource, PdfRegionSelection } from '../../models/types'
 import { usePendingSelectionStore } from '../../stores/pending-selection-store'
 import { useNewCodeTriggerStore } from '../../stores/new-code-trigger-store'
+import { modKey } from '../../utils/platform'
 
 // Horizontal space the right-hand RichMarginColumn + its 8-px gap actually
 // occupy in the flex row. The margin column has flex-basis 260 plus an 8-px
@@ -649,7 +650,7 @@ export function ImageDocumentViewer({ source }: Props) {
                 <div key={code.guid} className="context-menu-item" onClick={() => handleApplyCode(code.guid)}>
                   <span className="color-pip" style={{ background: code.color || '#888' }} />
                   <span style={{ flex: 1 }}>{code.name}</span>
-                  <span style={{ fontSize: 10, color: 'var(--menu-fg-muted)', marginLeft: 12 }}>{'\u2318'}{code.hotkey}</span>
+                  <span style={{ fontSize: 10, color: 'var(--menu-fg-muted)', marginLeft: 12 }}>{modKey(code.hotkey)}</span>
                 </div>
               ))}
               {hotkeyCodes.length === 0 && (

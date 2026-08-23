@@ -32,6 +32,7 @@ import { Icon, MEMO_RANGED_ICON, MEMO_POINT_ICON, QUOTE_ICON } from '../Icon'
 import type { Code, Memo, MemoEditInitData, PlainTextSelection } from '../../models/types'
 import { usePendingSelectionStore } from '../../stores/pending-selection-store'
 import { useNewCodeTriggerStore } from '../../stores/new-code-trigger-store'
+import { modKey } from '../../utils/platform'
 
 interface LabelContextMenu {
   x: number
@@ -1468,7 +1469,7 @@ export function VideoTranscriptView({
                     <span className="color-pip" style={{ background: code.color || '#888' }} />
                     <span style={{ flex: 1 }}>{code.name}</span>
                     <span style={{ fontSize: 10, color: 'var(--text-muted)', marginLeft: 12 }}>
-                      {'\u2318'}{code.hotkey}
+                      {modKey(code.hotkey)}
                     </span>
                   </div>
                 ))}

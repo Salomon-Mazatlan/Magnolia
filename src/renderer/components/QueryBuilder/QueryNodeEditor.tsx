@@ -3,6 +3,7 @@ import type { CodeCondition } from '../../models/types'
 import { validateCondition } from '../../utils/query-engine'
 import { Icon, faExclamationTriangle, faCircle, faXmark } from '../Icon'
 import { PaletteGroup, PaletteDivider, PaletteButton } from '../NodePalette'
+import { modKey, altClickHint } from '../../utils/platform'
 
 /* ═══════════════════════════════════════════════════
    Types
@@ -1933,8 +1934,8 @@ export function QueryNodeEditor({ onChange, onGraphChange, initialCondition, ini
       >
         <span>
           {selNodes.size > 1
-            ? `${selNodes.size} selected — ⌘C copy · ⌘V paste · Delete to remove`
-            : 'Drag codes & operators onto canvas · Drag to select · ⌥-click to multi-select'}
+            ? `${selNodes.size} selected — ${modKey('C')} copy · ${modKey('V')} paste · Delete to remove`
+            : `Drag codes & operators onto canvas · Drag to select · ${altClickHint} to multi-select`}
         </span>
         <span
           style={{

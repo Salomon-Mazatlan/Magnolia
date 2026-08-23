@@ -5,6 +5,7 @@ import { Markdown, markdownToHtml } from '../Markdown'
 import { MarkdownEditor } from '../MarkdownEditor'
 import type { Code } from '../../models/types'
 import { exportPdfWithHeader, buildPdfDocument, escHtml } from '../../utils/pdf-export'
+import { modKey } from '../../utils/platform'
 
 interface Props {
   onClose: () => void
@@ -202,7 +203,7 @@ function EditCodeDialog({
         {/* Hotkey */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <label style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-            {'\u2318'}
+            {modKey('')}
           </label>
           <input
             type="text"

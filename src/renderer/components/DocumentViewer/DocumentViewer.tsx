@@ -19,6 +19,7 @@ import { PreferencesWindow } from '../Preferences/PreferencesWindow'
 import { useAnalysisTabsStore } from '../../stores/analysis-tabs-store'
 import { usePendingSelectionStore } from '../../stores/pending-selection-store'
 import { useNewCodeTriggerStore } from '../../stores/new-code-trigger-store'
+import { modKey } from '../../utils/platform'
 
 /** Single dispatch point for "what to render for a tool tab id". Lives
  *  here (not in tab-ids) so JSX-bearing modules don't pull tab-ids into
@@ -670,7 +671,7 @@ export function DocumentViewer() {
                   />
                   <span style={{ flex: 1 }}>{code.name}</span>
                   <span style={{ fontSize: 10, color: 'var(--menu-fg-muted)', marginLeft: 12 }}>
-                    {'\u2318'}{code.hotkey}
+                    {modKey(code.hotkey)}
                   </span>
                 </div>
               ))}

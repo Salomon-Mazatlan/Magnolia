@@ -74,6 +74,7 @@ import { Icon, faCheck } from '../Icon'
 import { MemoFab } from '../Memos/MemoFab'
 import { cleanCellText, buildCellText } from '../../utils/survey/cell-text'
 import { exportPdfWithHeader, buildPdfDocument, escHtml } from '../../utils/pdf-export'
+import { modKey } from '../../utils/platform'
 
 interface Props {
   source: TextSource
@@ -2869,7 +2870,7 @@ export function SurveyViewer({ source }: Props) {
                   <span className="color-pip" style={{ background: code.color || '#888' }} />
                   <span style={{ flex: 1 }}>{code.name}</span>
                   <span style={{ fontSize: 10, color: 'var(--menu-fg-muted)', marginLeft: 12 }}>
-                    {'⌘'}{code.hotkey}
+                    {modKey(code.hotkey)}
                   </span>
                 </div>
               ))}

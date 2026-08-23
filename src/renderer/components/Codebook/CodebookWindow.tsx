@@ -4,6 +4,7 @@ import { MarkdownEditor } from '../MarkdownEditor'
 import { Icon, MEMO_ICON } from '../Icon'
 import type { Code, CodebookInitData } from '../../models/types'
 import { exportPdfWithHeader, buildPdfDocument, escHtml } from '../../utils/pdf-export'
+import { modKey } from '../../utils/platform'
 
 const PRESET_COLORS = [
   '#e05050', '#e08050', '#e0c050', '#50c050', '#50c0c0',
@@ -196,7 +197,7 @@ function EditCodeDialog({
         {/* Hotkey */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
           <label style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-            {'\u2318'}
+            {modKey('')}
           </label>
           <input
             type="text"
