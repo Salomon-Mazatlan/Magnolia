@@ -1,7 +1,7 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useQuoteStore } from '../../stores/quote-store'
 import { useDocumentStore } from '../../stores/document-store'
-import { Icon, QUOTE_ICON, faChevronDown, faChevronRight, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter } from '../Icon'
+import { Icon, QUOTE_ICON, faChevronDown, faChevronRight, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faMagnifyingGlass } from '../Icon'
 import { stripFormatting } from '../../utils/strip-formatting'
 import { sourceTypeFromFilename } from '../../utils/format-registry'
 import { PdfRegionThumbnail } from '../DocumentViewer/PdfRegionThumbnail'
@@ -24,6 +24,12 @@ export function QuotesPane({ onClose, onPopOut, isPoppedOut }: Props) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; guid: string } | null>(null)
   const menuPos = useClampedMenuPosition(contextMenu)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+  }, [])
 
   // Group quotes by source document
   const groups = useMemo(() => {
@@ -38,6 +44,33 @@ export function QuotesPane({ onClose, onPopOut, isPoppedOut }: Props) {
     }
     return Array.from(map.values())
   }, [quotes])
+
+  const trimmedSearch = searchQuery.trim()
+
+  /** Filter groups by a search query, matching anywhere in the quote's
+   *  text or its source document's name. A group whose own document name
+   *  matches keeps every quote (the name match is the "find"); otherwise
+   *  only the individual matching quotes survive, and the group header
+   *  renders dimmed since it's shown purely for context. */
+  const filteredGroups = useMemo(() => {
+    if (!trimmedSearch) return groups
+    const q = trimmedSearch.toLowerCase()
+    const result: { sourceName: string; sourceGuid: string; quotes: typeof quotes; nameMatch: boolean }[] = []
+    for (const group of groups) {
+      const nameMatch = group.sourceName.toLowerCase().includes(q)
+      const matchingQuotes = nameMatch
+        ? group.quotes
+        : group.quotes.filter((quote) => {
+            const src = sources.find((s) => s.guid === quote.sourceGuid)
+            const st = src?.sourceType || sourceTypeFromFilename(quote.sourceName)
+            return stripFormatting(quote.text, st).toLowerCase().includes(q)
+          })
+      if (matchingQuotes.length > 0) {
+        result.push({ ...group, quotes: matchingQuotes, nameMatch })
+      }
+    }
+    return result
+  }, [groups, trimmedSearch, sources])
 
   /** Copy a quote to the clipboard. Text quotes get their stripped /
    *  unwrapped body (no surrounding quote marks, no format markers) as
@@ -110,7 +143,43 @@ export function QuotesPane({ onClose, onPopOut, isPoppedOut }: Props) {
   return (
     <div className="panel">
       <div className="panel-header">
-        <span style={{ flex: 1 }}>Quotes</span>
+        {searchOpen ? (
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') closeSearch() }}
+            placeholder="Filter quotes..."
+            aria-label="Filter quotes"
+            autoFocus
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '2px 6px',
+              fontSize: 12,
+              fontWeight: 400,
+              letterSpacing: 'normal',
+              textTransform: 'none',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+              outline: 'none',
+              background: 'var(--bg-input)',
+              color: 'var(--text-primary)'
+            }}
+          />
+        ) : (
+          <span style={{ flex: 1 }}>Quotes</span>
+        )}
+        {quotes.length > 0 && (
+          <button
+            className="panel-header-search"
+            onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+            title={searchOpen ? 'Close search' : 'Filter quotes'}
+            aria-label={searchOpen ? 'Close search' : 'Filter quotes'}
+          >
+            <Icon icon={searchOpen ? faXmark : faMagnifyingGlass} />
+          </button>
+        )}
         {onPopOut && <button className="panel-header-popout" onClick={onPopOut} title={isPoppedOut ? "Pop back in" : "Pop out"} aria-label={isPoppedOut ? "Pop pane back into main window" : "Pop pane out into its own window"}><Icon icon={isPoppedOut ? faDownLeftAndUpRightToCenter : faUpRightFromSquare} /></button>}
         {onClose && <button className="panel-header-close" onClick={onClose} title="Close panel" aria-label="Close panel"><Icon icon={faXmark} /></button>}
       </div>
@@ -122,8 +191,14 @@ export function QuotesPane({ onClose, onPopOut, isPoppedOut }: Props) {
             Right-click a selection in a document and choose "Add as Quote".
           </div>
         )}
-        {groups.map((group) => {
-          const isCollapsed = collapsedGroups.has(group.sourceGuid)
+        {quotes.length > 0 && filteredGroups.length === 0 && (
+          <div className="empty-state" style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
+            No quotes match "{trimmedSearch}".
+          </div>
+        )}
+        {filteredGroups.map((group) => {
+          const isCollapsed = !trimmedSearch && collapsedGroups.has(group.sourceGuid)
+          const dimmed = !!trimmedSearch && !group.nameMatch
           return (
             <div key={group.sourceGuid}>
               {/* Document group header — styled like the parent-category
@@ -140,7 +215,8 @@ export function QuotesPane({ onClose, onPopOut, isPoppedOut }: Props) {
                   fontWeight: 600,
                   color: 'var(--text-secondary)',
                   cursor: 'pointer',
-                  userSelect: 'none'
+                  userSelect: 'none',
+                  opacity: dimmed ? 0.45 : 1
                 }}
               >
                 <span style={{ fontSize: 10, width: 12, textAlign: 'center', opacity: 0.6 }}>

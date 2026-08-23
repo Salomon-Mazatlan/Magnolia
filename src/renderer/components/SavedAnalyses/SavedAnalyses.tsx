@@ -1,9 +1,9 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useProjectStore } from '../../stores/project-store'
 import { useDocumentStore } from '../../stores/document-store'
 import { useRelationshipMapStore } from '../../stores/relationship-map-store'
 import { useMemoStore } from '../../stores/memo-store'
-import { Icon, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faChevronDown, faChevronRight, MEMO_ICON } from '../Icon'
+import { Icon, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faChevronDown, faChevronRight, MEMO_ICON, faMagnifyingGlass } from '../Icon'
 import type { AnalysisToolType, SavedAnalysis } from '../../models/types'
 import { TOOL_REGISTRY } from '../../utils/tool-registry'
 import { toolColors } from '../../utils/tool-colors'
@@ -59,6 +59,12 @@ export function SavedAnalyses({ onOpen, onClose, onPopOut, isPoppedOut, findMemo
   const [editName, setEditName] = useState('')
   // Per-tool collapse state. Tools not in the set are expanded.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+  }, [])
 
   // Multi-select state. anchorGuidRef anchors shift-click range selection.
   const [selectedGuids, setSelectedGuids] = useState<Set<string>>(new Set())
@@ -92,13 +98,29 @@ export function SavedAnalyses({ onOpen, onClose, onPopOut, isPoppedOut, findMemo
     })
   }, [savedAnalyses])
 
+  const trimmedSearch = searchQuery.trim()
+
+  /** Filter groups by analysis name, matching anywhere (not just the
+   *  start). Tool-type section labels ("Code Frequencies" etc.) are
+   *  fixed registry text, not user data, so only items are matched —
+   *  a section just disappears once none of its items match. */
+  const filteredGroups = useMemo(() => {
+    if (!trimmedSearch) return groups
+    const q = trimmedSearch.toLowerCase()
+    return groups
+      .map((g) => ({ ...g, items: g.items.filter((i) => i.name.toLowerCase().includes(q)) }))
+      .filter((g) => g.items.length > 0)
+  }, [groups, trimmedSearch])
+
   // Flat guid list in the visual order so shift-click range selection
   // still works across groups. Includes items from collapsed sections —
   // a range selection that crosses a collapsed section grabs them too,
-  // matching how most file-tree pickers behave.
+  // matching how most file-tree pickers behave. Derived from the
+  // filtered groups so a search doesn't let range-select or bulk actions
+  // reach analyses the user can't currently see.
   const orderedGuids = useMemo(
-    () => groups.flatMap((g) => g.items.map((i) => i.guid)),
-    [groups]
+    () => filteredGroups.flatMap((g) => g.items.map((i) => i.guid)),
+    [filteredGroups]
   )
 
   // Esc clears selection and any open menus.
@@ -204,7 +226,43 @@ export function SavedAnalyses({ onOpen, onClose, onPopOut, isPoppedOut, findMemo
   return (
     <div className="panel">
       <div className="panel-header">
-        <span style={{ flex: 1 }}>Analyses</span>
+        {searchOpen ? (
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') closeSearch() }}
+            placeholder="Filter analyses..."
+            aria-label="Filter analyses"
+            autoFocus
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '2px 6px',
+              fontSize: 12,
+              fontWeight: 400,
+              letterSpacing: 'normal',
+              textTransform: 'none',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+              outline: 'none',
+              background: 'var(--bg-input)',
+              color: 'var(--text-primary)'
+            }}
+          />
+        ) : (
+          <span style={{ flex: 1 }}>Analyses</span>
+        )}
+        {savedAnalyses.length > 0 && (
+          <button
+            className="panel-header-search"
+            onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+            title={searchOpen ? 'Close search' : 'Filter analyses'}
+            aria-label={searchOpen ? 'Close search' : 'Filter analyses'}
+          >
+            <Icon icon={searchOpen ? faXmark : faMagnifyingGlass} />
+          </button>
+        )}
         {onPopOut && <button className="panel-header-popout" onClick={onPopOut} title={isPoppedOut ? "Pop back in" : "Pop out"} aria-label={isPoppedOut ? "Pop pane back into main window" : "Pop pane out into its own window"}><Icon icon={isPoppedOut ? faDownLeftAndUpRightToCenter : faUpRightFromSquare} /></button>}
         {onClose && <button className="panel-header-close" onClick={onClose} title="Close panel" aria-label="Close panel"><Icon icon={faXmark} /></button>}
       </div>
@@ -216,8 +274,13 @@ export function SavedAnalyses({ onOpen, onClose, onPopOut, isPoppedOut, findMemo
             Open an analysis tool and click Save Analysis.
           </div>
         )}
-        {groups.map((group, idx) => {
-          const isCollapsed = collapsed.has(group.toolType)
+        {savedAnalyses.length > 0 && filteredGroups.length === 0 && (
+          <div className="empty-state" style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
+            No analyses match "{trimmedSearch}".
+          </div>
+        )}
+        {filteredGroups.map((group, idx) => {
+          const isCollapsed = !trimmedSearch && collapsed.has(group.toolType)
           const isFirst = idx === 0
           return (
             <div key={group.toolType}>

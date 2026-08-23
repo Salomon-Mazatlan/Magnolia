@@ -3,7 +3,7 @@ import { useCodeStore } from '../../stores/code-store'
 import { useDocumentStore } from '../../stores/document-store'
 import { useQueryStore } from '../../stores/query-store'
 import { MarkdownEditor } from '../MarkdownEditor'
-import { Icon, faChevronDown, faChevronRight, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faPlus } from '../Icon'
+import { Icon, faChevronDown, faChevronRight, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faPlus, faMagnifyingGlass } from '../Icon'
 import type { Code } from '../../models/types'
 import { useClampedMenuPosition } from '../../utils/use-clamped-menu-position'
 import { isMac, modKey } from '../../utils/platform'
@@ -21,6 +21,28 @@ function flattenCodeGuids(codes: Code[]): string[] {
   for (const c of codes) {
     result.push(c.guid)
     result.push(...flattenCodeGuids(c.children))
+  }
+  return result
+}
+
+/** Filter a code tree by a search query, matching anywhere in the name
+ *  (not just the start). A code is kept if its own name matches, or if
+ *  any descendant matches (so the match's ancestor chain stays visible
+ *  for tree context — CodeTreeItem dims the non-matching ancestors).
+ *  `alwaysIncludeGuid` bypasses the match check for one code (and keeps
+ *  its ancestors visible via the descendant-match rule) — used for a
+ *  just-created code mid-rename, so it doesn't vanish under an active
+ *  filter it doesn't yet match. */
+function filterCodeTree(codes: Code[], query: string, alwaysIncludeGuid: string | null): Code[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return codes
+  const result: Code[] = []
+  for (const code of codes) {
+    const filteredChildren = filterCodeTree(code.children, query, alwaysIncludeGuid)
+    const matchesSelf = code.guid === alwaysIncludeGuid || code.name.toLowerCase().includes(q)
+    if (matchesSelf || filteredChildren.length > 0) {
+      result.push({ ...code, children: filteredChildren })
+    }
   }
   return result
 }
@@ -70,7 +92,8 @@ function CodeTreeItem({
   onQueryAllDocs,
   onQueryActiveDoc,
   editingGuid,
-  onStopEditing
+  onStopEditing,
+  searchQuery
 }: {
   code: Code
   depth: number
@@ -90,6 +113,11 @@ function CodeTreeItem({
   onQueryActiveDoc: (codeGuid: string) => void
   editingGuid: string | null
   onStopEditing: () => void
+  /** Active search filter (trimmed, empty when no search is running). When
+   *  set, codes shown only for tree context (an ancestor of a match, but
+   *  not itself matching) render dimmed, and every node force-expands so
+   *  matches nested under a manually-collapsed parent stay visible. */
+  searchQuery: string
 }) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
   const menuPos = useClampedMenuPosition(contextMenu)
@@ -99,6 +127,9 @@ function CodeTreeItem({
   const [editName, setEditName] = useState(code.name)
   const [showColorPicker, setShowColorPicker] = useState(false)
   const [expanded, setExpanded] = useState(true)
+  const searchActive = searchQuery.length > 0
+  const isSearchMatch = !searchActive || isEditingFromParent || code.name.toLowerCase().includes(searchQuery.toLowerCase())
+  const effectiveExpanded = expanded || searchActive
   const [isDragOver, setIsDragOver] = useState(false)
   const [dropPosition, setDropPosition] = useState<'before' | 'child' | 'after'>('child')
   const [showMergeDroplet, setShowMergeDroplet] = useState(false)
@@ -278,6 +309,7 @@ function CodeTreeItem({
               : 'transparent',
           fontSize: 'var(--font-size-sm)',
           outline: isDragOver && dropPosition === 'child' ? '1px dashed var(--accent-hover)' : 'none',
+          opacity: isSearchMatch ? 1 : 0.45,
           transition: 'background 0.1s'
         }}
         onClick={(e) => onToggleSelect(code.guid, e)}
@@ -334,7 +366,7 @@ function CodeTreeItem({
           }}
         >
           {code.children.length > 0 && (
-            <Icon icon={expanded ? faChevronDown : faChevronRight} />
+            <Icon icon={effectiveExpanded ? faChevronDown : faChevronRight} />
           )}
         </span>
         <span
@@ -427,7 +459,7 @@ function CodeTreeItem({
         )}
       </div>
 
-      {expanded &&
+      {effectiveExpanded &&
         code.children.map((child) => (
           <CodeTreeItem
             key={child.guid}
@@ -449,6 +481,7 @@ function CodeTreeItem({
             onQueryActiveDoc={onQueryActiveDoc}
             editingGuid={editingGuid}
             onStopEditing={onStopEditing}
+            searchQuery={searchQuery}
           />
         ))}
 
@@ -765,6 +798,16 @@ export function CodeBrowser({ onNewCode, onClose, onPopOut, isPoppedOut }: Props
   const [editingMemoGuid, setEditingMemoGuid] = useState<string | null>(null)
   const [editingCodeGuid, setEditingCodeGuid] = useState<string | null>(null)
   const [mergeConfirm, setMergeConfirm] = useState<{ sourceGuid: string; targetGuid: string } | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  // Collapsed by default — the filter input replaces the "Codes" title
+  // in the header row itself rather than adding a permanent second row,
+  // so the panel doesn't lose vertical space until the user asks to
+  // search.
+  const [searchOpen, setSearchOpen] = useState(false)
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+  }, [])
   const lastClickedRef = useRef<string | null>(null)
 
   // Compute code occurrence counts across all documents
@@ -780,7 +823,16 @@ export function CodeBrowser({ onNewCode, onClose, onPopOut, isPoppedOut }: Props
     return counts
   }, [sources])
 
-  const flatOrder = useMemo(() => flattenCodeGuids(codes), [codes])
+  const trimmedSearch = searchQuery.trim()
+  const filteredCodes = useMemo(
+    () => filterCodeTree(codes, trimmedSearch, editingCodeGuid),
+    [codes, trimmedSearch, editingCodeGuid]
+  )
+
+  // Shift-click range selection and select-all operate over what's
+  // currently visible, so a search doesn't let either reach into codes
+  // the user can't see.
+  const flatOrder = useMemo(() => flattenCodeGuids(filteredCodes), [filteredCodes])
 
   // Listen for select-all event from App
   useEffect(() => {
@@ -873,7 +925,43 @@ export function CodeBrowser({ onNewCode, onClose, onPopOut, isPoppedOut }: Props
       }}
     >
       <div className="panel-header">
-        <span style={{ flex: 1 }}>Codes</span>
+        {searchOpen ? (
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') closeSearch() }}
+            placeholder="Filter codes..."
+            aria-label="Filter codes"
+            autoFocus
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '2px 6px',
+              fontSize: 12,
+              fontWeight: 400,
+              letterSpacing: 'normal',
+              textTransform: 'none',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+              outline: 'none',
+              background: 'var(--bg-input)',
+              color: 'var(--text-primary)'
+            }}
+          />
+        ) : (
+          <span style={{ flex: 1 }}>Codes</span>
+        )}
+        {codes.length > 0 && (
+          <button
+            className="panel-header-search"
+            onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+            title={searchOpen ? 'Close search' : 'Filter codes'}
+            aria-label={searchOpen ? 'Close search' : 'Filter codes'}
+          >
+            <Icon icon={searchOpen ? faXmark : faMagnifyingGlass} />
+          </button>
+        )}
         <button
           className="panel-header-add"
           onClick={onNewCode}
@@ -901,7 +989,20 @@ export function CodeBrowser({ onNewCode, onClose, onPopOut, isPoppedOut }: Props
             Click the + button above or use Codes menu.
           </div>
         )}
-        {codes.map((code) => (
+        {codes.length > 0 && filteredCodes.length === 0 && (
+          <div
+            className="empty-state"
+            style={{
+              padding: 20,
+              textAlign: 'center',
+              color: 'var(--text-muted)',
+              fontSize: 'var(--font-size-sm)'
+            }}
+          >
+            No codes match "{trimmedSearch}".
+          </div>
+        )}
+        {filteredCodes.map((code) => (
           <CodeTreeItem
             key={code.guid}
             code={code}
@@ -922,6 +1023,7 @@ export function CodeBrowser({ onNewCode, onClose, onPopOut, isPoppedOut }: Props
             onQueryActiveDoc={handleQueryActiveDoc}
             editingGuid={editingCodeGuid}
             onStopEditing={() => setEditingCodeGuid(null)}
+            searchQuery={trimmedSearch}
           />
         ))}
       </div>

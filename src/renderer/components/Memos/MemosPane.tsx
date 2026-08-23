@@ -4,7 +4,7 @@ import { useMemoStore } from '../../stores/memo-store'
 import { useDocumentStore } from '../../stores/document-store'
 import { useProjectStore } from '../../stores/project-store'
 import { useSurveyViewStore } from '../../stores/survey-view-store'
-import { Icon, MEMO_ICON, faChevronDown, faChevronRight, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faPlus } from '../Icon'
+import { Icon, MEMO_ICON, faChevronDown, faChevronRight, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faPlus, faMagnifyingGlass } from '../Icon'
 import { generateGuid } from '../../utils/guid'
 import { isToolTab } from '../../utils/tab-ids'
 import { useClampedMenuPosition } from '../../utils/use-clamped-menu-position'
@@ -113,7 +113,8 @@ function MemoSection({
   onDrop,
   droppable,
   defaultExpanded,
-  isFirst
+  isFirst,
+  forceExpanded
 }: {
   title: string
   memos: Memo[]
@@ -127,9 +128,13 @@ function MemoSection({
   droppable?: boolean
   defaultExpanded?: boolean
   isFirst?: boolean
+  /** While a search is active, force the section open regardless of its
+   *  own collapse state so filtered matches stay visible. */
+  forceExpanded?: boolean
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded ?? true)
   const [isDragOver, setIsDragOver] = useState(false)
+  const effectiveExpanded = expanded || !!forceExpanded
 
   return (
     <div>
@@ -153,12 +158,12 @@ function MemoSection({
         onDrop={droppable ? (e) => { setIsDragOver(false); onDrop?.(e) } : undefined}
       >
         <span style={{ fontSize: 10, width: 12, textAlign: 'center', opacity: 0.6 }}>
-          <Icon icon={expanded ? faChevronDown : faChevronRight} />
+          <Icon icon={effectiveExpanded ? faChevronDown : faChevronRight} />
         </span>
         <span style={{ flex: 1 }}>{title}</span>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>{memos.length}</span>
       </div>
-      {expanded && memos.map((memo) => (
+      {effectiveExpanded && memos.map((memo) => (
         <MemoItem
           key={memo.guid}
           memo={memo}
@@ -376,6 +381,21 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
   }, [viewDocument, viewDocumentAt, setSurveyView, setSurveyScrollTarget])
 
   const [newMemoMenu, setNewMemoMenu] = useState<{ x: number; y: number } | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+  }, [])
+  const trimmedSearch = searchQuery.trim()
+  const filterByTitle = useCallback(
+    (list: Memo[]) => {
+      if (!trimmedSearch) return list
+      const q = trimmedSearch.toLowerCase()
+      return list.filter((m) => (m.title || 'Untitled Memo').toLowerCase().includes(q))
+    },
+    [trimmedSearch]
+  )
 
   const projectMemos = useMemo(() => memos.filter((m) => m.type === 'project'), [memos])
   const documentMemos = useMemo(
@@ -475,16 +495,18 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState<Memo[] | null>(null)
 
   // Flat ordered list of all rendered memo guids — drives shift-click
-  // range selection and also defines the order for bulk delete.
+  // range selection and also defines the order for bulk delete. Built
+  // from the title-filtered lists so a search doesn't let either reach
+  // memos the user can't currently see.
   const orderedGuids = useMemo(() => {
     const out: string[] = []
-    for (const m of projectMemos) out.push(m.guid)
-    for (const m of documentMemos) out.push(m.guid)
-    for (const m of contentMemos) out.push(m.guid)
+    for (const m of filterByTitle(projectMemos)) out.push(m.guid)
+    for (const m of filterByTitle(documentMemos)) out.push(m.guid)
+    for (const m of filterByTitle(contentMemos)) out.push(m.guid)
     for (const g of analysisMemoGroups.groups) for (const m of g.memos) out.push(m.guid)
     for (const m of analysisMemoGroups.unattached) out.push(m.guid)
     return out
-  }, [projectMemos, documentMemos, contentMemos, analysisMemoGroups])
+  }, [projectMemos, documentMemos, contentMemos, analysisMemoGroups, filterByTitle])
 
   const handleItemClick = useCallback(
     (e: React.MouseEvent, memo: Memo) => {
@@ -579,7 +601,43 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
   return (
     <div className="panel">
       <div className="panel-header">
-        <span style={{ flex: 1 }}>Memos</span>
+        {searchOpen ? (
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') closeSearch() }}
+            placeholder="Filter memos..."
+            aria-label="Filter memos"
+            autoFocus
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '2px 6px',
+              fontSize: 12,
+              fontWeight: 400,
+              letterSpacing: 'normal',
+              textTransform: 'none',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+              outline: 'none',
+              background: 'var(--bg-input)',
+              color: 'var(--text-primary)'
+            }}
+          />
+        ) : (
+          <span style={{ flex: 1 }}>Memos</span>
+        )}
+        {memos.length > 0 && (
+          <button
+            className="panel-header-search"
+            onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+            title={searchOpen ? 'Close search' : 'Filter memos'}
+            aria-label={searchOpen ? 'Close search' : 'Filter memos'}
+          >
+            <Icon icon={searchOpen ? faXmark : faMagnifyingGlass} />
+          </button>
+        )}
         <button
           className="panel-header-add"
           onClick={handleNewMemoClick}
@@ -625,9 +683,12 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
 
       <div className="panel-content">
         {(() => {
-          const showProject = projectMemos.length > 0
-          const showDocument = documentMemos.length > 0
-          const showContent = contentMemos.length > 0
+          const visibleProject = filterByTitle(projectMemos)
+          const visibleDocument = filterByTitle(documentMemos)
+          const visibleContent = filterByTitle(contentMemos)
+          const showProject = visibleProject.length > 0
+          const showDocument = visibleDocument.length > 0
+          const showContent = visibleContent.length > 0
           // Analysis memos are intentionally hidden from this pane —
           // saved-analysis memos are reachable from the Saved
           // Analyses pane (row icon + right-click) and the in-tab
@@ -641,17 +702,22 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
             : null
           return (
             <>
-              {firstShown === null && (
+              {firstShown === null && !trimmedSearch && (
                 <div className="empty-state" style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
                   No memos yet.
                   <br />
                   Click the + button above, or right-click a selection in a document and choose "Add Memo".
                 </div>
               )}
+              {firstShown === null && trimmedSearch && (
+                <div className="empty-state" style={{ padding: 20, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--font-size-sm)' }}>
+                  No memos match "{trimmedSearch}".
+                </div>
+              )}
               {showProject && (
                 <MemoSection
                   title="Project Memos"
-                  memos={projectMemos}
+                  memos={visibleProject}
                   selectedGuids={selectedGuids}
                   onItemClick={handleItemClick}
                   onRightClick={handleItemRightClick}
@@ -661,12 +727,13 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
                   droppable
                   onDrop={handleDropOnProject}
                   isFirst={firstShown === 'project'}
+                  forceExpanded={!!trimmedSearch}
                 />
               )}
               {showDocument && (
                 <MemoSection
                   title="Document Memos"
-                  memos={documentMemos}
+                  memos={visibleDocument}
                   selectedGuids={selectedGuids}
                   onItemClick={handleItemClick}
                   onRightClick={handleItemRightClick}
@@ -675,12 +742,13 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
                   onDragStartMemo={handleDragStart}
                   defaultExpanded={!!viewedDocumentGuid}
                   isFirst={firstShown === 'document'}
+                  forceExpanded={!!trimmedSearch}
                 />
               )}
               {showContent && (
                 <MemoSection
                   title="Selection Memos"
-                  memos={contentMemos}
+                  memos={visibleContent}
                   selectedGuids={selectedGuids}
                   onItemClick={handleItemClick}
                   onRightClick={handleItemRightClick}
@@ -689,6 +757,7 @@ export function MemosPane({ onClose, onPopOut, isPoppedOut }: Props) {
                   onDragStartMemo={handleDragStart}
                   defaultExpanded={!!viewedDocumentGuid}
                   isFirst={firstShown === 'content'}
+                  forceExpanded={!!trimmedSearch}
                 />
               )}
               {showAnalysis && (

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { SavedQuery, Query } from '../../models/types'
-import { Icon, faMagnifyingGlass, MEMO_ICON } from '../Icon'
+import { Icon, faMagnifyingGlass, faXmark, MEMO_ICON } from '../Icon'
 import { useClampedMenuPosition } from '../../utils/use-clamped-menu-position'
 
 interface Props {
@@ -57,6 +57,12 @@ export function SavedQueries({
   const [selectedGuids, setSelectedGuids] = useState<Set<string>>(new Set())
   const lastClickedRef = useRef<string | null>(null)
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false)
+    setSearchQuery('')
+  }, [])
 
   const activeQueryGuid = useMemo(() => {
     if (!isActive || !currentQuery) return null
@@ -66,7 +72,15 @@ export function SavedQueries({
     return match?.guid ?? null
   }, [isActive, currentQuery, savedQueries])
 
-  const flatGuids = useMemo(() => savedQueries.map((sq) => sq.guid), [savedQueries])
+  const trimmedSearch = searchQuery.trim().toLowerCase()
+  const filteredQueries = useMemo(
+    () => trimmedSearch ? savedQueries.filter((sq) => sq.name.toLowerCase().includes(trimmedSearch)) : savedQueries,
+    [savedQueries, trimmedSearch]
+  )
+
+  // Shift-click range selection operates over what's currently visible, so
+  // a search doesn't let it reach queries the user can't see.
+  const flatGuids = useMemo(() => filteredQueries.map((sq) => sq.guid), [filteredQueries])
 
   useEffect(() => {
     if (pulsedQueryGuid) {
@@ -127,7 +141,43 @@ export function SavedQueries({
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div className="panel-header">
-        <span style={{ flex: 1 }}>Saved Queries</span>
+        {searchOpen ? (
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') closeSearch() }}
+            placeholder="Filter saved queries..."
+            aria-label="Filter saved queries"
+            autoFocus
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '2px 6px',
+              fontSize: 12,
+              fontWeight: 400,
+              letterSpacing: 'normal',
+              textTransform: 'none',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+              outline: 'none',
+              background: 'var(--bg-input)',
+              color: 'var(--text-primary)'
+            }}
+          />
+        ) : (
+          <span style={{ flex: 1 }}>Saved Queries</span>
+        )}
+        {savedQueries.length > 0 && (
+          <button
+            className="panel-header-search"
+            onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+            title={searchOpen ? 'Close search' : 'Filter saved queries'}
+            aria-label={searchOpen ? 'Close search' : 'Filter saved queries'}
+          >
+            <Icon icon={searchOpen ? faXmark : faMagnifyingGlass} />
+          </button>
+        )}
       </div>
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 4 }}>
       {savedQueries.length === 0 && (
@@ -145,7 +195,20 @@ export function SavedQueries({
           Run a query then click Save Query.
         </div>
       )}
-      {savedQueries.map((sq) => {
+      {savedQueries.length > 0 && filteredQueries.length === 0 && (
+        <div
+          className="empty-state"
+          style={{
+            padding: 20,
+            textAlign: 'center',
+            color: 'var(--text-muted)',
+            fontSize: 'var(--font-size-sm)'
+          }}
+        >
+          No saved queries match "{trimmedSearch}".
+        </div>
+      )}
+      {filteredQueries.map((sq) => {
         const isSelected = selectedGuids.has(sq.guid)
         const isActiveQuery = activeQueryGuid === sq.guid
         return (

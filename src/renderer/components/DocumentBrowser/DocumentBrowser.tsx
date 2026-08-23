@@ -2,7 +2,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 import { useDocumentStore, surveyEntityKey, parseSurveyEntityKey, type DocumentFolder } from '../../stores/document-store'
 import { useTagStore } from '../../stores/tag-store'
-import { Icon, faFolder, faFolderPlus, faFile, faFileAlt, faTags, faChevronDown, faChevronRight, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faHeadphones, faVideo, faImage, faPlus, SURVEY_ICON, SURVEY_RESPONDENT_ICON, SURVEY_QUESTION_ICON } from '../Icon'
+import { Icon, faFolder, faFolderPlus, faFile, faFileAlt, faTags, faChevronDown, faChevronRight, faXmark, faUpRightFromSquare, faDownLeftAndUpRightToCenter, faHeadphones, faVideo, faImage, faPlus, faMagnifyingGlass, SURVEY_ICON, SURVEY_RESPONDENT_ICON, SURVEY_QUESTION_ICON } from '../Icon'
 import type { TextSource, TagCategory, TagCategoryType, SurveyFormatData } from '../../models/types'
 import { toolColors } from '../../utils/tool-colors'
 import { sourceTypeFromExtension, sourceTypeFromFilename } from '../../utils/format-registry'
@@ -105,6 +105,7 @@ function FolderItem({
   onContextMenuSurveyChild,
   selectedSurveyEntities,
   onToggleSurveyEntity,
+  searchQuery
 
 }: {
   folder: DocumentFolder
@@ -140,10 +141,20 @@ function FolderItem({
   ) => void
   selectedSurveyEntities: Set<string>
   onToggleSurveyEntity: (sourceGuid: string, kind: 'respondent' | 'question', id: string) => void
+  /** Trimmed, lowercased active search filter ('' when no search is
+   *  running). `sources`/`allFolders` already arrive pre-filtered to
+   *  what should be visible — this is only used to tell whether THIS
+   *  folder is a genuine name match (full opacity) or shown purely as
+   *  ancestor context for a match further down (dimmed), and to force
+   *  the tree open so nested matches aren't hidden by a manual collapse. */
+  searchQuery: string
 
 }) {
   const [expanded, setExpanded] = useState(true)
   const [isDragOver, setIsDragOver] = useState(false)
+  const searchActive = searchQuery.length > 0
+  const isSearchMatch = !searchActive || folder.name.toLowerCase().includes(searchQuery)
+  const effectiveExpanded = expanded || searchActive
   const dragCounterRef = useRef(0)
   const moveSourceToFolder = useDocumentStore((s) => s.moveSourceToFolder)
   const moveFolderToFolder = useDocumentStore((s) => s.moveFolderToFolder)
@@ -166,6 +177,7 @@ function FolderItem({
           fontSize: 'var(--font-size-sm)',
           fontWeight: 600,
           outline: isDragOver ? '1px dashed var(--accent-hover)' : 'none',
+          opacity: isSearchMatch ? 1 : 0.45,
           transition: 'background 0.1s'
         }}
         draggable
@@ -255,13 +267,13 @@ function FolderItem({
         onClick={() => setExpanded(!expanded)}
         onContextMenu={(e) => onContextMenuFolder(e, folder.guid)}
       >
-        <Icon icon={expanded ? faChevronDown : faChevronRight} style={{ fontSize: 9, flexShrink: 0, width: 10, textAlign: 'center', opacity: 0.6 }} />
+        <Icon icon={effectiveExpanded ? faChevronDown : faChevronRight} style={{ fontSize: 9, flexShrink: 0, width: 10, textAlign: 'center', opacity: 0.6 }} />
         <Icon icon={faFolder} style={{ fontSize: 11, flexShrink: 0, width: 14, textAlign: 'center', opacity: 0.75, color: 'var(--text-muted)' }} />
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {folder.name}
         </span>
       </div>
-      {expanded && (
+      {effectiveExpanded && (
         <>
           {childFolders.map((cf) => (
             <FolderItem
@@ -289,6 +301,7 @@ function FolderItem({
               onContextMenuSurveyChild={onContextMenuSurveyChild}
               selectedSurveyEntities={selectedSurveyEntities}
               onToggleSurveyEntity={onToggleSurveyEntity}
+              searchQuery={searchQuery}
             />
           ))}
           {childSources.map((source) =>
@@ -1168,7 +1181,9 @@ function TagCategoryItem({
   selectedTagGuids,
   onTagClick,
   onTagDoubleClick,
-  onContextMenu
+  onContextMenu,
+  dimmed,
+  forceExpanded
 }: {
   category: import('../../models/types').TagCategory
   tags: import('../../models/types').QDASet[]
@@ -1176,8 +1191,15 @@ function TagCategoryItem({
   onTagClick: (tagGuid: string, e: React.MouseEvent) => void
   onTagDoubleClick?: (tagGuid: string, e: React.MouseEvent) => void
   onContextMenu: (e: React.MouseEvent, tagGuid: string) => void
+  /** True while a search is active and this category is shown only as
+   *  ancestor context (its own name didn't match, one of its tags did). */
+  dimmed?: boolean
+  /** Force the category open regardless of its own collapse state, so a
+   *  search match stays visible under a manually-collapsed category. */
+  forceExpanded?: boolean
 }) {
   const [expanded, setExpanded] = useState(true)
+  const effectiveExpanded = expanded || !!forceExpanded
 
   return (
     <div>
@@ -1213,16 +1235,17 @@ function TagCategoryItem({
           cursor: 'pointer',
           fontSize: 'var(--font-size-sm)',
           fontWeight: 600,
-          color: 'var(--text-secondary)'
+          color: 'var(--text-secondary)',
+          opacity: dimmed ? 0.45 : 1
         }}
         onClick={() => setExpanded(!expanded)}
       >
-        <Icon icon={expanded ? faChevronDown : faChevronRight} style={{ fontSize: 9, width: 12, textAlign: 'center', opacity: 0.6 }} />
+        <Icon icon={effectiveExpanded ? faChevronDown : faChevronRight} style={{ fontSize: 9, width: 12, textAlign: 'center', opacity: 0.6 }} />
         <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {category.name}
         </span>
       </div>
-      {expanded && tags.map((tag) => (
+      {effectiveExpanded && tags.map((tag) => (
         <TagItem
           key={tag.guid}
           tag={tag}
@@ -1991,23 +2014,76 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
   const renameCategory = useTagStore((s) => s.renameCategory)
   const updateCategoryListOptions = useTagStore((s) => s.updateCategoryListOptions)
 
+  // ── Document search / filter ────────────────────────────────────
+  const [docSearchOpen, setDocSearchOpen] = useState(false)
+  const [docSearchQuery, setDocSearchQuery] = useState('')
+  const closeDocSearch = useCallback(() => {
+    setDocSearchOpen(false)
+    setDocSearchQuery('')
+  }, [])
+  const trimmedDocSearch = docSearchQuery.trim().toLowerCase()
+
+  /** Sources whose own name matches — the leaves of the tree only ever
+   *  show when they themselves match (no "context" leaves). */
+  const matchingSourceGuids = useMemo(() => {
+    if (!trimmedDocSearch) return null
+    return new Set(sources.filter((s) => s.name.toLowerCase().includes(trimmedDocSearch)).map((s) => s.guid))
+  }, [sources, trimmedDocSearch])
+
+  /** Folders that should stay visible: their own name matches, or a
+   *  descendant folder/source matches — mirrors the Code Browser's
+   *  ancestor-context filtering (FolderItem dims the non-matching ones). */
+  const visibleFolderGuids = useMemo(() => {
+    if (!trimmedDocSearch || !matchingSourceGuids) return null
+    const childrenOf = new Map<string | null, DocumentFolder[]>()
+    for (const f of folders) {
+      const arr = childrenOf.get(f.parentGuid) ?? []
+      arr.push(f)
+      childrenOf.set(f.parentGuid, arr)
+    }
+    const visible = new Set<string>()
+    const visit = (folder: DocumentFolder): boolean => {
+      const selfMatch = folder.name.toLowerCase().includes(trimmedDocSearch)
+      let anyChildVisible = false
+      for (const cf of childrenOf.get(folder.guid) ?? []) {
+        if (visit(cf)) anyChildVisible = true
+      }
+      const hasMatchingSource = sources.some(
+        (s) => sourceFolder[s.guid] === folder.guid && matchingSourceGuids.has(s.guid)
+      )
+      const isVisible = selfMatch || anyChildVisible || hasMatchingSource
+      if (isVisible) visible.add(folder.guid)
+      return isVisible
+    }
+    for (const f of folders) if (f.parentGuid === null) visit(f)
+    return visible
+  }, [folders, sources, sourceFolder, matchingSourceGuids, trimmedDocSearch])
+
+  // The two arrays every tree level (root render + FolderItem's own
+  // recursive filtering) actually reads from. Pre-filtering here means
+  // FolderItem/DocItem/SurveyItem need no filtering logic of their own —
+  // their existing guid-based `.filter()` calls just naturally see fewer
+  // items when a search is active.
+  const visibleSources = matchingSourceGuids ? sources.filter((s) => matchingSourceGuids.has(s.guid)) : sources
+  const visibleFolders = visibleFolderGuids ? folders.filter((f) => visibleFolderGuids.has(f.guid)) : folders
+
   // Build a flat ordered list of all visible source guids (for shift-click range selection)
   const lastClickedRef = useRef<string | null>(null)
   const flatSourceOrder = useMemo(() => {
     const order: string[] = []
     const walkFolder = (parentGuid: string | null) => {
-      const childFolders = folders.filter((f) => f.parentGuid === parentGuid)
+      const childFolders = visibleFolders.filter((f) => f.parentGuid === parentGuid)
       for (const cf of childFolders) {
         walkFolder(cf.guid)
       }
       const childSources = parentGuid === null
-        ? sources.filter((s) => !sourceFolder[s.guid])
-        : sources.filter((s) => sourceFolder[s.guid] === parentGuid)
+        ? visibleSources.filter((s) => !sourceFolder[s.guid])
+        : visibleSources.filter((s) => sourceFolder[s.guid] === parentGuid)
       for (const s of childSources) order.push(s.guid)
     }
     walkFolder(null)
     return order
-  }, [sources, folders, sourceFolder])
+  }, [visibleSources, visibleFolders, sourceFolder])
 
   const handleSelectDocument = useCallback((guid: string, e: React.MouseEvent) => {
     if (e.shiftKey && lastClickedRef.current) {
@@ -2096,6 +2172,12 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
   const [editingDocGuid, setEditingDocGuid] = useState<string | null>(null)
   const [tagsExpanded, setTagsExpanded] = useState(true)
   const [selectedTagGuids, setSelectedTagGuids] = useState<Set<string>>(new Set())
+  const [tagSearchOpen, setTagSearchOpen] = useState(false)
+  const [tagSearchQuery, setTagSearchQuery] = useState('')
+  const closeTagSearch = useCallback(() => {
+    setTagSearchOpen(false)
+    setTagSearchQuery('')
+  }, [])
   const [tagContextMenu, setTagContextMenu] = useState<{ x: number; y: number; tagGuid: string } | null>(null)
   const [betweenFilter, setBetweenFilter] = useState<{ tagGuid: string; categoryGuid: string; value2: string; mode: 'between' | 'not-between' } | null>(null)
 
@@ -2111,19 +2193,50 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
 
   const lastClickedTagRef = useRef<string | null>(null)
 
-  // Flat ordered list of all tag GUIDs in display order (for shift-click range)
+  const trimmedTagSearch = tagSearchQuery.trim().toLowerCase()
+
+  /** Per-category filter result. A category whose own name matches keeps
+   *  every one of its tags (the name match IS the find — filtering the
+   *  tags too would often leave a matched category empty); otherwise
+   *  only its individually-matching tags survive, and the category
+   *  header renders dimmed since it's shown purely for context. Category
+   *  header itself is hidden entirely once it has zero visible tags. */
+  const filteredCategoryTags = useMemo(() => {
+    const map = new Map<string, { catNameMatch: boolean; visibleTags: typeof tags }>()
+    for (const cat of categories) {
+      const catTags = sortTagsForCategory(tags.filter((t) => t.categoryGuid === cat.guid), cat)
+      if (!trimmedTagSearch) {
+        map.set(cat.guid, { catNameMatch: true, visibleTags: catTags })
+        continue
+      }
+      const catNameMatch = cat.name.toLowerCase().includes(trimmedTagSearch)
+      const visibleTags = catNameMatch
+        ? catTags
+        : catTags.filter((t) => (t.value || t.name).toLowerCase().includes(trimmedTagSearch))
+      map.set(cat.guid, { catNameMatch, visibleTags })
+    }
+    return map
+  }, [categories, tags, trimmedTagSearch])
+
+  const visibleUncategorisedTags = useMemo(() => {
+    const uncategorised = tags.filter((t) => !t.categoryGuid)
+    if (!trimmedTagSearch) return uncategorised
+    return uncategorised.filter((t) => (t.value || t.name).toLowerCase().includes(trimmedTagSearch))
+  }, [tags, trimmedTagSearch])
+
+  // Flat ordered list of all tag GUIDs in display order (for shift-click
+  // range) — built from the filtered view so a search doesn't let range-
+  // select reach tags the user can't currently see.
   const flatTagGuids = useMemo(() => {
     const result: string[] = []
     for (const cat of categories) {
-      for (const t of tags) {
-        if (t.categoryGuid === cat.guid) result.push(t.guid)
+      for (const t of filteredCategoryTags.get(cat.guid)?.visibleTags ?? []) {
+        result.push(t.guid)
       }
     }
-    for (const t of tags) {
-      if (!t.categoryGuid) result.push(t.guid)
-    }
+    for (const t of visibleUncategorisedTags) result.push(t.guid)
     return result
-  }, [tags, categories])
+  }, [categories, filteredCategoryTags, visibleUncategorisedTags])
 
   const handleTagClick = useCallback((tagGuid: string, e: React.MouseEvent) => {
     if (e.shiftKey && lastClickedTagRef.current) {
@@ -2305,13 +2418,49 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
   }, [addSource, onSurveyImport])
 
   // Top-level (root) folders and documents
-  const rootFolders = folders.filter((f) => f.parentGuid === null)
-  const rootSources = sources.filter((s) => !sourceFolder[s.guid])
+  const rootFolders = visibleFolders.filter((f) => f.parentGuid === null)
+  const rootSources = visibleSources.filter((s) => !sourceFolder[s.guid])
 
   return (
     <div className="panel">
       <div className="panel-header">
-        <span style={{ flex: 1 }}>Documents</span>
+        {docSearchOpen ? (
+          <input
+            type="text"
+            value={docSearchQuery}
+            onChange={(e) => setDocSearchQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') closeDocSearch() }}
+            placeholder="Filter documents..."
+            aria-label="Filter documents"
+            autoFocus
+            style={{
+              flex: 1,
+              minWidth: 0,
+              padding: '2px 6px',
+              fontSize: 12,
+              fontWeight: 400,
+              letterSpacing: 'normal',
+              textTransform: 'none',
+              border: '1px solid var(--border-color)',
+              borderRadius: 'var(--radius-sm)',
+              outline: 'none',
+              background: 'var(--bg-input)',
+              color: 'var(--text-primary)'
+            }}
+          />
+        ) : (
+          <span style={{ flex: 1 }}>Documents</span>
+        )}
+        {(sources.length > 0 || folders.length > 0) && (
+          <button
+            className="panel-header-search"
+            onClick={() => (docSearchOpen ? closeDocSearch() : setDocSearchOpen(true))}
+            title={docSearchOpen ? 'Close search' : 'Filter documents'}
+            aria-label={docSearchOpen ? 'Close search' : 'Filter documents'}
+          >
+            <Icon icon={docSearchOpen ? faXmark : faMagnifyingGlass} />
+          </button>
+        )}
         <button
           className="panel-header-add"
           onClick={() => {
@@ -2404,12 +2553,25 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
             Click Import or use File &gt; Import.
           </div>
         )}
+        {(sources.length > 0 || folders.length > 0) && trimmedDocSearch && visibleSources.length === 0 && visibleFolders.length === 0 && (
+          <div
+            className="empty-state"
+            style={{
+              padding: 20,
+              textAlign: 'center',
+              color: 'var(--text-muted)',
+              fontSize: 'var(--font-size-sm)'
+            }}
+          >
+            No documents match "{docSearchQuery.trim()}".
+          </div>
+        )}
         {rootFolders.map((folder) => (
           <FolderItem
             key={folder.guid}
             folder={folder}
-            allFolders={folders}
-            sources={sources}
+            allFolders={visibleFolders}
+            sources={visibleSources}
             sourceFolder={sourceFolder}
             selectedGuids={selectedGuids}
             viewedGuid={viewedGuid}
@@ -2430,6 +2592,7 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
             onContextMenuSurveyChild={handleContextMenuSurveyChild}
             selectedSurveyEntities={selectedSurveyEntities}
             onToggleSurveyEntity={handleToggleSurveyEntity}
+            searchQuery={trimmedDocSearch}
           />
         ))}
         {rootSources.map((source) =>
@@ -2492,7 +2655,43 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
                 className so it inherits the small-caps section-label
                 typography along with the Documents/Codes/Memos panes. */}
             <div className="panel-header" style={{ flexShrink: 0 }}>
-              <span style={{ flex: 1 }}>Tags</span>
+              {tagSearchOpen ? (
+                <input
+                  type="text"
+                  value={tagSearchQuery}
+                  onChange={(e) => setTagSearchQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') closeTagSearch() }}
+                  placeholder="Filter tags..."
+                  aria-label="Filter tags"
+                  autoFocus
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    padding: '2px 6px',
+                    fontSize: 12,
+                    fontWeight: 400,
+                    letterSpacing: 'normal',
+                    textTransform: 'none',
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 'var(--radius-sm)',
+                    outline: 'none',
+                    background: 'var(--bg-input)',
+                    color: 'var(--text-primary)'
+                  }}
+                />
+              ) : (
+                <span style={{ flex: 1 }}>Tags</span>
+              )}
+              {(tags.length > 0 || categories.length > 0) && (
+                <button
+                  className="panel-header-search"
+                  onClick={() => (tagSearchOpen ? closeTagSearch() : setTagSearchOpen(true))}
+                  title={tagSearchOpen ? 'Close search' : 'Filter tags'}
+                  aria-label={tagSearchOpen ? 'Close search' : 'Filter tags'}
+                >
+                  <Icon icon={tagSearchOpen ? faXmark : faMagnifyingGlass} />
+                </button>
+              )}
               <button
                 className="panel-header-add"
                 onClick={() => setShowManageLocal(true)}
@@ -2516,16 +2715,30 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
                   No tags yet.
                 </div>
               )}
+              {(tags.length > 0 || categories.length > 0) && trimmedTagSearch && flatTagGuids.length === 0 && (
+                <div
+                  className="empty-state"
+                  style={{
+                    padding: 20,
+                    textAlign: 'center',
+                    color: 'var(--text-muted)',
+                    fontSize: 'var(--font-size-sm)'
+                  }}
+                >
+                  No tags match "{tagSearchQuery.trim()}".
+                </div>
+              )}
               {(() => {
-                const uncategorised = tags.filter((t) => !t.categoryGuid)
                 return (
                   <>
                     {categories.map((cat) => {
-                      const catTags = sortTagsForCategory(tags.filter((t) => t.categoryGuid === cat.guid), cat)
-                      // Empty categories are listed too — they're a real
-                      // organisational unit the user has set up, not noise.
-                      // TagCategoryItem renders fine with an empty list:
-                      // just the header, expandable to nothing.
+                      const entry = filteredCategoryTags.get(cat.guid)
+                      const catTags = entry?.visibleTags ?? []
+                      // Empty categories are listed too when there's no
+                      // active search — they're a real organisational unit
+                      // the user has set up, not noise. During a search,
+                      // a category with zero matching tags just disappears.
+                      if (trimmedTagSearch && catTags.length === 0) return null
                       return (
                         <TagCategoryItem
                           key={cat.guid}
@@ -2540,10 +2753,12 @@ export function DocumentBrowser({ onImport, onSurveyImport, showManageDocTags, o
                             setBetweenFilter(null)
                             setTagContextMenu({ x: e.clientX, y: e.clientY, tagGuid })
                           }}
+                          dimmed={!!trimmedTagSearch && !entry?.catNameMatch}
+                          forceExpanded={!!trimmedTagSearch}
                         />
                       )
                     })}
-                    {uncategorised.map((tag) => (
+                    {visibleUncategorisedTags.map((tag) => (
                       <TagItem
                         key={tag.guid}
                         tag={tag}
