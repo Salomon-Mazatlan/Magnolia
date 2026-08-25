@@ -2,7 +2,7 @@
 # Report GitHub release download counts for Magnolia.
 #
 # Prints the total number of real installer downloads (the .dmg / .exe / .deb /
-# .AppImage assets people actually click), then a per-asset-type breakdown.
+# .rpm / .AppImage assets people actually click), then a per-asset-type breakdown.
 # Auto-updater housekeeping files (latest*.yml, *.blockmap) are excluded from
 # the headline total because they are fetched by the updater, not by humans.
 #
@@ -24,20 +24,20 @@ fi
 assets="$(gh api "repos/${REPO}/releases" --paginate \
   --jq '.[].assets[] | [.name, .download_count] | @tsv')"
 
-installer_re='\.(dmg|exe|deb|AppImage)$'
+installer_re='\.(dmg|exe|deb|rpm|AppImage)$'
 
 total="$(printf '%s\n' "$assets" \
   | awk -F'\t' -v re="$installer_re" '$1 ~ re { sum += $2 } END { print sum + 0 }')"
 
-echo "Installer downloads (.dmg/.exe/.deb/.AppImage): ${total}"
+echo "Installer downloads (.dmg/.exe/.deb/.rpm/.AppImage): ${total}"
 echo
 echo "By platform:"
 printf '%s\n' "$assets" | awk -F'\t' '
-  $1 ~ /\.dmg$/             { mac += $2 }
-  $1 ~ /\.exe$/             { win += $2 }
-  $1 ~ /\.deb$|\.AppImage$/ { lin += $2 }
+  $1 ~ /\.dmg$/                      { mac += $2 }
+  $1 ~ /\.exe$/                      { win += $2 }
+  $1 ~ /\.deb$|\.rpm$|\.AppImage$/   { lin += $2 }
   END {
     printf "  macOS (.dmg):        %d\n", mac + 0
     printf "  Windows (.exe):      %d\n", win + 0
-    printf "  Linux (.deb/.App):   %d\n", lin + 0
+    printf "  Linux (.deb/.rpm/.App): %d\n", lin + 0
   }'

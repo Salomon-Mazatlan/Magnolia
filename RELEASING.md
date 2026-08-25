@@ -115,15 +115,23 @@ Produces `dist\Magnolia-win-x64.exe` (an NSIS installer).
 ```sh
 npm run package:linux
 ```
-Produces `dist/Magnolia-linux-x86_64.AppImage` and `dist/Magnolia-linux-amd64.deb`
-(electron-builder names Linux artifacts by architecture convention — `x86_64`
-for AppImage, `amd64` for `.deb` — **not** `x64`).
+Produces `dist/Magnolia-linux-x86_64.AppImage`, `dist/Magnolia-linux-amd64.deb`,
+and `dist/Magnolia-linux-x86_64.rpm` (electron-builder names Linux artifacts by
+architecture convention — `x86_64` for AppImage/rpm, `amd64` for `.deb` — **not**
+`x64`).
 
 **Notes:**
-- The **AppImage** is portable — `chmod +x` it and run; no install needed.
+- The **AppImage** is portable — `chmod +x` it and run; no install needed. It
+  needs **libfuse2** on the host to launch, which some newer distros (Fedora
+  41+, Ubuntu 24.04+) don't ship by default — see the README's Troubleshooting
+  section. The .deb/.rpm packages don't have this problem, since they pull in
+  their own dependencies.
 - The **.deb** is for Debian/Ubuntu (`sudo apt install ./Magnolia-linux-amd64.deb`).
-- On a minimal Linux you may need a couple of packaging tools for the `.deb`
-  (e.g. `fakeroot`, `dpkg`); electron-builder fetches most of what it needs.
+- The **.rpm** is for Fedora/RHEL/openSUSE (`sudo dnf install ./Magnolia-linux-x86_64.rpm`
+  or `sudo zypper install ./Magnolia-linux-x86_64.rpm`).
+- On a minimal Linux you may need a couple of packaging tools: `fakeroot` and
+  `dpkg` for the `.deb`, `rpm`/`rpmbuild` for the `.rpm`; electron-builder
+  fetches most of what it needs.
 - Linux builds are **unsigned** (Linux has no Gatekeeper-style requirement).
 - Frameless window → Magnolia draws its own window controls, same as Windows.
 
@@ -196,7 +204,7 @@ README's `…/releases/latest/download/…` links stay valid across versions.
 | `latest-mac.yml` | macOS | Update manifest the app polls — **must** be present |
 | `Magnolia-win-x64.exe` | Windows | NSIS installer |
 | `latest.yml` | Windows | Windows update manifest |
-| `Magnolia-linux-x86_64.AppImage` / `Magnolia-linux-amd64.deb` | Linux | Installers |
+| `Magnolia-linux-x86_64.AppImage` / `Magnolia-linux-amd64.deb` / `Magnolia-linux-x86_64.rpm` | Linux | Installers |
 | `latest-linux.yml` | Linux | Linux update manifest |
 | `*.blockmap` | all | Differential-update metadata |
 

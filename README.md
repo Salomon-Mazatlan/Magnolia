@@ -14,8 +14,9 @@ Magnolia is **experimental.** It was coded by Claude over several months. It may
 - [macOS — Intel](https://github.com/caledavis/Magnolia/releases/latest/download/Magnolia-mac-x64.dmg)
 - [Windows — Installer](https://github.com/caledavis/Magnolia/releases/latest/download/Magnolia-win-x64.exe)
 - [Windows — Portable](https://github.com/caledavis/Magnolia/releases/latest/download/Magnolia-win-portable-x64.exe) (no installation or admin rights needed — ideal for managed or work computers)
-- [Linux — AppImage](https://github.com/caledavis/Magnolia/releases/latest/download/Magnolia-linux-x86_64.AppImage)
-- [Linux — .deb](https://github.com/caledavis/Magnolia/releases/latest/download/Magnolia-linux-amd64.deb)
+- [Linux — AppImage](https://github.com/caledavis/Magnolia/releases/latest/download/Magnolia-linux-x86_64.AppImage) (see [Troubleshooting](#troubleshooting) if it fails to launch)
+- [Linux — .deb](https://github.com/caledavis/Magnolia/releases/latest/download/Magnolia-linux-amd64.deb) (Debian/Ubuntu)
+- [Linux — .rpm](https://github.com/caledavis/Magnolia/releases/latest/download/Magnolia-linux-x86_64.rpm) (Fedora/openSUSE/RHEL)
 
 Magnolia is free and open-source qualitative data analysis software released under the European Union Public Licence (EUPL).
 
@@ -122,3 +123,26 @@ Magnolia does not contain any AI features. There's no AI analysis, and no AI tra
 There's no cloud, so you can save your data where you want: locally, or on a network drive (multiple simultaneous users are not yet supported).
 
 There is nothing in Magnolia which requires a subscription. 
+
+## Troubleshooting
+
+### Linux AppImage fails with "error loading libfuse.so.2"
+
+AppImages need **libfuse2** to mount themselves at launch. Several recent
+distros (Fedora 41+, Ubuntu 24.04+, and others) no longer ship it by default,
+so the AppImage fails immediately with:
+
+```
+dlopen(): error loading libfuse.so.2
+AppImages require FUSE to run.
+```
+
+Two ways to fix it:
+
+- **Use the .deb or .rpm package instead** — they install their own
+  dependencies automatically and don't need FUSE. See the download links
+  above.
+- **Or install libfuse2** and keep using the AppImage:
+  - Fedora/RHEL: `sudo dnf install fuse-libs`
+  - Ubuntu/Debian: `sudo apt install libfuse2`
+  - Arch: `sudo pacman -S fuse2`
