@@ -2,6 +2,22 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.7.0]
+
+### Added
+- **Interface Scale preference.** A new dropdown in Preferences > Appearance lets you scale Magnolia's fonts and icons to 100%, 125%, 150%, or 200%.
+- **Search and filter every sidebar panel.** A magnifying-glass toggle now appears in each panel's header. Clicking this opens a small text box that allows you to filter the content of the panel. Close it by hitting the X or ESC.
+- **Apply Code hint in context menus.** Right-click contextual menus in the Document Viewer now show a short instructional line explaining that dragging a code from the Code Browser onto a selection applies it.
+- **Linux .rpm package.** Magnolia is now available as a native `.rpm`, for Fedora, RHEL, and openSUSE, alongside the existing AppImage and `.deb`. This also works around AppImages failing to launch on distros — like recent Fedora releases — that no longer ship `libfuse2` by default.
+
+### Changed
+- **OS-appropriate modifier keys.** Shortcut hints and hotkey labels now show Ctrl-based keys on Windows and Linux instead of macOS's ⌘/⌥ symbols everywhere.
+
+### Fixed
+- **Relationship Map node boxes no longer grow indefinitely on some displays.** On displays with fractional scaling (e.g. Windows at 125%/150%), a node's box could slowly stretch taller the longer the map stayed open.
+- **Blank transcript text when importing NVivo QDPX files.** NVivo exports its sources folder with a capital "S", which Magnolia's importer didn't expect, so transcripts (and other imported content) came in empty even though the data was present in the file.
+- **PDF scroll position no longer resets after visiting a tool tab.** Switching to Preferences, an Analysis tool, or the Query Builder and back to a PDF used to jump you back to page 1.
+
 ## [1.6.2]
 
 ### Fixed
