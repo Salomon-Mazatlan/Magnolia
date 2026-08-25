@@ -45,6 +45,8 @@ printf '%s\n' "$assets" | awk -F'\t' '
   $1 ~ /\.exe$/                      { win += $2 }
   $1 ~ /\.deb$|\.rpm$|\.AppImage$/   { lin += $2 }
   END {
+    total = mac + win + lin
+    printf "  Sum:                 %d\n", total
     printf "  macOS (.dmg):        %d\n", mac + 0
     printf "  Windows (.exe):      %d\n", win + 0
     printf "  Linux (.deb/.rpm/.App): %d\n", lin + 0
