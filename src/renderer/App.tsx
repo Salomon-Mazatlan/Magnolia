@@ -2042,8 +2042,7 @@ function App() {
       <div
         className="app-toolbar"
         style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr auto 1fr',
+          display: 'flex',
           alignItems: 'center',
           // Vertical padding only here. Horizontal padding lives in
           // .app-toolbar so the macOS-only override can replace the
@@ -2056,19 +2055,19 @@ function App() {
           height: 54
         }}
       >
-        {/* Left cell: the Magnolia icon followed by the open project's
-            file name. Clicking the name opens the Project Info pane. The
-            right margin keeps breathing room from the centred icon row on
-            narrower windows. */}
+        {/* Left: the Magnolia icon followed by the open project's file
+            name. Clicking the name opens the Project Info pane. Pinned —
+            flexShrink: 0 keeps it (and the project name) visible at any
+            window size; see the scrollable middle section below
+            (GitHub issue #15). */}
         <div
           style={{
-            justifySelf: 'start',
-            marginRight: 32,
+            flexShrink: 0,
+            marginRight: 12,
             padding: '4px 6px',
             display: 'flex',
             alignItems: 'center',
-            gap: 8,
-            minWidth: 0
+            gap: 8
           }}
         >
           <div
@@ -2125,8 +2124,24 @@ function App() {
           </button>
         </div>
 
-        {/* Center cell: icons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        {/* Scrollable middle: every other toolbar option, between the
+            pinned project name (left) and the pinned window controls
+            (right). Scrolls horizontally instead of overflowing and
+            clipping/overlapping when the window is too narrow to fit
+            everything — e.g. tiled or resized small (GitHub issue #15). */}
+        <div
+          className="app-toolbar-scroll"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 2,
+            flex: '1 1 auto',
+            minWidth: 0,
+            height: '100%',
+            overflowX: 'auto',
+            overflowY: 'hidden'
+          }}
+        >
           {[
             { icon: faSquareArrowRightEnter, label: 'Import', action: () => handleImportDocument() },
             { icon: faBook, label: 'Codebook', action: () => openCodebook() },
@@ -2287,82 +2302,84 @@ function App() {
               />
             )}
           </button>
+          {/* Licence button. Opens a dialog explaining that Magnolia is
+              FOSS (EUPL-1.2) and listing the main bundled libraries with
+              their licences. Lives in the scrollable middle rather than
+              being pinned — it's a reference link, not something that
+              needs to stay reachable at every window size. */}
+          <button
+            className="app-toolbar-btn"
+            title="Licence & attributions"
+            aria-label="Show licence and attributions"
+            onClick={() => setShowLicenceDialog(true)}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 3,
+              padding: '4px 12px',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              background: 'transparent',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              lineHeight: 1,
+              transition: 'background 0.12s, color 0.12s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--bg-tertiary)'
+              e.currentTarget.style.color = 'var(--text-primary)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--text-secondary)'
+            }}
+          >
+            <Icon icon={faScale} style={{ fontSize: 20 }} />
+            <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>EUPL</span>
+          </button>
+          {/* Help: opens Magnolia's online manual (GitHub Pages) in the
+              default browser. The main window's window-open handler routes
+              window.open through shell.openExternal. */}
+          <button
+            className="app-toolbar-btn"
+            title="Open the Magnolia user manual"
+            aria-label="Open the Magnolia user manual"
+            onClick={() => window.open('https://caledavis.github.io/Magnolia/', '_blank')}
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 3,
+              padding: '4px 12px',
+              border: 'none',
+              borderRadius: 'var(--radius-sm)',
+              background: 'transparent',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              lineHeight: 1,
+              transition: 'background 0.12s, color 0.12s'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'var(--bg-tertiary)'
+              e.currentTarget.style.color = 'var(--text-primary)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent'
+              e.currentTarget.style.color = 'var(--text-secondary)'
+            }}
+          >
+            <Icon icon={faCircleQuestion} style={{ fontSize: 20 }} />
+            <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>Manual</span>
+          </button>
         </div>
 
-        {/* Right cell: Licence button. Opens a dialog explaining that
-            Magnolia is FOSS (EUPL-1.2) and listing the main bundled
-            libraries with their licences. Mirrors the
-            icon-over-label style of the centre-cell buttons but sits
-            justifySelf: 'end' so it hugs the right edge — visually
-            balances the wordmark in the left cell. */}
-        <div style={{ justifySelf: 'end', display: 'flex', alignItems: 'center', gap: 6, height: '100%' }}>
-        <button
-          className="app-toolbar-btn"
-          title="Licence & attributions"
-          aria-label="Show licence and attributions"
-          onClick={() => setShowLicenceDialog(true)}
-          style={{
-            justifySelf: 'end',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 3,
-            padding: '4px 12px',
-            border: 'none',
-            borderRadius: 'var(--radius-sm)',
-            background: 'transparent',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            lineHeight: 1,
-            transition: 'background 0.12s, color 0.12s'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'var(--bg-tertiary)'
-            e.currentTarget.style.color = 'var(--text-primary)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--text-secondary)'
-          }}
-        >
-          <Icon icon={faScale} style={{ fontSize: 20 }} />
-          <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>EUPL</span>
-        </button>
-        {/* Help: opens Magnolia's online manual (GitHub Pages) in the
-            default browser. The main window's window-open handler routes
-            window.open through shell.openExternal. */}
-        <button
-          className="app-toolbar-btn"
-          title="Open the Magnolia user manual"
-          aria-label="Open the Magnolia user manual"
-          onClick={() => window.open('https://caledavis.github.io/Magnolia/', '_blank')}
-          style={{
-            justifySelf: 'end',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: 3,
-            padding: '4px 12px',
-            border: 'none',
-            borderRadius: 'var(--radius-sm)',
-            background: 'transparent',
-            color: 'var(--text-secondary)',
-            cursor: 'pointer',
-            lineHeight: 1,
-            transition: 'background 0.12s, color 0.12s'
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = 'var(--bg-tertiary)'
-            e.currentTarget.style.color = 'var(--text-primary)'
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'transparent'
-            e.currentTarget.style.color = 'var(--text-secondary)'
-          }}
-        >
-          <Icon icon={faCircleQuestion} style={{ fontSize: 20 }} />
-          <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>Manual</span>
-        </button>
+        {/* Right: window controls (minimise/maximise/close) on Windows
+            and Linux — native traffic lights on macOS, where this
+            renders nothing. Pinned — flexShrink: 0 keeps these reachable
+            at any window size, since they're the only way to move,
+            resize, or close the frameless window (GitHub issue #15). */}
+        <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', height: '100%' }}>
           <WindowControls />
         </div>
       </div>

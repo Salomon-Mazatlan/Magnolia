@@ -1120,6 +1120,26 @@ textarea:focus {
   -webkit-app-region: drag;
   app-region: drag;
 }
+
+/* The toolbar's own overflow stays hidden — it's the inner
+ * .app-toolbar-scroll section (see App.tsx) that scrolls, so the
+ * pinned project name (left) and window controls (right) around it
+ * never get scrolled out of view themselves (GitHub issue #15).
+ *
+ * It also opts out of the toolbar's drag region entirely, not just on
+ * its buttons: .app-toolbar marks its whole area draggable so the
+ * frameless window can be moved, but a drag region under the cursor
+ * swallows scroll gestures in Electron. Without this override, the gaps
+ * between buttons stayed draggable and killed horizontal scrolling the
+ * moment the cursor drifted off a button. */
+.app-toolbar-scroll {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+  scrollbar-width: thin;
+}
+.app-toolbar-scroll::-webkit-scrollbar {
+  height: 6px;
+}
 /* macOS keeps the traffic lights (titleBarStyle: 'hiddenInset') —
  * indent the toolbar's left edge so the wordmark sits clear of
  * them. The cluster spans ~52 px starting at x=20 (set via
