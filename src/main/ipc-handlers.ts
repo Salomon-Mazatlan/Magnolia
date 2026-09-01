@@ -1,7 +1,7 @@
 import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import { readFile, writeFile, stat, unlink } from 'fs/promises'
 import { existsSync, mkdirSync } from 'fs'
-import { basename, join } from 'path'
+import { basename, dirname, join } from 'path'
 import { readQdpx } from './qdpx/reader'
 import { writeQdpx, EmptyProjectGuardError, createEmptyProjectFile } from './qdpx/writer'
 import { serializeCodebook } from './qdpx/codebook-serializer'
@@ -9,6 +9,7 @@ import { deserializeCodebook } from './qdpx/codebook-deserializer'
 import {
   setActiveProjectPath,
   noteActiveProjectPath,
+  getActiveProjectPath,
   isBinaryHandle,
   resolveHandle,
   readArchiveByName,
@@ -16,6 +17,7 @@ import {
   markPersisted,
   putOverlay
 } from './binary-store'
+import { getLastImportDir, setLastImportDir } from './import-dirs'
 import type { Project, Code } from '../renderer/models/types'
 
 /**
@@ -390,10 +392,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('import-text-file', async () => {
     const result = await dialog.showOpenDialog({
       title: 'Import Document',
+      defaultPath: await getLastImportDir(getActiveProjectPath()),
       filters: [{ name: 'Supported Documents', extensions: SUPPORTED_EXTENSIONS }],
       properties: ['openFile', 'multiSelections']
     })
     if (result.canceled || result.filePaths.length === 0) return null
+    void setLastImportDir(getActiveProjectPath(), dirname(result.filePaths[0]))
     return readDocumentBatch(result.filePaths)
   })
 
@@ -422,10 +426,12 @@ export function registerIpcHandlers(): void {
     }
     const result = await dialog.showOpenDialog({
       title: 'Re-import Document',
+      defaultPath: await getLastImportDir(getActiveProjectPath()),
       filters: [{ name: 'Supported Documents', extensions: extsFor(sourceType) }],
       properties: ['openFile']
     })
     if (result.canceled || result.filePaths.length === 0) return null
+    void setLastImportDir(getActiveProjectPath(), dirname(result.filePaths[0]))
     try {
       const doc = await readDocumentFile(result.filePaths[0])
       // Honor the SOURCE's media type, not the file extension. Atlas (and
@@ -478,6 +484,7 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('import-transcript', async () => {
     const result = await dialog.showOpenDialog({
       title: 'Import Transcript',
+      defaultPath: await getLastImportDir(getActiveProjectPath()),
       filters: [
         { name: 'Text Files', extensions: ['txt', 'md', 'markdown', 'srt', 'vtt', 'html', 'htm'] }
       ],
@@ -485,6 +492,7 @@ export function registerIpcHandlers(): void {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const fp = result.filePaths[0]
+    void setLastImportDir(getActiveProjectPath(), dirname(fp))
     const content = await readFile(fp, 'utf-8')
     return { name: basename(fp), content }
   })
