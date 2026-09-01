@@ -2,6 +2,14 @@
 
 All notable changes to Magnolia are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project follows [Semantic Versioning](https://semver.org/).
 
+## [1.7.1]
+
+### Added
+- **Import dialogs remember the last folder used.** These now open to the folder you last imported a file from for that project, instead of resetting every time.
+
+### Fixed
+- **Toolbar buttons no longer disappear on narrow or tiled windows.** The project name and window controls now stay pinned and reachable at any window size; the toolbar buttons in between scroll horizontally instead of being pushed off-screen and clipped.
+
 ## [1.7.0]
 
 ### Added
