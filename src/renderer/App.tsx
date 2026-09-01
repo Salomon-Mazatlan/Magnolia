@@ -2133,8 +2133,6 @@ function App() {
           className="app-toolbar-scroll"
           style={{
             display: 'flex',
-            alignItems: 'center',
-            gap: 2,
             flex: '1 1 auto',
             minWidth: 0,
             height: '100%',
@@ -2142,6 +2140,14 @@ function App() {
             overflowY: 'hidden'
           }}
         >
+          {/* Inner wrapper: margin: 0 auto centers this group within the
+              scroll track whenever it's narrower than the available
+              space (the common case). If it's wider, auto margins
+              collapse to 0 — the group left-aligns and the outer div's
+              overflow-x takes over, so this never fights the #15 fix
+              above by clipping content out the left edge on narrow
+              windows. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2, margin: '0 auto' }}>
           {[
             { icon: faSquareArrowRightEnter, label: 'Import', action: () => handleImportDocument() },
             { icon: faBook, label: 'Codebook', action: () => openCodebook() },
@@ -2372,6 +2378,7 @@ function App() {
             <Icon icon={faCircleQuestion} style={{ fontSize: 20 }} />
             <span className="toolbar-label" style={{ fontSize: 9, whiteSpace: 'nowrap', fontWeight: 400 }}>Manual</span>
           </button>
+          </div>
         </div>
 
         {/* Right: window controls (minimise/maximise/close) on Windows
